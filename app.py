@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.linear_model import LinearRegression
 import warnings
 import time
 warnings.filterwarnings('ignore')
@@ -26,18 +25,18 @@ st.markdown("---")
 # Sidebar configuration
 st.sidebar.header("⚙️ Configuration")
 
-# Popular trading pairs
+# Popular trading pairs with CoinCap IDs
 POPULAR_PAIRS = {
     "Bitcoin (BTC)": "bitcoin",
     "Ethereum (ETH)": "ethereum",
-    "Binance Coin (BNB)": "binancecoin",
-    "XRP": "ripple",
+    "Binance Coin (BNB)": "binance-coin",
+    "XRP": "xrp",
     "Cardano (ADA)": "cardano",
     "Solana (SOL)": "solana",
     "Dogecoin (DOGE)": "dogecoin",
-    "Polygon (MATIC)": "matic-network",
+    "Polygon (MATIC)": "polygon",
     "Polkadot (DOT)": "polkadot",
-    "Avalanche (AVAX)": "avalanche-2",
+    "Avalanche (AVAX)": "avalanche",
     "Chainlink (LINK)": "chainlink",
     "Uniswap (UNI)": "uniswap",
     "Cosmos (ATOM)": "cosmos",
@@ -50,17 +49,14 @@ coin_id = POPULAR_PAIRS[pair_display]
 
 # Timeframe selection
 TIMEFRAMES = {
-    "1 hour": 1,
-    "4 hours": 4,
-    "12 hours": 12,
-    "1 day": 24,
-    "7 days": 168,
-    "30 days": 720,
-    "90 days": 2160
+    "1 day": "m5",
+    "7 days": "m15",
+    "30 days": "h1",
+    "90 days": "h2"
 }
 
-timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=3)
-hours = TIMEFRAMES[timeframe_name]
+timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=1)
+interval = TIMEFRAMES[timeframe_name]
 
 # Auto-refresh
 auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False)
@@ -83,15 +79,25 @@ use_rsi = st.sidebar.checkbox("RSI (14)", value=True)
 use_macd = st.sidebar.checkbox("MACD", value=True)
 use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
 
-# API Functions - Using CoinGecko (No restrictions)
+# API Functions - Using CoinCap (No auth required!)
 @st.cache_data(ttl=300)
-def get_coingecko_data(coin_id, days=7):
-    """Fetch historical data from CoinGecko API"""
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+def get_coincap_history(coin_id, interval="m5"):
+    """Fetch historical data from CoinCap API - NO AUTH NEEDED"""
+    url = f"https://api.coincap.io/v2/assets/{coin_id}/history"
+    
+    # Set time range based on interval
+    if interval == "m5":
+        start_time = int((datetime.now() - timedelta(days=1)).timestamp() * 1000)
+    elif interval == "m15":
+        start_time = int((datetime.now() - timedelta(days=7)).timestamp() * 1000)
+    elif interval == "h1":
+        start_time = int((datetime.now() - timedelta(days=30)).timestamp() * 1000)
+    else:
+        start_time = int((datetime.now() - timedelta(days=90)).timestamp() * 1000)
+    
     params = {
-        "vs_currency": "usd",
-        "days": days,
-        "interval": "hourly" if days <= 90 else "daily"
+        "interval": interval,
+        "start": start_time
     }
     
     try:
@@ -99,38 +105,38 @@ def get_coingecko_data(coin_id, days=7):
         response.raise_for_status()
         data = response.json()
         
+        if 'data' not in data:
+            return None
+        
         # Convert to DataFrame
-        prices = data['prices']
-        volumes = data['total_volumes']
+        df = pd.DataFrame(data['data'])
+        df['timestamp'] = pd.to_datetime(df['time'], unit='ms')
+        df['close'] = df['priceUsd'].astype(float)
         
-        df = pd.DataFrame(prices, columns=['timestamp', 'close'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df['volume'] = [v[1] for v in volumes]
-        
-        # Create OHLC from close prices (approximation)
+        # Create OHLC data (approximation from price data)
         df['open'] = df['close'].shift(1).fillna(df['close'])
-        df['high'] = df[['open', 'close']].max(axis=1) * 1.001
-        df['low'] = df[['open', 'close']].min(axis=1) * 0.999
+        df['high'] = df[['open', 'close']].max(axis=1) * 1.002
+        df['low'] = df[['open', 'close']].min(axis=1) * 0.998
+        df['volume'] = 1000000  # Placeholder volume
+        
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.dropna()
         
         return df
     except Exception as e:
-        st.error(f"❌ CoinGecko API Error: {e}")
+        st.error(f"❌ CoinCap API Error: {e}")
         return None
 
-def get_coingecko_current_price(coin_id):
-    """Get current price and market data"""
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
-    params = {
-        "localization": "false",
-        "tickers": "false",
-        "community_data": "true",
-        "developer_data": "false"
-    }
+@st.cache_data(ttl=60)
+def get_coincap_current(coin_id):
+    """Get current price from CoinCap - NO AUTH NEEDED"""
+    url = f"https://api.coincap.io/v2/assets/{coin_id}"
     
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, timeout=5)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        return data.get('data', {})
     except Exception as e:
         return None
 
@@ -189,8 +195,6 @@ def create_features(df):
     df_feat['bb_lower'] = bb_lower
     df_feat['bb_width'] = (bb_upper - bb_lower) / bb_middle
     
-    df_feat['volume_sma'] = df_feat['volume'].rolling(window=20).mean()
-    df_feat['volume_ratio'] = df_feat['volume'] / df_feat['volume_sma']
     df_feat['volatility'] = df_feat['close'].rolling(window=20).std()
     
     for i in [1, 2, 3, 5, 10]:
@@ -223,13 +227,13 @@ def train_ml_model(df, model_type='Ensemble (Recommended)', periods_ahead=5):
         model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1)
         model.fit(X_train, y_train)
         predictions = model.predict(X_test)
-        score = 1 - np.mean(np.abs(predictions - y_test.values) / y_test.values)
+        score = max(0, 1 - np.mean(np.abs(predictions - y_test.values) / y_test.values))
         return model, X.columns.tolist(), score
     elif model_type == 'Gradient Boosting':
         model = GradientBoostingRegressor(n_estimators=100, max_depth=5, random_state=42)
         model.fit(X_train, y_train)
         predictions = model.predict(X_test)
-        score = 1 - np.mean(np.abs(predictions - y_test.values) / y_test.values)
+        score = max(0, 1 - np.mean(np.abs(predictions - y_test.values) / y_test.values))
         return model, X.columns.tolist(), score
     else:  # Ensemble
         rf_model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1)
@@ -242,7 +246,7 @@ def train_ml_model(df, model_type='Ensemble (Recommended)', periods_ahead=5):
         gb_pred = gb_model.predict(X_test)
         predictions = (rf_pred + gb_pred) / 2
         
-        score = 1 - np.mean(np.abs(predictions - y_test.values) / y_test.values)
+        score = max(0, 1 - np.mean(np.abs(predictions - y_test.values) / y_test.values))
         
         return (rf_model, gb_model), X.columns.tolist(), score
 
@@ -251,24 +255,30 @@ def predict_future_prices(df, model, feature_cols, model_type, periods=5):
     df_pred = create_features(df)
     df_pred = df_pred.dropna()
     
+    if len(df_pred) == 0:
+        return []
+    
     predictions = []
     current_data = df_pred.iloc[-1:].copy()
     
     for i in range(periods):
-        X_pred = current_data[feature_cols]
-        
-        if model_type == 'Ensemble (Recommended)':
-            rf_model, gb_model = model
-            pred = (rf_model.predict(X_pred)[0] + gb_model.predict(X_pred)[0]) / 2
-        else:
-            pred = model.predict(X_pred)[0]
-        
-        predictions.append(pred)
-        
-        new_row = current_data.iloc[-1].copy()
-        new_row['close'] = pred
-        current_data = pd.concat([current_data, pd.DataFrame([new_row])], ignore_index=True)
-        current_data = create_features(current_data).iloc[-1:]
+        try:
+            X_pred = current_data[feature_cols]
+            
+            if model_type == 'Ensemble (Recommended)':
+                rf_model, gb_model = model
+                pred = (rf_model.predict(X_pred)[0] + gb_model.predict(X_pred)[0]) / 2
+            else:
+                pred = model.predict(X_pred)[0]
+            
+            predictions.append(pred)
+            
+            new_row = current_data.iloc[-1].copy()
+            new_row['close'] = pred
+            current_data = pd.concat([current_data, pd.DataFrame([new_row])], ignore_index=True)
+            current_data = create_features(current_data).iloc[-1:]
+        except:
+            break
     
     return predictions
 
@@ -277,10 +287,13 @@ def generate_signals(df):
     signals = []
     signal_strength = 0
     
+    if len(df) < 2:
+        return signals, signal_strength
+    
     latest = df.iloc[-1]
     prev = df.iloc[-2]
     
-    if 'rsi' in df.columns:
+    if 'rsi' in df.columns and not pd.isna(latest['rsi']):
         if latest['rsi'] < 30:
             signals.append("🟢 RSI Oversold (<30) - Strong BUY")
             signal_strength += 2
@@ -295,28 +308,30 @@ def generate_signals(df):
             signal_strength -= 1
     
     if 'macd' in df.columns and 'macd_signal' in df.columns:
-        if latest['macd'] > latest['macd_signal'] and prev['macd'] <= prev['macd_signal']:
-            signals.append("🟢 MACD Bullish Crossover - BUY")
-            signal_strength += 3
-        elif latest['macd'] < latest['macd_signal'] and prev['macd'] >= prev['macd_signal']:
-            signals.append("🔴 MACD Bearish Crossover - SELL")
-            signal_strength -= 3
-        elif latest['macd'] > latest['macd_signal']:
-            signals.append("🟢 MACD Above Signal - Bullish")
-            signal_strength += 1
-        else:
-            signals.append("🔴 MACD Below Signal - Bearish")
-            signal_strength -= 1
+        if not pd.isna(latest['macd']) and not pd.isna(prev['macd']):
+            if latest['macd'] > latest['macd_signal'] and prev['macd'] <= prev['macd_signal']:
+                signals.append("🟢 MACD Bullish Crossover - BUY")
+                signal_strength += 3
+            elif latest['macd'] < latest['macd_signal'] and prev['macd'] >= prev['macd_signal']:
+                signals.append("🔴 MACD Bearish Crossover - SELL")
+                signal_strength -= 3
+            elif latest['macd'] > latest['macd_signal']:
+                signals.append("🟢 MACD Above Signal - Bullish")
+                signal_strength += 1
+            else:
+                signals.append("🔴 MACD Below Signal - Bearish")
+                signal_strength -= 1
     
     if 'sma_20' in df.columns and 'sma_50' in df.columns:
-        if latest['sma_20'] > latest['sma_50'] and prev['sma_20'] <= prev['sma_50']:
-            signals.append("🟢 Golden Cross - Strong BUY")
-            signal_strength += 3
-        elif latest['sma_20'] < latest['sma_50'] and prev['sma_20'] >= prev['sma_50']:
-            signals.append("🔴 Death Cross - Strong SELL")
-            signal_strength -= 3
+        if not pd.isna(latest['sma_20']) and not pd.isna(latest['sma_50']):
+            if latest['sma_20'] > latest['sma_50'] and prev['sma_20'] <= prev['sma_50']:
+                signals.append("🟢 Golden Cross - Strong BUY")
+                signal_strength += 3
+            elif latest['sma_20'] < latest['sma_50'] and prev['sma_20'] >= prev['sma_50']:
+                signals.append("🔴 Death Cross - Strong SELL")
+                signal_strength -= 3
     
-    if 'ema_20' in df.columns:
+    if 'ema_20' in df.columns and not pd.isna(latest['ema_20']):
         if latest['close'] > latest['ema_20']:
             signals.append("🟢 Price Above EMA20 - Bullish")
             signal_strength += 1
@@ -325,12 +340,13 @@ def generate_signals(df):
             signal_strength -= 1
     
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
-        if latest['close'] <= latest['bb_lower']:
-            signals.append("🟢 At Lower BB - Potential BUY")
-            signal_strength += 2
-        elif latest['close'] >= latest['bb_upper']:
-            signals.append("🔴 At Upper BB - Potential SELL")
-            signal_strength -= 2
+        if not pd.isna(latest['bb_upper']) and not pd.isna(latest['bb_lower']):
+            if latest['close'] <= latest['bb_lower']:
+                signals.append("🟢 At Lower BB - Potential BUY")
+                signal_strength += 2
+            elif latest['close'] >= latest['bb_upper']:
+                signals.append("🔴 At Upper BB - Potential SELL")
+                signal_strength -= 2
     
     return signals, signal_strength
 
@@ -340,22 +356,24 @@ if st.sidebar.button("🔄 Refresh Now", type="primary"):
     st.rerun()
 
 # Live Data
-st.markdown("### 📡 Live Market Data (CoinGecko API)")
-
-# Calculate days for API call
-days_map = {1: 1, 4: 2, 12: 3, 24: 7, 168: 30, 720: 90, 2160: 365}
-days = days_map.get(hours, 7)
+st.markdown("### 📡 Live Market Data (CoinCap API - No Auth Required)")
 
 col1, col2, col3 = st.columns(3)
 
 # Fetch live data
-with st.spinner("🔄 Fetching live data from CoinGecko..."):
-    df = get_coingecko_data(coin_id, days)
-    market_data = get_coingecko_current_price(coin_id)
+with st.spinner("🔄 Fetching live data from CoinCap..."):
+    df = get_coincap_history(coin_id, interval)
+    current_data = get_coincap_current(coin_id)
 
 if df is not None and len(df) > 50:
     current_price = df['close'].iloc[-1]
-    price_change_24h = ((df['close'].iloc[-1] - df['close'].iloc[-24]) / df['close'].iloc[-24]) * 100 if len(df) > 24 else 0
+    
+    # Calculate 24h change
+    if len(df) >= 24:
+        price_24h_ago = df['close'].iloc[-24]
+        price_change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
+    else:
+        price_change_24h = 0
     
     with col1:
         st.markdown("#### 💰 Current Price")
@@ -364,21 +382,23 @@ if df is not None and len(df) > 50:
             f"${current_price:,.2f}",
             f"{price_change_24h:+.2f}%"
         )
+        if current_data:
+            st.write(f"**Rank:** #{current_data.get('rank', 'N/A')}")
     
     with col2:
         st.markdown("#### 📊 24h Range")
-        st.write(f"**High:** ${df['high'].tail(24).max():,.2f}")
-        st.write(f"**Low:** ${df['low'].tail(24).min():,.2f}")
+        high_24h = df['high'].tail(min(24, len(df))).max()
+        low_24h = df['low'].tail(min(24, len(df))).min()
+        st.write(f"**High:** ${high_24h:,.2f}")
+        st.write(f"**Low:** ${low_24h:,.2f}")
     
     with col3:
         st.markdown("#### 📈 Market Data")
-        if market_data and 'market_data' in market_data:
-            md = market_data['market_data']
-            if 'market_cap' in md:
-                mcap = md['market_cap'].get('usd', 0)
-                st.write(f"**Market Cap:** ${mcap:,.0f}")
-            if 'market_cap_rank' in md:
-                st.write(f"**Rank:** #{md.get('market_cap_rank', 'N/A')}")
+        if current_data:
+            market_cap = float(current_data.get('marketCapUsd', 0))
+            volume_24h = float(current_data.get('volumeUsd24Hr', 0))
+            st.write(f"**Market Cap:** ${market_cap/1e9:.2f}B")
+            st.write(f"**Volume 24h:** ${volume_24h/1e9:.2f}B")
     
     st.markdown("---")
     
@@ -406,7 +426,7 @@ if df is not None and len(df) > 50:
     with st.spinner("🧠 Training AI model on live data..."):
         model, feature_cols, accuracy = train_ml_model(df, ai_model, prediction_periods)
     
-    if model is not None:
+    if model is not None and feature_cols is not None:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -421,29 +441,30 @@ if df is not None and len(df) > 50:
         # Generate predictions
         future_prices = predict_future_prices(df, model, feature_cols, ai_model, prediction_periods)
         
-        st.markdown("#### 🎯 AI Price Predictions")
-        pred_cols = st.columns(min(5, prediction_periods))
-        
-        for i, pred_price in enumerate(future_prices):
-            with pred_cols[i % 5]:
-                change_pct = ((pred_price - current_price) / current_price) * 100
-                st.metric(
-                    f"+{i+1}",
-                    f"${pred_price:,.2f}",
-                    f"{change_pct:+.2f}%"
-                )
-        
-        # AI Recommendation
-        avg_prediction = np.mean(future_prices)
-        prediction_trend = "BULLISH 🚀" if avg_prediction > current_price else "BEARISH 🔻"
-        expected_change = ((avg_prediction - current_price) / current_price) * 100
-        
-        if avg_prediction > current_price:
-            st.success(f"### ✅ AI PREDICTION: {prediction_trend}")
-            st.success(f"Expected movement: **+{expected_change:.2f}%** over {prediction_periods} periods")
-        else:
-            st.error(f"### ⚠️ AI PREDICTION: {prediction_trend}")
-            st.error(f"Expected movement: **{expected_change:.2f}%** over {prediction_periods} periods")
+        if len(future_prices) > 0:
+            st.markdown("#### 🎯 AI Price Predictions")
+            pred_cols = st.columns(min(5, len(future_prices)))
+            
+            for i, pred_price in enumerate(future_prices):
+                with pred_cols[i % 5]:
+                    change_pct = ((pred_price - current_price) / current_price) * 100
+                    st.metric(
+                        f"+{i+1}",
+                        f"${pred_price:,.2f}",
+                        f"{change_pct:+.2f}%"
+                    )
+            
+            # AI Recommendation
+            avg_prediction = np.mean(future_prices)
+            prediction_trend = "BULLISH 🚀" if avg_prediction > current_price else "BEARISH 🔻"
+            expected_change = ((avg_prediction - current_price) / current_price) * 100
+            
+            if avg_prediction > current_price:
+                st.success(f"### ✅ AI PREDICTION: {prediction_trend}")
+                st.success(f"Expected movement: **+{expected_change:.2f}%** over {prediction_periods} periods")
+            else:
+                st.error(f"### ⚠️ AI PREDICTION: {prediction_trend}")
+                st.error(f"Expected movement: **{expected_change:.2f}%** over {prediction_periods} periods")
     
     st.markdown("---")
     
@@ -475,8 +496,11 @@ if df is not None and len(df) > 50:
     
     with col2:
         st.markdown("#### 📋 Signals:")
-        for signal in signals:
-            st.markdown(f"- {signal}")
+        if len(signals) > 0:
+            for signal in signals:
+                st.markdown(f"- {signal}")
+        else:
+            st.info("Calculating signals...")
     
     st.markdown("---")
     
@@ -505,9 +529,10 @@ if df is not None and len(df) > 50:
     )
     
     # Predictions
-    if model and future_prices:
+    if model and len(future_prices) > 0:
         last_ts = df['timestamp'].iloc[-1]
-        future_ts = [last_ts + timedelta(hours=i+1) for i in range(len(future_prices))]
+        time_delta = (df['timestamp'].iloc[-1] - df['timestamp'].iloc[-2])
+        future_ts = [last_ts + time_delta * (i+1) for i in range(len(future_prices))]
         
         fig.add_trace(
             go.Scatter(
@@ -534,7 +559,7 @@ if df is not None and len(df) > 50:
     
     # Volume
     colors = ['red' if df['close'].iloc[i] < df['open'].iloc[i] else 'green' for i in range(len(df))]
-    fig.add_trace(go.Bar(x=df['timestamp'], y=df['volume'], marker_color=colors), row=2, col=1)
+    fig.add_trace(go.Bar(x=df['timestamp'], y=df['volume'], marker_color=colors, showlegend=False), row=2, col=1)
     
     # RSI
     if use_rsi:
@@ -546,7 +571,8 @@ if df is not None and len(df) > 50:
     if use_macd:
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd'], name='MACD', line=dict(color='blue')), row=4, col=1)
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd_signal'], name='Signal', line=dict(color='red')), row=4, col=1)
-        fig.add_trace(go.Bar(x=df['timestamp'], y=df['macd_hist'], name='Histogram'), row=4, col=1)
+        colors_macd = ['green' if val > 0 else 'red' for val in df['macd_hist']]
+        fig.add_trace(go.Bar(x=df['timestamp'], y=df['macd_hist'], marker_color=colors_macd, showlegend=False), row=4, col=1)
     
     fig.update_layout(height=1000, showlegend=True, xaxis_rangeslider_visible=False, hovermode='x unified')
     st.plotly_chart(fig, use_container_width=True)
@@ -558,13 +584,13 @@ if df is not None and len(df) > 50:
     
     with col1:
         st.success("#### 🟢 BUY ZONES")
-        if 'bb_lower' in df.columns:
+        if 'bb_lower' in df.columns and not pd.isna(df['bb_lower'].iloc[-1]):
             st.write(f"Lower BB: **${df['bb_lower'].iloc[-1]:,.2f}**")
         st.write(f"Recent Low: **${df['low'].tail(20).min():,.2f}**")
     
     with col2:
         st.error("#### 🔴 SELL ZONES")
-        if 'bb_upper' in df.columns:
+        if 'bb_upper' in df.columns and not pd.isna(df['bb_upper'].iloc[-1]):
             st.write(f"Upper BB: **${df['bb_upper'].iloc[-1]:,.2f}**")
         st.write(f"Recent High: **${df['high'].tail(20).max():,.2f}**")
     
@@ -579,8 +605,8 @@ if df is not None and len(df) > 50:
     """)
 
 else:
-    st.error("❌ Unable to fetch data. Please try again in a few moments.")
-    st.info("Using CoinGecko API - works globally without restrictions!")
+    st.error("❌ Unable to fetch data. Please try again.")
+    st.info("💡 Using CoinCap API - Free, no authentication required!")
 
 # Auto-refresh
 if auto_refresh:
@@ -591,7 +617,7 @@ if auto_refresh:
 st.markdown("---")
 st.markdown(f"""
 <div style='text-align: center;'>
-    <p><b>📡 Data Source:</b> CoinGecko API (Global - No Restrictions)</p>
+    <p><b>📡 Data Source:</b> CoinCap API (Free - No Auth Required)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
     <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
 </div>
