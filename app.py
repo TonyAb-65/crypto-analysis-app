@@ -5,7 +5,6 @@ import requests
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 import warnings
@@ -17,7 +16,7 @@ st.set_page_config(page_title="Live Crypto AI Analysis", layout="wide", page_ico
 
 # Title
 st.title("🤖 Live Cryptocurrency AI Analysis & Trading Signals")
-st.markdown("*Real-time data from multiple exchanges with ML predictions*")
+st.markdown("*Real-time data with ML predictions - Works Globally!*")
 
 # Display current time
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -27,55 +26,44 @@ st.markdown("---")
 # Sidebar configuration
 st.sidebar.header("⚙️ Configuration")
 
-# Exchange selection
-exchange = st.sidebar.selectbox(
-    "Select Exchange",
-    ["Binance", "Multi-Source (Binance + CoinGecko)"],
-    index=0
-)
-
 # Popular trading pairs
 POPULAR_PAIRS = {
-    "BTC/USDT": "BTCUSDT",
-    "ETH/USDT": "ETHUSDT",
-    "BNB/USDT": "BNBUSDT",
-    "XRP/USDT": "XRPUSDT",
-    "ADA/USDT": "ADAUSDT",
-    "SOL/USDT": "SOLUSDT",
-    "DOGE/USDT": "DOGEUSDT",
-    "MATIC/USDT": "MATICUSDT",
-    "DOT/USDT": "DOTUSDT",
-    "AVAX/USDT": "AVAXUSDT",
-    "LINK/USDT": "LINKUSDT",
-    "UNI/USDT": "UNIUSDT",
-    "ATOM/USDT": "ATOMUSDT",
-    "LTC/USDT": "LTCUSDT",
-    "TRX/USDT": "TRXUSDT"
+    "Bitcoin (BTC)": "bitcoin",
+    "Ethereum (ETH)": "ethereum",
+    "Binance Coin (BNB)": "binancecoin",
+    "XRP": "ripple",
+    "Cardano (ADA)": "cardano",
+    "Solana (SOL)": "solana",
+    "Dogecoin (DOGE)": "dogecoin",
+    "Polygon (MATIC)": "matic-network",
+    "Polkadot (DOT)": "polkadot",
+    "Avalanche (AVAX)": "avalanche-2",
+    "Chainlink (LINK)": "chainlink",
+    "Uniswap (UNI)": "uniswap",
+    "Cosmos (ATOM)": "cosmos",
+    "Litecoin (LTC)": "litecoin",
+    "Tron (TRX)": "tron"
 }
 
-pair_display = st.sidebar.selectbox("Select Trading Pair", list(POPULAR_PAIRS.keys()), index=0)
-symbol = POPULAR_PAIRS[pair_display]
+pair_display = st.sidebar.selectbox("Select Cryptocurrency", list(POPULAR_PAIRS.keys()), index=0)
+coin_id = POPULAR_PAIRS[pair_display]
 
 # Timeframe selection
 TIMEFRAMES = {
-    "1 minute": "1m",
-    "5 minutes": "5m",
-    "15 minutes": "15m",
-    "30 minutes": "30m",
-    "1 hour": "1h",
-    "4 hours": "4h",
-    "1 day": "1d",
-    "1 week": "1w"
+    "1 hour": 1,
+    "4 hours": 4,
+    "12 hours": 12,
+    "1 day": 24,
+    "7 days": 168,
+    "30 days": 720,
+    "90 days": 2160
 }
 
-timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=4)
-interval = TIMEFRAMES[timeframe_name]
-
-# Number of candles
-limit = st.sidebar.slider("Number of Candles", 100, 500, 300)
+timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=3)
+hours = TIMEFRAMES[timeframe_name]
 
 # Auto-refresh
-auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (30s)", value=False)
+auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False)
 
 # AI Model Selection
 st.sidebar.markdown("### 🤖 AI Configuration")
@@ -95,14 +83,15 @@ use_rsi = st.sidebar.checkbox("RSI (14)", value=True)
 use_macd = st.sidebar.checkbox("MACD", value=True)
 use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
 
-# API Functions
-def get_binance_data(symbol, interval, limit):
-    """Fetch live data from Binance API"""
-    url = "https://api.binance.com/api/v3/klines"
+# API Functions - Using CoinGecko (No restrictions)
+@st.cache_data(ttl=300)
+def get_coingecko_data(coin_id, days=7):
+    """Fetch historical data from CoinGecko API"""
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
     params = {
-        "symbol": symbol,
-        "interval": interval,
-        "limit": limit
+        "vs_currency": "usd",
+        "days": days,
+        "interval": "hourly" if days <= 90 else "daily"
     }
     
     try:
@@ -110,87 +99,40 @@ def get_binance_data(symbol, interval, limit):
         response.raise_for_status()
         data = response.json()
         
-        df = pd.DataFrame(data, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
-            'taker_buy_quote', 'ignore'
-        ])
+        # Convert to DataFrame
+        prices = data['prices']
+        volumes = data['total_volumes']
         
+        df = pd.DataFrame(prices, columns=['timestamp', 'close'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            df[col] = df[col].astype(float)
+        df['volume'] = [v[1] for v in volumes]
         
-        df['source'] = 'Binance'
+        # Create OHLC from close prices (approximation)
+        df['open'] = df['close'].shift(1).fillna(df['close'])
+        df['high'] = df[['open', 'close']].max(axis=1) * 1.001
+        df['low'] = df[['open', 'close']].min(axis=1) * 0.999
+        
         return df
     except Exception as e:
-        st.error(f"❌ Binance API Error: {e}")
+        st.error(f"❌ CoinGecko API Error: {e}")
         return None
 
-def get_binance_ticker(symbol):
-    """Get current ticker info from Binance"""
-    url = "https://api.binance.com/api/v3/ticker/24hr"
-    params = {"symbol": symbol}
-    
-    try:
-        response = requests.get(url, params=params, timeout=5)
-        response.raise_for_status()
-        return response.json()
-    except:
-        return None
-
-def get_coingecko_price(coin_id):
-    """Get current price from CoinGecko API"""
-    url = f"https://api.coingecko.com/api/v3/simple/price"
-    params = {
-        "ids": coin_id,
-        "vs_currencies": "usd",
-        "include_24hr_change": "true",
-        "include_24hr_vol": "true",
-        "include_market_cap": "true"
-    }
-    
-    try:
-        response = requests.get(url, params=params, timeout=5)
-        response.raise_for_status()
-        return response.json()
-    except:
-        return None
-
-def get_coingecko_market_data(coin_id):
-    """Get detailed market data from CoinGecko"""
+def get_coingecko_current_price(coin_id):
+    """Get current price and market data"""
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
     params = {
         "localization": "false",
         "tickers": "false",
-        "community_data": "false",
+        "community_data": "true",
         "developer_data": "false"
     }
     
     try:
-        response = requests.get(url, params=params, timeout=5)
+        response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         return response.json()
-    except:
+    except Exception as e:
         return None
-
-# Coin ID mapping for CoinGecko
-COINGECKO_IDS = {
-    "BTCUSDT": "bitcoin",
-    "ETHUSDT": "ethereum",
-    "BNBUSDT": "binancecoin",
-    "XRPUSDT": "ripple",
-    "ADAUSDT": "cardano",
-    "SOLUSDT": "solana",
-    "DOGEUSDT": "dogecoin",
-    "MATICUSDT": "matic-network",
-    "DOTUSDT": "polkadot",
-    "AVAXUSDT": "avalanche-2",
-    "LINKUSDT": "chainlink",
-    "UNIUSDT": "uniswap",
-    "ATOMUSDT": "cosmos",
-    "LTCUSDT": "litecoin",
-    "TRXUSDT": "tron"
-}
 
 # Technical Indicators
 def calculate_sma(df, period=20):
@@ -268,9 +210,7 @@ def train_ml_model(df, model_type='Ensemble (Recommended)', periods_ahead=5):
     df_ml = df_ml.dropna()
     
     feature_cols = [col for col in df_ml.columns if col not in 
-                   ['timestamp', 'close_time', 'quote_volume', 'trades', 
-                    'taker_buy_base', 'taker_buy_quote', 'ignore', 'target', 
-                    'open', 'high', 'low', 'close', 'source']]
+                   ['timestamp', 'target', 'open', 'high', 'low', 'close', 'volume']]
     
     X = df_ml[feature_cols]
     y = df_ml['target']
@@ -392,87 +332,57 @@ def generate_signals(df):
             signals.append("🔴 At Upper BB - Potential SELL")
             signal_strength -= 2
     
-    if 'volume' in df.columns:
-        avg_volume = df['volume'].tail(20).mean()
-        if latest['volume'] > avg_volume * 1.5:
-            signals.append("📊 High Volume - Strong Movement")
-            signal_strength += 1
-    
     return signals, signal_strength
 
 # Main App
 if st.sidebar.button("🔄 Refresh Now", type="primary"):
+    st.cache_data.clear()
     st.rerun()
 
-# Live Multi-Source Data
-st.markdown("### 📡 Live Market Data from Multiple Sources")
+# Live Data
+st.markdown("### 📡 Live Market Data (CoinGecko API)")
+
+# Calculate days for API call
+days_map = {1: 1, 4: 2, 12: 3, 24: 7, 168: 30, 720: 90, 2160: 365}
+days = days_map.get(hours, 7)
 
 col1, col2, col3 = st.columns(3)
 
 # Fetch live data
-with st.spinner("🔄 Fetching live data..."):
-    df = get_binance_data(symbol, interval, limit)
-    ticker_data = get_binance_ticker(symbol)
-    
-    if symbol in COINGECKO_IDS:
-        coingecko_data = get_coingecko_price(COINGECKO_IDS[symbol])
-        coingecko_market = get_coingecko_market_data(COINGECKO_IDS[symbol])
-    else:
-        coingecko_data = None
-        coingecko_market = None
+with st.spinner("🔄 Fetching live data from CoinGecko..."):
+    df = get_coingecko_data(coin_id, days)
+    market_data = get_coingecko_current_price(coin_id)
 
-# Display live prices from multiple sources
 if df is not None and len(df) > 50:
     current_price = df['close'].iloc[-1]
+    price_change_24h = ((df['close'].iloc[-1] - df['close'].iloc[-24]) / df['close'].iloc[-24]) * 100 if len(df) > 24 else 0
     
     with col1:
-        st.markdown("#### 🟢 Binance (Live)")
-        if ticker_data:
-            change_24h = float(ticker_data['priceChangePercent'])
-            st.metric(
-                "Current Price",
-                f"${current_price:.4f}",
-                f"{change_24h:+.2f}%"
-            )
-            st.write(f"**Volume (24h):** {float(ticker_data['volume']):.0f}")
-        else:
-            st.metric("Current Price", f"${current_price:.4f}")
+        st.markdown("#### 💰 Current Price")
+        st.metric(
+            pair_display,
+            f"${current_price:,.2f}",
+            f"{price_change_24h:+.2f}%"
+        )
     
     with col2:
-        st.markdown("#### 🔵 CoinGecko (Live)")
-        if coingecko_data:
-            coin_id = COINGECKO_IDS[symbol]
-            price_cg = coingecko_data[coin_id]['usd']
-            change_cg = coingecko_data[coin_id].get('usd_24h_change', 0)
-            st.metric(
-                "Current Price",
-                f"${price_cg:.4f}",
-                f"{change_cg:+.2f}%"
-            )
-            if 'usd_24h_vol' in coingecko_data[coin_id]:
-                st.write(f"**Volume (24h):** ${coingecko_data[coin_id]['usd_24h_vol']:,.0f}")
-        else:
-            st.info("CoinGecko data unavailable")
+        st.markdown("#### 📊 24h Range")
+        st.write(f"**High:** ${df['high'].tail(24).max():,.2f}")
+        st.write(f"**Low:** ${df['low'].tail(24).min():,.2f}")
     
     with col3:
-        st.markdown("#### 📊 Market Overview")
-        if coingecko_market:
-            market_data = coingecko_market.get('market_data', {})
-            if 'market_cap' in market_data:
-                mcap = market_data['market_cap'].get('usd', 0)
+        st.markdown("#### 📈 Market Data")
+        if market_data and 'market_data' in market_data:
+            md = market_data['market_data']
+            if 'market_cap' in md:
+                mcap = md['market_cap'].get('usd', 0)
                 st.write(f"**Market Cap:** ${mcap:,.0f}")
-            if 'total_volume' in market_data:
-                vol = market_data['total_volume'].get('usd', 0)
-                st.write(f"**Total Volume:** ${vol:,.0f}")
-            if 'market_cap_rank' in market_data:
-                st.write(f"**Rank:** #{market_data.get('market_cap_rank', 'N/A')}")
-        else:
-            st.write(f"**24h High:** ${df['high'].max():.4f}")
-            st.write(f"**24h Low:** ${df['low'].min():.4f}")
+            if 'market_cap_rank' in md:
+                st.write(f"**Rank:** #{md.get('market_cap_rank', 'N/A')}")
     
     st.markdown("---")
     
-    # Calculate all indicators
+    # Calculate indicators
     if use_sma:
         df['sma_20'] = calculate_sma(df, 20)
         df['sma_50'] = calculate_sma(df, 50)
@@ -519,9 +429,8 @@ if df is not None and len(df) > 50:
                 change_pct = ((pred_price - current_price) / current_price) * 100
                 st.metric(
                     f"+{i+1}",
-                    f"${pred_price:.4f}",
-                    f"{change_pct:+.2f}%",
-                    delta_color="normal"
+                    f"${pred_price:,.2f}",
+                    f"{change_pct:+.2f}%"
                 )
         
         # AI Recommendation
@@ -531,10 +440,10 @@ if df is not None and len(df) > 50:
         
         if avg_prediction > current_price:
             st.success(f"### ✅ AI PREDICTION: {prediction_trend}")
-            st.success(f"Expected price movement: **+{expected_change:.2f}%** over {prediction_periods} periods")
+            st.success(f"Expected movement: **+{expected_change:.2f}%** over {prediction_periods} periods")
         else:
             st.error(f"### ⚠️ AI PREDICTION: {prediction_trend}")
-            st.error(f"Expected price movement: **{expected_change:.2f}%** over {prediction_periods} periods")
+            st.error(f"Expected movement: **{expected_change:.2f}%** over {prediction_periods} periods")
     
     st.markdown("---")
     
@@ -548,42 +457,41 @@ if df is not None and len(df) > 50:
     with col1:
         if signal_strength >= 5:
             st.success("## 🟢 STRONG BUY")
-            st.markdown("**Action:** Enter LONG position")
+            st.markdown("**Action:** Enter LONG")
         elif signal_strength >= 2:
             st.success("## 🟢 BUY")
             st.markdown("**Action:** Consider LONG")
         elif signal_strength <= -5:
             st.error("## 🔴 STRONG SELL")
-            st.markdown("**Action:** Enter SHORT/Exit")
+            st.markdown("**Action:** Exit/SHORT")
         elif signal_strength <= -2:
             st.error("## 🔴 SELL")
             st.markdown("**Action:** Consider exit")
         else:
             st.warning("## 🟡 NEUTRAL")
-            st.markdown("**Action:** Wait for signals")
+            st.markdown("**Action:** Wait")
         
         st.metric("Signal Strength", f"{signal_strength}/10")
     
     with col2:
-        st.markdown("#### 📋 Signal Breakdown:")
+        st.markdown("#### 📋 Signals:")
         for signal in signals:
             st.markdown(f"- {signal}")
     
     st.markdown("---")
     
-    # Interactive Chart
-    st.markdown("### 📈 Live Price Chart with Technical Analysis")
+    # Chart
+    st.markdown("### 📈 Live Price Chart")
     
-    # Create comprehensive chart
     fig = make_subplots(
         rows=4, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.03,
         row_heights=[0.5, 0.2, 0.15, 0.15],
-        subplot_titles=(f'{pair_display} - {timeframe_name}', 'Volume', 'RSI (14)', 'MACD')
+        subplot_titles=(f'{pair_display} - {timeframe_name}', 'Volume', 'RSI', 'MACD')
     )
     
-    # Candlestick chart
+    # Candlestick
     fig.add_trace(
         go.Candlestick(
             x=df['timestamp'],
@@ -591,146 +499,100 @@ if df is not None and len(df) > 50:
             high=df['high'],
             low=df['low'],
             close=df['close'],
-            name='Price',
-            increasing_line_color='#26a69a',
-            decreasing_line_color='#ef5350'
+            name='Price'
         ),
         row=1, col=1
     )
     
-    # Add predictions to chart
-    if model is not None and len(future_prices) > 0:
-        last_timestamp = df['timestamp'].iloc[-1]
-        time_deltas = {
-            '1m': timedelta(minutes=1), '5m': timedelta(minutes=5),
-            '15m': timedelta(minutes=15), '30m': timedelta(minutes=30),
-            '1h': timedelta(hours=1), '4h': timedelta(hours=4),
-            '1d': timedelta(days=1), '1w': timedelta(weeks=1)
-        }
-        delta = time_deltas.get(interval, timedelta(hours=1))
-        
-        future_timestamps = [last_timestamp + delta * (i + 1) for i in range(len(future_prices))]
+    # Predictions
+    if model and future_prices:
+        last_ts = df['timestamp'].iloc[-1]
+        future_ts = [last_ts + timedelta(hours=i+1) for i in range(len(future_prices))]
         
         fig.add_trace(
             go.Scatter(
-                x=future_timestamps,
+                x=future_ts,
                 y=future_prices,
                 mode='lines+markers',
                 name='AI Prediction',
-                line=dict(color='purple', width=3, dash='dash'),
-                marker=dict(size=10, symbol='star', color='purple')
+                line=dict(color='purple', width=3, dash='dash')
             ),
             row=1, col=1
         )
     
-    # Moving Averages
+    # Indicators
     if use_sma:
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['sma_20'], name='SMA 20', line=dict(color='orange', width=1.5)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['sma_50'], name='SMA 50', line=dict(color='blue', width=1.5)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['sma_20'], name='SMA 20', line=dict(color='orange')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['sma_50'], name='SMA 50', line=dict(color='blue')), row=1, col=1)
     
     if use_ema:
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['ema_20'], name='EMA 20', line=dict(color='red', width=1.5, dash='dot')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['ema_20'], name='EMA 20', line=dict(color='red', dash='dot')), row=1, col=1)
     
-    # Bollinger Bands
     if use_bb:
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_upper'], name='BB Upper', line=dict(color='gray', width=1, dash='dash'), opacity=0.5), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_lower'], name='BB Lower', line=dict(color='gray', width=1, dash='dash'), opacity=0.5), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_upper'], name='BB Upper', line=dict(color='gray', dash='dash')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dash')), row=1, col=1)
     
-    # Volume bars
-    colors = ['#ef5350' if df['close'].iloc[i] < df['open'].iloc[i] else '#26a69a' for i in range(len(df))]
-    fig.add_trace(
-        go.Bar(x=df['timestamp'], y=df['volume'], name='Volume', marker_color=colors, showlegend=False),
-        row=2, col=1
-    )
+    # Volume
+    colors = ['red' if df['close'].iloc[i] < df['open'].iloc[i] else 'green' for i in range(len(df))]
+    fig.add_trace(go.Bar(x=df['timestamp'], y=df['volume'], marker_color=colors), row=2, col=1)
     
     # RSI
     if use_rsi:
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi'], name='RSI', line=dict(color='purple', width=2)), row=3, col=1)
-        fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=3, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=3, col=1)
-        fig.add_hline(y=50, line_dash="dot", line_color="gray", opacity=0.3, row=3, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi'], name='RSI', line=dict(color='purple')), row=3, col=1)
+        fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
     
     # MACD
     if use_macd:
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd'], name='MACD', line=dict(color='blue', width=2)), row=4, col=1)
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd_signal'], name='Signal', line=dict(color='red', width=2)), row=4, col=1)
-        colors_macd = ['#26a69a' if val > 0 else '#ef5350' for val in df['macd_hist']]
-        fig.add_trace(go.Bar(x=df['timestamp'], y=df['macd_hist'], name='Histogram', marker_color=colors_macd, showlegend=False), row=4, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd'], name='MACD', line=dict(color='blue')), row=4, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd_signal'], name='Signal', line=dict(color='red')), row=4, col=1)
+        fig.add_trace(go.Bar(x=df['timestamp'], y=df['macd_hist'], name='Histogram'), row=4, col=1)
     
-    fig.update_layout(
-        height=1000,
-        showlegend=True,
-        xaxis_rangeslider_visible=False,
-        hovermode='x unified',
-        template='plotly_dark'
-    )
-    
-    fig.update_xaxes(showgrid=True, gridwidth=0.5, gridcolor='rgba(128,128,128,0.2)')
-    fig.update_yaxes(showgrid=True, gridwidth=0.5, gridcolor='rgba(128,128,128,0.2)')
-    
+    fig.update_layout(height=1000, showlegend=True, xaxis_rangeslider_visible=False, hovermode='x unified')
     st.plotly_chart(fig, use_container_width=True)
     
-    # Entry/Exit Points
-    st.markdown("### 💰 Suggested Entry & Exit Points (Based on Live Data)")
+    # Entry/Exit
+    st.markdown("### 💰 Entry & Exit Points")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.success("#### 🟢 BUY ZONES (Support Levels)")
+        st.success("#### 🟢 BUY ZONES")
         if 'bb_lower' in df.columns:
-            st.write(f"✓ Lower Bollinger Band: **${df['bb_lower'].iloc[-1]:.4f}**")
-        if 'sma_50' in df.columns:
-            st.write(f"✓ SMA 50: **${df['sma_50'].iloc[-1]:.4f}**")
-        recent_low = df['low'].tail(20).min()
-        st.write(f"✓ Recent Support: **${recent_low:.4f}**")
-        if model is not None and len(future_prices) > 0:
-            min_pred = min(future_prices)
-            st.write(f"✓ AI Predicted Low: **${min_pred:.4f}**")
+            st.write(f"Lower BB: **${df['bb_lower'].iloc[-1]:,.2f}**")
+        st.write(f"Recent Low: **${df['low'].tail(20).min():,.2f}**")
     
     with col2:
-        st.error("#### 🔴 SELL ZONES (Resistance Levels)")
+        st.error("#### 🔴 SELL ZONES")
         if 'bb_upper' in df.columns:
-            st.write(f"✓ Upper Bollinger Band: **${df['bb_upper'].iloc[-1]:.4f}**")
-        recent_high = df['high'].tail(20).max()
-        st.write(f"✓ Recent Resistance: **${recent_high:.4f}**")
-        if model is not None and len(future_prices) > 0:
-            max_pred = max(future_prices)
-            st.write(f"✓ AI Predicted High: **${max_pred:.4f}**")
+            st.write(f"Upper BB: **${df['bb_upper'].iloc[-1]:,.2f}**")
+        st.write(f"Recent High: **${df['high'].tail(20).max():,.2f}**")
     
-    # Risk Management
     st.markdown("---")
-    st.markdown("### ⚠️ Risk Management & Disclaimer")
     st.warning("""
-    **Important Trading Guidelines:**
-    
-    ✓ **Stop Loss:** Always set stop-loss orders (recommended 2-3% below entry)
-    
-    ✓ **Position Sizing:** Never risk more than 1-2% of your portfolio on a single trade
-    
-    ✓ **Diversification:** Spread investments across multiple assets
-    
-    ✓ **AI Limitations:** Predictions are probabilistic, not guarantees
-    
-    ✓ **Market Volatility:** Crypto markets are highly volatile - trade with caution
-    
-    ✓ **Do Your Research:** This is a tool to assist analysis, not financial advice
+    **⚠️ Risk Management:**
+    - Use stop-loss orders (2-3% below entry)
+    - Never risk more than 1-2% per trade
+    - Diversify your portfolio
+    - AI predictions are probabilistic
+    - This is NOT financial advice
     """)
 
 else:
-    st.error("❌ Unable to fetch live data. Please check your internet connection and try again.")
-    st.info("💡 Tips: Try refreshing the page or selecting a different trading pair.")
+    st.error("❌ Unable to fetch data. Please try again in a few moments.")
+    st.info("Using CoinGecko API - works globally without restrictions!")
 
-# Auto-refresh functionality
+# Auto-refresh
 if auto_refresh:
-    time.sleep(30)
+    time.sleep(60)
     st.rerun()
 
 # Footer
 st.markdown("---")
 st.markdown(f"""
-<div style='text-align: center; padding: 20px;'>
-    <p><b>📡 Live Data Sources:</b> Binance API • CoinGecko API</p>
+<div style='text-align: center;'>
+    <p><b>📡 Data Source:</b> CoinGecko API (Global - No Restrictions)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
-    <p style='color: #888;'>⚠️ This tool is for educational purposes only. Not financial advice.</p>
+    <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
 </div>
 """, unsafe_allow_html=True)
