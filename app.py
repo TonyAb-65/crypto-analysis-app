@@ -25,38 +25,39 @@ st.markdown("---")
 # Sidebar configuration
 st.sidebar.header("⚙️ Configuration")
 
-# Popular trading pairs with CoinCap IDs
-POPULAR_PAIRS = {
-    "Bitcoin (BTC)": "bitcoin",
-    "Ethereum (ETH)": "ethereum",
-    "Binance Coin (BNB)": "binance-coin",
-    "XRP": "xrp",
-    "Cardano (ADA)": "cardano",
-    "Solana (SOL)": "solana",
-    "Dogecoin (DOGE)": "dogecoin",
-    "Polygon (MATIC)": "polygon",
-    "Polkadot (DOT)": "polkadot",
-    "Avalanche (AVAX)": "avalanche",
-    "Chainlink (LINK)": "chainlink",
-    "Uniswap (UNI)": "uniswap",
-    "Cosmos (ATOM)": "cosmos",
-    "Litecoin (LTC)": "litecoin",
-    "Tron (TRX)": "tron"
+# Popular trading pairs
+CRYPTO_SYMBOLS = {
+    "Bitcoin (BTC)": "BTC",
+    "Ethereum (ETH)": "ETH",
+    "Binance Coin (BNB)": "BNB",
+    "XRP": "XRP",
+    "Cardano (ADA)": "ADA",
+    "Solana (SOL)": "SOL",
+    "Dogecoin (DOGE)": "DOGE",
+    "Polygon (MATIC)": "MATIC",
+    "Polkadot (DOT)": "DOT",
+    "Avalanche (AVAX)": "AVAX",
+    "Chainlink (LINK)": "LINK",
+    "Litecoin (LTC)": "LTC",
+    "Bitcoin Cash (BCH)": "BCH",
+    "Stellar (XLM)": "XLM",
+    "Tron (TRX)": "TRX"
 }
 
-pair_display = st.sidebar.selectbox("Select Cryptocurrency", list(POPULAR_PAIRS.keys()), index=0)
-coin_id = POPULAR_PAIRS[pair_display]
+pair_display = st.sidebar.selectbox("Select Cryptocurrency", list(CRYPTO_SYMBOLS.keys()), index=0)
+symbol = CRYPTO_SYMBOLS[pair_display]
 
 # Timeframe selection
 TIMEFRAMES = {
-    "1 day": "m5",
-    "7 days": "m15",
-    "30 days": "h1",
-    "90 days": "h2"
+    "1 Hour": {"limit": 60, "unit": "minute"},
+    "6 Hours": {"limit": 360, "unit": "minute"},
+    "24 Hours": {"limit": 24, "unit": "hour"},
+    "7 Days": {"limit": 168, "unit": "hour"},
+    "30 Days": {"limit": 30, "unit": "day"}
 }
 
-timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=1)
-interval = TIMEFRAMES[timeframe_name]
+timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=2)
+timeframe_config = TIMEFRAMES[timeframe_name]
 
 # Auto-refresh
 auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False)
@@ -79,25 +80,91 @@ use_rsi = st.sidebar.checkbox("RSI (14)", value=True)
 use_macd = st.sidebar.checkbox("MACD", value=True)
 use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
 
-# API Functions - Using CoinCap (No auth required!)
+# API Functions - CryptoCompare (Most Reliable!)
 @st.cache_data(ttl=300)
-def get_coincap_history(coin_id, interval="m5"):
-    """Fetch historical data from CoinCap API - NO AUTH NEEDED"""
-    url = f"https://api.coincap.io/v2/assets/{coin_id}/history"
+def get_crypto_data(symbol, limit=100, unit="hour"):
+    """Fetch data from CryptoCompare - No API key needed for basic usage"""
     
-    # Set time range based on interval
-    if interval == "m5":
-        start_time = int((datetime.now() - timedelta(days=1)).timestamp() * 1000)
-    elif interval == "m15":
-        start_time = int((datetime.now() - timedelta(days=7)).timestamp() * 1000)
-    elif interval == "h1":
-        start_time = int((datetime.now() - timedelta(days=30)).timestamp() * 1000)
+    # Choose the right endpoint based on unit
+    if unit == "minute":
+        endpoint = "histominute"
+    elif unit == "hour":
+        endpoint = "histohour"
     else:
-        start_time = int((datetime.now() - timedelta(days=90)).timestamp() * 1000)
+        endpoint = "histoday"
     
+    url = f"https://min-api.cryptocompare.com/data/v2/{endpoint}"
     params = {
-        "interval": interval,
-        "start": start_time
+        "fsym": symbol,
+        "tsym": "USD",
+        "limit": limit
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('Response') == 'Error':
+            st.error(f"API Error: {data.get('Message', 'Unknown error')}")
+            return None
+        
+        if 'Data' not in data or 'Data' not in data['Data']:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(data['Data']['Data'])
+        
+        if len(df) == 0:
+            return None
+        
+        # Convert timestamp and rename columns
+        df['timestamp'] = pd.to_datetime(df['time'], unit='s')
+        df = df.rename(columns={
+            'open': 'open',
+            'high': 'high',
+            'low': 'low',
+            'close': 'close',
+            'volumefrom': 'volume'
+        })
+        
+        # Select relevant columns
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.dropna()
+        
+        return df
+        
+    except requests.exceptions.RequestException as e:
+        st.error(f"❌ Network Error: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"❌ Error: {str(e)}")
+        return None
+
+@st.cache_data(ttl=60)
+def get_current_price(symbol):
+    """Get current price from CryptoCompare"""
+    url = "https://min-api.cryptocompare.com/data/price"
+    params = {
+        "fsym": symbol,
+        "tsyms": "USD"
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        return data.get('USD', None)
+    except:
+        return None
+
+@st.cache_data(ttl=300)
+def get_market_data(symbol):
+    """Get detailed market data"""
+    url = "https://min-api.cryptocompare.com/data/pricemultifull"
+    params = {
+        "fsyms": symbol,
+        "tsyms": "USD"
     }
     
     try:
@@ -105,39 +172,10 @@ def get_coincap_history(coin_id, interval="m5"):
         response.raise_for_status()
         data = response.json()
         
-        if 'data' not in data:
-            return None
-        
-        # Convert to DataFrame
-        df = pd.DataFrame(data['data'])
-        df['timestamp'] = pd.to_datetime(df['time'], unit='ms')
-        df['close'] = df['priceUsd'].astype(float)
-        
-        # Create OHLC data (approximation from price data)
-        df['open'] = df['close'].shift(1).fillna(df['close'])
-        df['high'] = df[['open', 'close']].max(axis=1) * 1.002
-        df['low'] = df[['open', 'close']].min(axis=1) * 0.998
-        df['volume'] = 1000000  # Placeholder volume
-        
-        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        df = df.dropna()
-        
-        return df
-    except Exception as e:
-        st.error(f"❌ CoinCap API Error: {e}")
+        if 'RAW' in data and symbol in data['RAW'] and 'USD' in data['RAW'][symbol]:
+            return data['RAW'][symbol]['USD']
         return None
-
-@st.cache_data(ttl=60)
-def get_coincap_current(coin_id):
-    """Get current price from CoinCap - NO AUTH NEEDED"""
-    url = f"https://api.coincap.io/v2/assets/{coin_id}"
-    
-    try:
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        return data.get('data', {})
-    except Exception as e:
+    except:
         return None
 
 # Technical Indicators
@@ -356,22 +394,27 @@ if st.sidebar.button("🔄 Refresh Now", type="primary"):
     st.rerun()
 
 # Live Data
-st.markdown("### 📡 Live Market Data (CoinCap API - No Auth Required)")
+st.markdown("### 📡 Live Market Data (CryptoCompare API)")
 
 col1, col2, col3 = st.columns(3)
 
 # Fetch live data
-with st.spinner("🔄 Fetching live data from CoinCap..."):
-    df = get_coincap_history(coin_id, interval)
-    current_data = get_coincap_current(coin_id)
+with st.spinner(f"🔄 Fetching live data for {symbol}..."):
+    df = get_crypto_data(symbol, timeframe_config["limit"], timeframe_config["unit"])
+    current_price = get_current_price(symbol)
+    market_data = get_market_data(symbol)
 
 if df is not None and len(df) > 50:
-    current_price = df['close'].iloc[-1]
+    # Use current price from API if available, otherwise use latest from df
+    if current_price:
+        display_price = current_price
+    else:
+        display_price = df['close'].iloc[-1]
     
     # Calculate 24h change
     if len(df) >= 24:
-        price_24h_ago = df['close'].iloc[-24]
-        price_change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
+        price_24h_ago = df['close'].iloc[-min(24, len(df))]
+        price_change_24h = ((display_price - price_24h_ago) / price_24h_ago) * 100
     else:
         price_change_24h = 0
     
@@ -379,26 +422,27 @@ if df is not None and len(df) > 50:
         st.markdown("#### 💰 Current Price")
         st.metric(
             pair_display,
-            f"${current_price:,.2f}",
+            f"${display_price:,.2f}",
             f"{price_change_24h:+.2f}%"
         )
-        if current_data:
-            st.write(f"**Rank:** #{current_data.get('rank', 'N/A')}")
     
     with col2:
         st.markdown("#### 📊 24h Range")
-        high_24h = df['high'].tail(min(24, len(df))).max()
-        low_24h = df['low'].tail(min(24, len(df))).min()
-        st.write(f"**High:** ${high_24h:,.2f}")
-        st.write(f"**Low:** ${low_24h:,.2f}")
+        if market_data:
+            st.write(f"**High:** ${market_data.get('HIGH24HOUR', 0):,.2f}")
+            st.write(f"**Low:** ${market_data.get('LOW24HOUR', 0):,.2f}")
+        else:
+            st.write(f"**High:** ${df['high'].tail(24).max():,.2f}")
+            st.write(f"**Low:** ${df['low'].tail(24).min():,.2f}")
     
     with col3:
         st.markdown("#### 📈 Market Data")
-        if current_data:
-            market_cap = float(current_data.get('marketCapUsd', 0))
-            volume_24h = float(current_data.get('volumeUsd24Hr', 0))
-            st.write(f"**Market Cap:** ${market_cap/1e9:.2f}B")
-            st.write(f"**Volume 24h:** ${volume_24h/1e9:.2f}B")
+        if market_data:
+            st.write(f"**24h Volume:** ${market_data.get('VOLUME24HOURTO', 0)/1e9:.2f}B")
+            change = market_data.get('CHANGEPCT24HOUR', 0)
+            st.write(f"**24h Change:** {change:+.2f}%")
+        else:
+            st.write(f"**Volume:** ${df['volume'].sum()/1e6:.2f}M")
     
     st.markdown("---")
     
@@ -447,7 +491,7 @@ if df is not None and len(df) > 50:
             
             for i, pred_price in enumerate(future_prices):
                 with pred_cols[i % 5]:
-                    change_pct = ((pred_price - current_price) / current_price) * 100
+                    change_pct = ((pred_price - display_price) / display_price) * 100
                     st.metric(
                         f"+{i+1}",
                         f"${pred_price:,.2f}",
@@ -456,10 +500,10 @@ if df is not None and len(df) > 50:
             
             # AI Recommendation
             avg_prediction = np.mean(future_prices)
-            prediction_trend = "BULLISH 🚀" if avg_prediction > current_price else "BEARISH 🔻"
-            expected_change = ((avg_prediction - current_price) / current_price) * 100
+            prediction_trend = "BULLISH 🚀" if avg_prediction > display_price else "BEARISH 🔻"
+            expected_change = ((avg_prediction - display_price) / display_price) * 100
             
-            if avg_prediction > current_price:
+            if avg_prediction > display_price:
                 st.success(f"### ✅ AI PREDICTION: {prediction_trend}")
                 st.success(f"Expected movement: **+{expected_change:.2f}%** over {prediction_periods} periods")
             else:
@@ -605,8 +649,14 @@ if df is not None and len(df) > 50:
     """)
 
 else:
-    st.error("❌ Unable to fetch data. Please try again.")
-    st.info("💡 Using CoinCap API - Free, no authentication required!")
+    st.error("❌ Unable to fetch data. Please try refreshing the page.")
+    st.info("💡 Using CryptoCompare API - Reliable worldwide!")
+    
+    # Show debug info
+    if st.checkbox("Show Debug Info"):
+        st.write(f"Attempting to fetch data for: {symbol}")
+        st.write(f"Timeframe: {timeframe_name}")
+        st.write(f"Config: {timeframe_config}")
 
 # Auto-refresh
 if auto_refresh:
@@ -617,7 +667,7 @@ if auto_refresh:
 st.markdown("---")
 st.markdown(f"""
 <div style='text-align: center;'>
-    <p><b>📡 Data Source:</b> CoinCap API (Free - No Auth Required)</p>
+    <p><b>📡 Data Source:</b> CryptoCompare API (Trusted by Major Platforms)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
     <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
 </div>
