@@ -50,10 +50,11 @@ symbol = CRYPTO_SYMBOLS[pair_display]
 # Timeframe selection
 TIMEFRAMES = {
     "1 Hour": {"limit": 60, "unit": "minute"},
-    "6 Hours": {"limit": 360, "unit": "minute"},
+    "6 Hours": {"limit": 72, "unit": "minute"},  # 6 hours * 12 = 72 (5-min intervals)
     "24 Hours": {"limit": 24, "unit": "hour"},
-    "7 Days": {"limit": 168, "unit": "hour"},
-    "30 Days": {"limit": 30, "unit": "day"}
+    "7 Days": {"limit": 7, "unit": "day"},      # Changed to daily data
+    "30 Days": {"limit": 30, "unit": "day"},
+    "90 Days": {"limit": 90, "unit": "day"}
 }
 
 timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=2)
@@ -101,21 +102,25 @@ def get_crypto_data(symbol, limit=100, unit="hour"):
     }
     
     try:
-        response = requests.get(url, params=params, timeout=15)
+        response = requests.get(url, params=params, timeout=30)  # Increased timeout
         response.raise_for_status()
         data = response.json()
         
         if data.get('Response') == 'Error':
-            st.error(f"API Error: {data.get('Message', 'Unknown error')}")
+            error_msg = data.get('Message', 'Unknown error')
+            st.error(f"API Error: {error_msg}")
+            st.info(f"Tried to fetch: {limit} {unit} candles for {symbol}")
             return None
         
         if 'Data' not in data or 'Data' not in data['Data']:
+            st.warning(f"No data returned for {symbol}. API might be rate limiting.")
             return None
         
         # Convert to DataFrame
         df = pd.DataFrame(data['Data']['Data'])
         
         if len(df) == 0:
+            st.warning(f"Empty data returned for {symbol}")
             return None
         
         # Convert timestamp and rename columns
@@ -132,8 +137,14 @@ def get_crypto_data(symbol, limit=100, unit="hour"):
         df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
         df = df.dropna()
         
+        # Success message
+        st.success(f"✅ Loaded {len(df)} data points successfully!")
+        
         return df
         
+    except requests.exceptions.Timeout:
+        st.error("❌ Request timed out. Please try a shorter timeframe.")
+        return None
     except requests.exceptions.RequestException as e:
         st.error(f"❌ Network Error: {str(e)}")
         return None
