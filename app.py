@@ -11,11 +11,11 @@ import time
 warnings.filterwarnings('ignore')
 
 # Page configuration
-st.set_page_config(page_title="Live Crypto AI Analysis", layout="wide", page_icon="🤖")
+st.set_page_config(page_title="Live Market AI Analysis", layout="wide", page_icon="🤖")
 
 # Title
-st.title("🤖 Live Cryptocurrency AI Analysis & Trading Signals")
-st.markdown("*Real-time data with ML predictions - Works Globally!*")
+st.title("🤖 Live Market Analysis & Trading Signals")
+st.markdown("*Real-time Crypto, Gold, Silver & AI Predictions - Works Globally!*")
 
 # Display current time
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -25,7 +25,14 @@ st.markdown("---")
 # Sidebar configuration
 st.sidebar.header("⚙️ Configuration")
 
-# Popular trading pairs
+# Asset Type Selection
+asset_type = st.sidebar.selectbox(
+    "📊 Select Asset Type",
+    ["💰 Cryptocurrency", "🏆 Precious Metals"],
+    index=0
+)
+
+# Asset symbols based on type
 CRYPTO_SYMBOLS = {
     "Bitcoin (BTC)": "BTC",
     "Ethereum (ETH)": "ETH",
@@ -44,8 +51,20 @@ CRYPTO_SYMBOLS = {
     "Tron (TRX)": "TRX"
 }
 
-pair_display = st.sidebar.selectbox("Select Cryptocurrency", list(CRYPTO_SYMBOLS.keys()), index=0)
-symbol = CRYPTO_SYMBOLS[pair_display]
+PRECIOUS_METALS = {
+    "Gold (XAU/USD)": "XAU",
+    "Silver (XAG/USD)": "XAG",
+    "Platinum (XPT/USD)": "XPT",
+    "Palladium (XPD/USD)": "XPD"
+}
+
+# Select symbol based on asset type
+if asset_type == "💰 Cryptocurrency":
+    pair_display = st.sidebar.selectbox("Select Cryptocurrency", list(CRYPTO_SYMBOLS.keys()), index=0)
+    symbol = CRYPTO_SYMBOLS[pair_display]
+else:
+    pair_display = st.sidebar.selectbox("Select Precious Metal", list(PRECIOUS_METALS.keys()), index=0)
+    symbol = PRECIOUS_METALS[pair_display]
 
 # Timeframe selection
 TIMEFRAMES = {
@@ -410,7 +429,7 @@ st.markdown("### 📡 Live Market Data (CryptoCompare API)")
 col1, col2, col3 = st.columns(3)
 
 # Fetch live data
-with st.spinner(f"🔄 Fetching live data for {symbol}..."):
+with st.spinner(f"🔄 Fetching live data for {pair_display}..."):
     df = get_crypto_data(symbol, timeframe_config["limit"], timeframe_config["unit"])
     current_price = get_current_price(symbol)
     market_data = get_market_data(symbol)
@@ -429,22 +448,37 @@ if df is not None and len(df) > 50:
     else:
         price_change_24h = 0
     
+    # Determine if it's precious metal
+    is_precious_metal = asset_type == "🏆 Precious Metals"
+    price_label = "Price per Ounce" if is_precious_metal else "Current Price"
+    
     with col1:
-        st.markdown("#### 💰 Current Price")
-        st.metric(
-            pair_display,
-            f"${display_price:,.2f}",
-            f"{price_change_24h:+.2f}%"
-        )
+        st.markdown(f"#### 💰 {price_label}")
+        if display_price >= 1000:
+            st.metric(
+                pair_display,
+                f"${display_price:,.0f}",  # No decimals for high value
+                f"{price_change_24h:+.2f}%"
+            )
+        else:
+            st.metric(
+                pair_display,
+                f"${display_price:,.2f}",
+                f"{price_change_24h:+.2f}%"
+            )
     
     with col2:
         st.markdown("#### 📊 24h Range")
         if market_data:
-            st.write(f"**High:** ${market_data.get('HIGH24HOUR', 0):,.2f}")
-            st.write(f"**Low:** ${market_data.get('LOW24HOUR', 0):,.2f}")
+            high_val = market_data.get('HIGH24HOUR', 0)
+            low_val = market_data.get('LOW24HOUR', 0)
+            st.write(f"**High:** ${high_val:,.0f}" if high_val >= 1000 else f"**High:** ${high_val:,.2f}")
+            st.write(f"**Low:** ${low_val:,.0f}" if low_val >= 1000 else f"**Low:** ${low_val:,.2f}")
         else:
-            st.write(f"**High:** ${df['high'].tail(24).max():,.2f}")
-            st.write(f"**Low:** ${df['low'].tail(24).min():,.2f}")
+            high_val = df['high'].tail(24).max()
+            low_val = df['low'].tail(24).min()
+            st.write(f"**High:** ${high_val:,.0f}" if high_val >= 1000 else f"**High:** ${high_val:,.2f}")
+            st.write(f"**Low:** ${low_val:,.0f}" if low_val >= 1000 else f"**Low:** ${low_val:,.2f}")
     
     with col3:
         st.markdown("#### 📈 Market Data")
@@ -454,6 +488,10 @@ if df is not None and len(df) > 50:
             st.write(f"**24h Change:** {change:+.2f}%")
         else:
             st.write(f"**Volume:** ${df['volume'].sum()/1e6:.2f}M")
+        
+        # Add specific info for precious metals
+        if is_precious_metal:
+            st.info("💎 Price per Troy Ounce")
     
     st.markdown("---")
     
@@ -503,9 +541,15 @@ if df is not None and len(df) > 50:
             for i, pred_price in enumerate(future_prices):
                 with pred_cols[i % 5]:
                     change_pct = ((pred_price - display_price) / display_price) * 100
+                    # Format based on price level
+                    if pred_price >= 1000:
+                        price_display = f"${pred_price:,.0f}"
+                    else:
+                        price_display = f"${pred_price:,.2f}"
+                    
                     st.metric(
                         f"+{i+1}",
-                        f"${pred_price:,.2f}",
+                        price_display,
                         f"{change_pct:+.2f}%"
                     )
             
@@ -637,17 +681,24 @@ if df is not None and len(df) > 50:
     
     col1, col2 = st.columns(2)
     
+    # Determine price formatting based on value
+    def format_price(price):
+        if price >= 1000:
+            return f"${price:,.0f}"
+        else:
+            return f"${price:,.2f}"
+    
     with col1:
         st.success("#### 🟢 BUY ZONES")
         if 'bb_lower' in df.columns and not pd.isna(df['bb_lower'].iloc[-1]):
-            st.write(f"Lower BB: **${df['bb_lower'].iloc[-1]:,.2f}**")
-        st.write(f"Recent Low: **${df['low'].tail(20).min():,.2f}**")
+            st.write(f"Lower BB: **{format_price(df['bb_lower'].iloc[-1])}**")
+        st.write(f"Recent Low: **{format_price(df['low'].tail(20).min())}**")
     
     with col2:
         st.error("#### 🔴 SELL ZONES")
         if 'bb_upper' in df.columns and not pd.isna(df['bb_upper'].iloc[-1]):
-            st.write(f"Upper BB: **${df['bb_upper'].iloc[-1]:,.2f}**")
-        st.write(f"Recent High: **${df['high'].tail(20).max():,.2f}**")
+            st.write(f"Upper BB: **{format_price(df['bb_upper'].iloc[-1])}**")
+        st.write(f"Recent High: **{format_price(df['high'].tail(20).max())}**")
     
     st.markdown("---")
     st.warning("""
@@ -661,11 +712,13 @@ if df is not None and len(df) > 50:
 
 else:
     st.error("❌ Unable to fetch data. Please try refreshing the page.")
-    st.info("💡 Using CryptoCompare API - Reliable worldwide!")
+    st.info("💡 Using CryptoCompare API - Supports Crypto, Gold, Silver & Platinum!")
     
     # Show debug info
     if st.checkbox("Show Debug Info"):
+        st.write(f"Asset Type: {asset_type}")
         st.write(f"Attempting to fetch data for: {symbol}")
+        st.write(f"Display Name: {pair_display}")
         st.write(f"Timeframe: {timeframe_name}")
         st.write(f"Config: {timeframe_config}")
 
@@ -678,7 +731,7 @@ if auto_refresh:
 st.markdown("---")
 st.markdown(f"""
 <div style='text-align: center;'>
-    <p><b>📡 Data Source:</b> CryptoCompare API (Trusted by Major Platforms)</p>
+    <p><b>📡 Data Source:</b> CryptoCompare API (Crypto, Gold, Silver & More)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
     <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
 </div>
