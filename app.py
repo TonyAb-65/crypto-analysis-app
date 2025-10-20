@@ -15,7 +15,7 @@ st.set_page_config(page_title="Live Market AI Analysis", layout="wide", page_ico
 
 # Title
 st.title("🤖 Live Market Analysis & Trading Signals")
-st.markdown("*Real-time Crypto, Gold, Silver & AI Predictions - Multi-Source Data*")
+st.markdown("*Real-time Crypto (OKX/Binance), Gold, Silver & AI Predictions*")
 
 # Display current time
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -102,7 +102,61 @@ use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
 
 # API Functions
 
-# 1. BINANCE API (for Crypto)
+# 1. OKX API (Primary for Crypto)
+@st.cache_data(ttl=300)
+def get_okx_data(symbol, interval="1H", limit=100):
+    """Fetch data from OKX API"""
+    url = "https://www.okx.com/api/v5/market/candles"
+    
+    # OKX interval mapping
+    interval_map = {
+        "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+        "1h": "1H", "4h": "4H", "1d": "1D", "1w": "1W"
+    }
+    okx_interval = interval_map.get(interval, "1H")
+    
+    params = {
+        "instId": f"{symbol}-USDT",
+        "bar": okx_interval,
+        "limit": limit
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('code') != '0':
+            st.warning(f"⚠️ OKX API error: {data.get('msg', 'Unknown error')}")
+            return None, None
+        
+        # OKX returns: [timestamp, open, high, low, close, volume, ...]
+        candles = data.get('data', [])
+        
+        if not candles:
+            return None, None
+        
+        df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'volCcy', 'volCcyQuote', 'confirm'])
+        
+        # Convert timestamp from milliseconds
+        df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
+        
+        # Convert to float
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        
+        # OKX returns newest first, so reverse it
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        st.success(f"✅ OKX: Loaded {len(df)} data points")
+        return df, "OKX"
+        
+    except Exception as e:
+        st.warning(f"⚠️ OKX API failed: {str(e)[:100]}")
+        return None, None
+
+# 2. BINANCE API (Backup for Crypto)
 @st.cache_data(ttl=300)
 def get_binance_data(symbol, interval="1h", limit=100):
     """Fetch data from Binance API"""
@@ -189,7 +243,70 @@ def get_cryptocompare_data(symbol, limit=100, unit="hour"):
         st.warning(f"⚠️ CryptoCompare API failed: {str(e)[:100]}")
         return None, None
 
-# 3. TWELVE DATA API (for Gold, Silver, Commodities)
+# 3. YAHOO FINANCE (for Gold, Silver - NO API KEY NEEDED!)
+@st.cache_data(ttl=300)
+def get_yahoo_finance_commodities(symbol, period="1d", interval="1h"):
+    """Fetch commodities from Yahoo Finance - NO AUTH NEEDED"""
+    
+    # Map symbols to Yahoo Finance tickers
+    yahoo_symbols = {
+        "XAU/USD": "GC=F",  # Gold Futures
+        "XAG/USD": "SI=F",  # Silver Futures
+        "XPT/USD": "PL=F",  # Platinum Futures
+        "XPD/USD": "PA=F"   # Palladium Futures
+    }
+    
+    yahoo_ticker = yahoo_symbols.get(symbol, "GC=F")
+    
+    # Period mapping
+    period_map = {
+        "minute": "1d", "hour": "5d", "day": "60d"
+    }
+    
+    # Interval mapping
+    interval_map = {
+        "minute": "1m", "hour": "1h", "day": "1d"
+    }
+    
+    try:
+        import yfinance as yf
+        
+        ticker = yf.Ticker(yahoo_ticker)
+        df = ticker.history(period=period, interval=interval)
+        
+        if df.empty:
+            return None, None
+        
+        # Rename columns to match our format
+        df = df.reset_index()
+        df = df.rename(columns={
+            'Date': 'timestamp',
+            'Datetime': 'timestamp',
+            'Open': 'open',
+            'High': 'high',
+            'Low': 'low',
+            'Close': 'close',
+            'Volume': 'volume'
+        })
+        
+        # Make sure timestamp is datetime
+        if 'timestamp' not in df.columns and 'Date' in df.columns:
+            df = df.rename(columns={'Date': 'timestamp'})
+        
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.dropna()
+        
+        st.success(f"✅ Yahoo Finance: Loaded {len(df)} data points")
+        return df, "Yahoo Finance"
+        
+    except ImportError:
+        st.error("❌ yfinance library not installed. Installing...")
+        return None, None
+    except Exception as e:
+        st.warning(f"⚠️ Yahoo Finance failed: {str(e)[:100]}")
+        return None, None
+
+# 4. TWELVE DATA API (Backup for Gold, Silver, Commodities)
 @st.cache_data(ttl=300)
 def get_twelve_data_commodities(symbol, interval="1h", outputsize=100):
     """Fetch commodities data from Twelve Data API"""
@@ -242,10 +359,16 @@ def fetch_market_data(symbol, timeframe_config, asset_type):
     """Fetch data from appropriate source based on asset type"""
     
     if asset_type == "💰 Cryptocurrency":
-        # Try Binance first, fallback to CryptoCompare
-        st.info("🔄 Trying Binance API...")
-        df, source = get_binance_data(symbol, timeframe_config["binance"], timeframe_config["limit"])
+        # Try OKX first
+        st.info("🔄 Trying OKX API...")
+        df, source = get_okx_data(symbol, timeframe_config["binance"], timeframe_config["limit"])
         
+        # Fallback to Binance if OKX fails
+        if df is None:
+            st.info("🔄 OKX failed. Trying Binance API...")
+            df, source = get_binance_data(symbol, timeframe_config["binance"], timeframe_config["limit"])
+        
+        # Fallback to CryptoCompare if both fail
         if df is None:
             st.info("🔄 Binance failed. Trying CryptoCompare...")
             df, source = get_cryptocompare_data(symbol, timeframe_config["limit"], timeframe_config["unit"])
@@ -253,24 +376,48 @@ def fetch_market_data(symbol, timeframe_config, asset_type):
         return df, source
     
     else:  # Precious Metals
-        # Use Twelve Data for commodities
-        st.info("🔄 Fetching commodities data from Twelve Data...")
+        # Try Yahoo Finance first (NO API KEY NEEDED!)
+        st.info("🔄 Fetching from Yahoo Finance (No API key required)...")
         
         # Map interval
-        interval_map = {
-            "minute": "1min",
-            "hour": "1h",
-            "day": "1day"
-        }
-        interval = interval_map.get(timeframe_config["unit"], "1h")
+        df, source = get_yahoo_finance_commodities(symbol, "5d", "1h")
         
-        df, source = get_twelve_data_commodities(symbol, interval, timeframe_config["limit"])
+        # Fallback to Twelve Data if Yahoo fails
+        if df is None:
+            st.info("🔄 Yahoo Finance failed. Trying Twelve Data...")
+            
+            # Check if API key exists
+            try:
+                api_key = st.secrets.get("TWELVE_DATA_API_KEY")
+                if api_key:
+                    interval_map = {
+                        "minute": "1min",
+                        "hour": "1h",
+                        "day": "1day"
+                    }
+                    interval = interval_map.get(timeframe_config["unit"], "1h")
+                    df, source = get_twelve_data_commodities(symbol, interval, timeframe_config["limit"])
+                else:
+                    st.warning("⚠️ Twelve Data API key not configured (optional)")
+            except:
+                st.warning("⚠️ Twelve Data API key not configured (optional)")
+        
         return df, source
 
 @st.cache_data(ttl=60)
 def get_current_price_crypto(symbol):
     """Get current crypto price from multiple sources"""
-    # Try Binance first
+    # Try OKX first
+    try:
+        url = "https://www.okx.com/api/v5/market/ticker"
+        response = requests.get(url, params={"instId": f"{symbol}-USDT"}, timeout=5)
+        data = response.json()
+        if data.get('code') == '0' and data.get('data'):
+            return float(data['data'][0]['last']), "OKX"
+    except:
+        pass
+    
+    # Try Binance
     try:
         url = "https://api.binance.com/api/v3/ticker/price"
         response = requests.get(url, params={"symbol": f"{symbol}USDT"}, timeout=5)
@@ -784,12 +931,17 @@ else:
         st.info("""
         💡 **For Gold/Silver Analysis:**
         
-        You need a FREE Twelve Data API key:
+        **Primary:** Yahoo Finance (FREE - No API Key Required!) ✅
+        - Should work automatically
+        - Uses commodity futures data
         
-        1. Get key: https://twelvedata.com/
-        2. Go to: Settings → Secrets
-        3. Add: `TWELVE_DATA_API_KEY = "your_key_here"`
+        **Optional Backup:** Twelve Data API
+        - Get key: https://twelvedata.com/
+        - Add to: Settings → Secrets
+        - Format: `TWELVE_DATA_API_KEY = "your_key_here"`
         """)
+    else:
+        st.info("💡 The app tries multiple sources: OKX → Binance → CryptoCompare")
     
     # Show debug info
     if st.checkbox("Show Debug Info"):
@@ -809,8 +961,8 @@ st.markdown("---")
 st.markdown(f"""
 <div style='text-align: center;'>
     <p><b>📡 Data Sources:</b></p>
-    <p>Crypto: Binance API (Primary) + CryptoCompare (Backup)</p>
-    <p>Precious Metals: Twelve Data API</p>
+    <p>Crypto: OKX API (Primary) → Binance (Backup) → CryptoCompare (Fallback)</p>
+    <p>Precious Metals: Yahoo Finance (Free, No API Key) → Twelve Data (Optional)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
     <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
 </div>
