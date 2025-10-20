@@ -15,7 +15,7 @@ st.set_page_config(page_title="Live Market AI Analysis", layout="wide", page_ico
 
 # Title
 st.title("🤖 Live Market Analysis & Trading Signals")
-st.markdown("*Real-time Crypto (OKX/Binance), Gold, Silver & AI Predictions*")
+st.markdown("*Real-time Crypto (OKX) + Precious Metals (Twelve Data) with AI Predictions*")
 
 # Display current time
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -68,12 +68,15 @@ else:
 
 # Timeframe selection
 TIMEFRAMES = {
-    "1 Hour": {"limit": 60, "unit": "minute", "binance": "1m"},
-    "6 Hours": {"limit": 72, "unit": "minute", "binance": "5m"},
-    "24 Hours": {"limit": 24, "unit": "hour", "binance": "1h"},
-    "7 Days": {"limit": 7, "unit": "day", "binance": "1d"},
-    "30 Days": {"limit": 30, "unit": "day", "binance": "1d"},
-    "90 Days": {"limit": 90, "unit": "day", "binance": "1d"}
+    "1 Minute": {"limit": 60, "unit": "minute", "binance": "1m", "okx": "1m"},
+    "5 Minutes": {"limit": 60, "unit": "minute", "binance": "5m", "okx": "5m"},
+    "15 Minutes": {"limit": 96, "unit": "minute", "binance": "15m", "okx": "15m"},
+    "1 Hour": {"limit": 60, "unit": "minute", "binance": "1m", "okx": "1m"},
+    "6 Hours": {"limit": 72, "unit": "minute", "binance": "5m", "okx": "5m"},
+    "24 Hours": {"limit": 96, "unit": "hour", "binance": "15m", "okx": "15m"},
+    "7 Days": {"limit": 168, "unit": "hour", "binance": "1h", "okx": "1H"},
+    "30 Days": {"limit": 30, "unit": "day", "binance": "1d", "okx": "1D"},
+    "90 Days": {"limit": 90, "unit": "day", "binance": "1d", "okx": "1D"}
 }
 
 timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=2)
@@ -108,32 +111,31 @@ def get_okx_data(symbol, interval="1H", limit=100):
     """Fetch data from OKX API"""
     url = "https://www.okx.com/api/v5/market/candles"
     
-    # OKX interval mapping
-    interval_map = {
-        "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
-        "1h": "1H", "4h": "4H", "1d": "1D", "1w": "1W"
-    }
-    okx_interval = interval_map.get(interval, "1H")
+    # Ensure limit doesn't exceed OKX max (300)
+    limit = min(limit, 300)
     
     params = {
         "instId": f"{symbol}-USDT",
-        "bar": okx_interval,
-        "limit": limit
+        "bar": interval,
+        "limit": str(limit)
     }
     
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=15)
         response.raise_for_status()
         data = response.json()
         
         if data.get('code') != '0':
-            st.warning(f"⚠️ OKX API error: {data.get('msg', 'Unknown error')}")
+            error_msg = data.get('msg', 'Unknown error')
+            st.warning(f"⚠️ OKX API error: {error_msg}")
+            st.write(f"Debug - Tried: {params}")
             return None, None
         
         # OKX returns: [timestamp, open, high, low, close, volume, ...]
         candles = data.get('data', [])
         
-        if not candles:
+        if not candles or len(candles) == 0:
+            st.warning(f"⚠️ OKX returned no data for {symbol}")
             return None, None
         
         df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'volCcy', 'volCcyQuote', 'confirm'])
@@ -152,8 +154,14 @@ def get_okx_data(symbol, interval="1H", limit=100):
         st.success(f"✅ OKX: Loaded {len(df)} data points")
         return df, "OKX"
         
+    except requests.exceptions.Timeout:
+        st.warning("⚠️ OKX API timeout")
+        return None, None
+    except requests.exceptions.RequestException as e:
+        st.warning(f"⚠️ OKX API network error: {str(e)[:100]}")
+        return None, None
     except Exception as e:
-        st.warning(f"⚠️ OKX API failed: {str(e)[:100]}")
+        st.warning(f"⚠️ OKX API failed: {str(e)[:150]}")
         return None, None
 
 # 2. BINANCE API (Backup for Crypto)
@@ -161,6 +169,10 @@ def get_okx_data(symbol, interval="1H", limit=100):
 def get_binance_data(symbol, interval="1h", limit=100):
     """Fetch data from Binance API"""
     url = "https://api.binance.com/api/v3/klines"
+    
+    # Binance max limit is 1000
+    limit = min(limit, 1000)
+    
     params = {
         "symbol": f"{symbol}USDT",
         "interval": interval,
@@ -168,9 +180,18 @@ def get_binance_data(symbol, interval="1h", limit=100):
     }
     
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=15)
         response.raise_for_status()
         data = response.json()
+        
+        # Check if response is an error
+        if isinstance(data, dict) and 'code' in data:
+            st.warning(f"⚠️ Binance API error: {data.get('msg', 'Unknown error')}")
+            return None, None
+        
+        if not data or len(data) == 0:
+            st.warning("⚠️ Binance returned no data")
+            return None, None
         
         df = pd.DataFrame(data, columns=[
             'timestamp', 'open', 'high', 'low', 'close', 'volume',
@@ -186,14 +207,24 @@ def get_binance_data(symbol, interval="1h", limit=100):
         st.success(f"✅ Binance: Loaded {len(df)} data points")
         return df, "Binance"
         
+    except requests.exceptions.Timeout:
+        st.warning("⚠️ Binance API timeout")
+        return None, None
+    except requests.exceptions.HTTPError as e:
+        st.warning(f"⚠️ Binance HTTP error: {e.response.status_code}")
+        return None, None
     except Exception as e:
-        st.warning(f"⚠️ Binance API failed: {str(e)[:100]}")
+        st.warning(f"⚠️ Binance API failed: {str(e)[:150]}")
         return None, None
 
-# 2. CRYPTOCOMPARE API (Backup for Crypto)
+# 2b. CRYPTOCOMPARE API (Backup for Crypto)
 @st.cache_data(ttl=300)
 def get_cryptocompare_data(symbol, limit=100, unit="hour"):
     """Fetch data from CryptoCompare"""
+    
+    # CryptoCompare has a max limit of 2000
+    limit = min(limit, 2000)
+    
     if unit == "minute":
         endpoint = "histominute"
     elif unit == "hour":
@@ -214,9 +245,11 @@ def get_cryptocompare_data(symbol, limit=100, unit="hour"):
         data = response.json()
         
         if data.get('Response') == 'Error':
+            st.warning(f"⚠️ CryptoCompare: {data.get('Message', 'Unknown error')}")
             return None, None
         
         if 'Data' not in data or 'Data' not in data['Data']:
+            st.warning("⚠️ CryptoCompare returned no data")
             return None, None
         
         df = pd.DataFrame(data['Data']['Data'])
@@ -239,8 +272,11 @@ def get_cryptocompare_data(symbol, limit=100, unit="hour"):
         st.success(f"✅ CryptoCompare: Loaded {len(df)} data points")
         return df, "CryptoCompare"
         
+    except requests.exceptions.Timeout:
+        st.warning("⚠️ CryptoCompare timeout (slow response)")
+        return None, None
     except Exception as e:
-        st.warning(f"⚠️ CryptoCompare API failed: {str(e)[:100]}")
+        st.warning(f"⚠️ CryptoCompare failed: {str(e)[:150]}")
         return None, None
 
 # 3. YAHOO FINANCE (for Gold, Silver - NO API KEY NEEDED!)
@@ -361,7 +397,7 @@ def fetch_market_data(symbol, timeframe_config, asset_type):
     if asset_type == "💰 Cryptocurrency":
         # Try OKX first
         st.info("🔄 Trying OKX API...")
-        df, source = get_okx_data(symbol, timeframe_config["binance"], timeframe_config["limit"])
+        df, source = get_okx_data(symbol, timeframe_config["okx"], timeframe_config["limit"])
         
         # Fallback to Binance if OKX fails
         if df is None:
@@ -371,36 +407,51 @@ def fetch_market_data(symbol, timeframe_config, asset_type):
         # Fallback to CryptoCompare if both fail
         if df is None:
             st.info("🔄 Binance failed. Trying CryptoCompare...")
-            df, source = get_cryptocompare_data(symbol, timeframe_config["limit"], timeframe_config["unit"])
+            # Reduce limit for CryptoCompare to avoid issues
+            cc_limit = min(timeframe_config["limit"], 2000)
+            df, source = get_cryptocompare_data(symbol, cc_limit, timeframe_config["unit"])
         
         return df, source
     
     else:  # Precious Metals
-        # Try Yahoo Finance first (NO API KEY NEEDED!)
-        st.info("🔄 Fetching from Yahoo Finance (No API key required)...")
+        # Try Twelve Data first (Better quality with API key!)
+        st.info("🔄 Fetching from Twelve Data API (Primary)...")
         
-        # Map interval
-        df, source = get_yahoo_finance_commodities(symbol, "5d", "1h")
+        # Check if API key exists
+        api_key = None
+        try:
+            api_key = st.secrets.get("TWELVE_DATA_API_KEY")
+        except:
+            pass
         
-        # Fallback to Twelve Data if Yahoo fails
-        if df is None:
-            st.info("🔄 Yahoo Finance failed. Trying Twelve Data...")
+        if api_key:
+            # Map interval
+            interval_map = {
+                "minute": "1min",
+                "hour": "1h",
+                "day": "1day"
+            }
+            interval = interval_map.get(timeframe_config["unit"], "1h")
+            df, source = get_twelve_data_commodities(symbol, interval, timeframe_config["limit"])
             
-            # Check if API key exists
-            try:
-                api_key = st.secrets.get("TWELVE_DATA_API_KEY")
-                if api_key:
-                    interval_map = {
-                        "minute": "1min",
-                        "hour": "1h",
-                        "day": "1day"
-                    }
-                    interval = interval_map.get(timeframe_config["unit"], "1h")
-                    df, source = get_twelve_data_commodities(symbol, interval, timeframe_config["limit"])
-                else:
-                    st.warning("⚠️ Twelve Data API key not configured (optional)")
-            except:
-                st.warning("⚠️ Twelve Data API key not configured (optional)")
+            # If Twelve Data succeeds, return immediately
+            if df is not None:
+                return df, source
+        else:
+            st.warning("⚠️ Twelve Data API key not found")
+        
+        # Fallback to Yahoo Finance if Twelve Data fails or no API key
+        st.info("🔄 Twelve Data failed. Trying Yahoo Finance (Backup)...")
+        
+        # Map period and interval for Yahoo Finance
+        if timeframe_config["unit"] == "minute":
+            period, interval = "1d", "1m"
+        elif timeframe_config["unit"] == "hour":
+            period, interval = "5d", "1h"
+        else:
+            period, interval = "60d", "1d"
+        
+        df, source = get_yahoo_finance_commodities(symbol, period, interval)
         
         return df, source
 
@@ -925,31 +976,47 @@ if df is not None and len(df) > 50:
     """)
 
 else:
-    st.error("❌ Unable to fetch data. Please try refreshing the page.")
+    st.error("❌ Unable to fetch data. All data sources failed.")
     
     if asset_type == "🏆 Precious Metals":
         st.info("""
         💡 **For Gold/Silver Analysis:**
         
-        **Primary:** Yahoo Finance (FREE - No API Key Required!) ✅
-        - Should work automatically
-        - Uses commodity futures data
+        **Primary:** Twelve Data API (Better Quality!) ✅
+        - Real-time spot prices
+        - You have this configured! ✅
         
-        **Optional Backup:** Twelve Data API
-        - Get key: https://twelvedata.com/
-        - Add to: Settings → Secrets
-        - Format: `TWELVE_DATA_API_KEY = "your_key_here"`
+        **Backup:** Yahoo Finance (FREE - No API Key)
+        - Commodity futures data
+        - Falls back automatically if Twelve Data fails
+        
+        **Both sources failed** - This is unusual. Try:
+        - Refresh the page
+        - Try a different timeframe
+        - Check back in a few minutes
         """)
     else:
-        st.info("💡 The app tries multiple sources: OKX → Binance → CryptoCompare")
+        st.info("""
+        💡 **Crypto Data Sources:**
+        - The app tries: OKX → Binance → CryptoCompare
+        - All three sources failed
+        - This might be a temporary API issue
+        - Try a shorter timeframe or refresh in a few minutes
+        """)
     
     # Show debug info
-    if st.checkbox("Show Debug Info"):
-        st.write(f"Asset Type: {asset_type}")
-        st.write(f"Symbol: {symbol}")
-        st.write(f"Display Name: {pair_display}")
-        st.write(f"Timeframe: {timeframe_name}")
-        st.write(f"Config: {timeframe_config}")
+    st.markdown("### 🔍 Debug Information")
+    st.write(f"**Asset Type:** {asset_type}")
+    st.write(f"**Symbol:** {symbol}")
+    st.write(f"**Display Name:** {pair_display}")
+    st.write(f"**Timeframe:** {timeframe_name}")
+    st.write(f"**Config:** {timeframe_config}")
+    
+    if asset_type == "💰 Cryptocurrency":
+        st.write(f"**OKX Params:** instId={symbol}-USDT, bar={timeframe_config['okx']}, limit={timeframe_config['limit']}")
+        st.write(f"**Binance Params:** symbol={symbol}USDT, interval={timeframe_config['binance']}, limit={timeframe_config['limit']}")
+    
+    st.info("💡 **Tip:** Try selecting '1 Hour' or '6 Hours' timeframe - shorter timeframes usually work better.")
 
 # Auto-refresh
 if auto_refresh:
@@ -962,7 +1029,7 @@ st.markdown(f"""
 <div style='text-align: center;'>
     <p><b>📡 Data Sources:</b></p>
     <p>Crypto: OKX API (Primary) → Binance (Backup) → CryptoCompare (Fallback)</p>
-    <p>Precious Metals: Yahoo Finance (Free, No API Key) → Twelve Data (Optional)</p>
+    <p>Precious Metals: Twelve Data API (Primary) → Yahoo Finance (Free Backup)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
     <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
 </div>
