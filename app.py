@@ -15,7 +15,7 @@ st.set_page_config(page_title="Live Market AI Analysis", layout="wide", page_ico
 
 # Title
 st.title("🤖 Live Market Analysis & Trading Signals")
-st.markdown("*Real-time Crypto, Gold, Silver & AI Predictions - Works Globally!*")
+st.markdown("*Real-time Crypto, Gold, Silver & AI Predictions - Multi-Source Data*")
 
 # Display current time
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -52,10 +52,10 @@ CRYPTO_SYMBOLS = {
 }
 
 PRECIOUS_METALS = {
-    "Gold (XAU/USD)": "XAU",
-    "Silver (XAG/USD)": "XAG",
-    "Platinum (XPT/USD)": "XPT",
-    "Palladium (XPD/USD)": "XPD"
+    "Gold (XAU/USD)": "XAU/USD",
+    "Silver (XAG/USD)": "XAG/USD",
+    "Platinum (XPT/USD)": "XPT/USD",
+    "Palladium (XPD/USD)": "XPD/USD"
 }
 
 # Select symbol based on asset type
@@ -68,12 +68,12 @@ else:
 
 # Timeframe selection
 TIMEFRAMES = {
-    "1 Hour": {"limit": 60, "unit": "minute"},
-    "6 Hours": {"limit": 72, "unit": "minute"},  # 6 hours * 12 = 72 (5-min intervals)
-    "24 Hours": {"limit": 24, "unit": "hour"},
-    "7 Days": {"limit": 7, "unit": "day"},      # Changed to daily data
-    "30 Days": {"limit": 30, "unit": "day"},
-    "90 Days": {"limit": 90, "unit": "day"}
+    "1 Hour": {"limit": 60, "unit": "minute", "binance": "1m"},
+    "6 Hours": {"limit": 72, "unit": "minute", "binance": "5m"},
+    "24 Hours": {"limit": 24, "unit": "hour", "binance": "1h"},
+    "7 Days": {"limit": 7, "unit": "day", "binance": "1d"},
+    "30 Days": {"limit": 30, "unit": "day", "binance": "1d"},
+    "90 Days": {"limit": 90, "unit": "day", "binance": "1d"}
 }
 
 timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=2)
@@ -100,12 +100,46 @@ use_rsi = st.sidebar.checkbox("RSI (14)", value=True)
 use_macd = st.sidebar.checkbox("MACD", value=True)
 use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
 
-# API Functions - CryptoCompare (Most Reliable!)
+# API Functions
+
+# 1. BINANCE API (for Crypto)
 @st.cache_data(ttl=300)
-def get_crypto_data(symbol, limit=100, unit="hour"):
-    """Fetch data from CryptoCompare - No API key needed for basic usage"""
+def get_binance_data(symbol, interval="1h", limit=100):
+    """Fetch data from Binance API"""
+    url = "https://api.binance.com/api/v3/klines"
+    params = {
+        "symbol": f"{symbol}USDT",
+        "interval": interval,
+        "limit": limit
+    }
     
-    # Choose the right endpoint based on unit
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        df = pd.DataFrame(data, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+            'taker_buy_quote', 'ignore'
+        ])
+        
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        st.success(f"✅ Binance: Loaded {len(df)} data points")
+        return df, "Binance"
+        
+    except Exception as e:
+        st.warning(f"⚠️ Binance API failed: {str(e)[:100]}")
+        return None, None
+
+# 2. CRYPTOCOMPARE API (Backup for Crypto)
+@st.cache_data(ttl=300)
+def get_cryptocompare_data(symbol, limit=100, unit="hour"):
+    """Fetch data from CryptoCompare"""
     if unit == "minute":
         endpoint = "histominute"
     elif unit == "hour":
@@ -121,28 +155,21 @@ def get_crypto_data(symbol, limit=100, unit="hour"):
     }
     
     try:
-        response = requests.get(url, params=params, timeout=30)  # Increased timeout
+        response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
         data = response.json()
         
         if data.get('Response') == 'Error':
-            error_msg = data.get('Message', 'Unknown error')
-            st.error(f"API Error: {error_msg}")
-            st.info(f"Tried to fetch: {limit} {unit} candles for {symbol}")
-            return None
+            return None, None
         
         if 'Data' not in data or 'Data' not in data['Data']:
-            st.warning(f"No data returned for {symbol}. API might be rate limiting.")
-            return None
+            return None, None
         
-        # Convert to DataFrame
         df = pd.DataFrame(data['Data']['Data'])
         
         if len(df) == 0:
-            st.warning(f"Empty data returned for {symbol}")
-            return None
+            return None, None
         
-        # Convert timestamp and rename columns
         df['timestamp'] = pd.to_datetime(df['time'], unit='s')
         df = df.rename(columns={
             'open': 'open',
@@ -152,61 +179,114 @@ def get_crypto_data(symbol, limit=100, unit="hour"):
             'volumefrom': 'volume'
         })
         
-        # Select relevant columns
         df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
         df = df.dropna()
         
-        # Success message
-        st.success(f"✅ Loaded {len(df)} data points successfully!")
+        st.success(f"✅ CryptoCompare: Loaded {len(df)} data points")
+        return df, "CryptoCompare"
         
-        return df
-        
-    except requests.exceptions.Timeout:
-        st.error("❌ Request timed out. Please try a shorter timeframe.")
-        return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"❌ Network Error: {str(e)}")
-        return None
     except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
-        return None
+        st.warning(f"⚠️ CryptoCompare API failed: {str(e)[:100]}")
+        return None, None
+
+# 3. TWELVE DATA API (for Gold, Silver, Commodities)
+@st.cache_data(ttl=300)
+def get_twelve_data_commodities(symbol, interval="1h", outputsize=100):
+    """Fetch commodities data from Twelve Data API"""
+    
+    # Check if API key exists
+    try:
+        api_key = st.secrets["TWELVE_DATA_API_KEY"]
+    except:
+        st.error("❌ Twelve Data API key not found. Please add it to Streamlit Secrets.")
+        st.info("📝 Go to Settings → Secrets and add: TWELVE_DATA_API_KEY = 'your_key_here'")
+        return None, None
+    
+    url = "https://api.twelvedata.com/time_series"
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "outputsize": outputsize,
+        "apikey": api_key,
+        "format": "JSON"
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'values' not in data:
+            st.error(f"❌ Twelve Data Error: {data.get('message', 'Unknown error')}")
+            return None, None
+        
+        df = pd.DataFrame(data['values'])
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        df = df.rename(columns={'datetime': 'timestamp'})
+        
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        
+        st.success(f"✅ Twelve Data: Loaded {len(df)} data points")
+        return df, "Twelve Data"
+        
+    except Exception as e:
+        st.error(f"❌ Twelve Data API Error: {str(e)}")
+        return None, None
+
+# Main data fetching function
+def fetch_market_data(symbol, timeframe_config, asset_type):
+    """Fetch data from appropriate source based on asset type"""
+    
+    if asset_type == "💰 Cryptocurrency":
+        # Try Binance first, fallback to CryptoCompare
+        st.info("🔄 Trying Binance API...")
+        df, source = get_binance_data(symbol, timeframe_config["binance"], timeframe_config["limit"])
+        
+        if df is None:
+            st.info("🔄 Binance failed. Trying CryptoCompare...")
+            df, source = get_cryptocompare_data(symbol, timeframe_config["limit"], timeframe_config["unit"])
+        
+        return df, source
+    
+    else:  # Precious Metals
+        # Use Twelve Data for commodities
+        st.info("🔄 Fetching commodities data from Twelve Data...")
+        
+        # Map interval
+        interval_map = {
+            "minute": "1min",
+            "hour": "1h",
+            "day": "1day"
+        }
+        interval = interval_map.get(timeframe_config["unit"], "1h")
+        
+        df, source = get_twelve_data_commodities(symbol, interval, timeframe_config["limit"])
+        return df, source
 
 @st.cache_data(ttl=60)
-def get_current_price(symbol):
-    """Get current price from CryptoCompare"""
-    url = "https://min-api.cryptocompare.com/data/price"
-    params = {
-        "fsym": symbol,
-        "tsyms": "USD"
-    }
-    
+def get_current_price_crypto(symbol):
+    """Get current crypto price from multiple sources"""
+    # Try Binance first
     try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
+        url = "https://api.binance.com/api/v3/ticker/price"
+        response = requests.get(url, params={"symbol": f"{symbol}USDT"}, timeout=5)
         data = response.json()
-        return data.get('USD', None)
+        return float(data['price']), "Binance"
     except:
-        return None
-
-@st.cache_data(ttl=300)
-def get_market_data(symbol):
-    """Get detailed market data"""
-    url = "https://min-api.cryptocompare.com/data/pricemultifull"
-    params = {
-        "fsyms": symbol,
-        "tsyms": "USD"
-    }
+        pass
     
+    # Fallback to CryptoCompare
     try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
+        url = "https://min-api.cryptocompare.com/data/price"
+        response = requests.get(url, params={"fsym": symbol, "tsyms": "USD"}, timeout=5)
         data = response.json()
-        
-        if 'RAW' in data and symbol in data['RAW'] and 'USD' in data['RAW'][symbol]:
-            return data['RAW'][symbol]['USD']
-        return None
+        return data.get('USD', None), "CryptoCompare"
     except:
-        return None
+        return None, None
 
 # Technical Indicators
 def calculate_sma(df, period=20):
@@ -424,22 +504,22 @@ if st.sidebar.button("🔄 Refresh Now", type="primary"):
     st.rerun()
 
 # Live Data
-st.markdown("### 📡 Live Market Data (CryptoCompare API)")
+st.markdown("### 📡 Live Market Data")
 
 col1, col2, col3 = st.columns(3)
 
 # Fetch live data
 with st.spinner(f"🔄 Fetching live data for {pair_display}..."):
-    df = get_crypto_data(symbol, timeframe_config["limit"], timeframe_config["unit"])
-    current_price = get_current_price(symbol)
-    market_data = get_market_data(symbol)
+    df, data_source = fetch_market_data(symbol, timeframe_config, asset_type)
 
 if df is not None and len(df) > 50:
-    # Use current price from API if available, otherwise use latest from df
-    if current_price:
-        display_price = current_price
-    else:
-        display_price = df['close'].iloc[-1]
+    # Get current price
+    display_price = df['close'].iloc[-1]
+    
+    if asset_type == "💰 Cryptocurrency":
+        current_price, price_source = get_current_price_crypto(symbol)
+        if current_price:
+            display_price = current_price
     
     # Calculate 24h change
     if len(df) >= 24:
@@ -448,7 +528,6 @@ if df is not None and len(df) > 50:
     else:
         price_change_24h = 0
     
-    # Determine if it's precious metal
     is_precious_metal = asset_type == "🏆 Precious Metals"
     price_label = "Price per Ounce" if is_precious_metal else "Current Price"
     
@@ -457,7 +536,7 @@ if df is not None and len(df) > 50:
         if display_price >= 1000:
             st.metric(
                 pair_display,
-                f"${display_price:,.0f}",  # No decimals for high value
+                f"${display_price:,.0f}",
                 f"{price_change_24h:+.2f}%"
             )
         else:
@@ -466,32 +545,22 @@ if df is not None and len(df) > 50:
                 f"${display_price:,.2f}",
                 f"{price_change_24h:+.2f}%"
             )
+        st.caption(f"📡 Source: {data_source}")
     
     with col2:
         st.markdown("#### 📊 24h Range")
-        if market_data:
-            high_val = market_data.get('HIGH24HOUR', 0)
-            low_val = market_data.get('LOW24HOUR', 0)
-            st.write(f"**High:** ${high_val:,.0f}" if high_val >= 1000 else f"**High:** ${high_val:,.2f}")
-            st.write(f"**Low:** ${low_val:,.0f}" if low_val >= 1000 else f"**Low:** ${low_val:,.2f}")
-        else:
-            high_val = df['high'].tail(24).max()
-            low_val = df['low'].tail(24).min()
-            st.write(f"**High:** ${high_val:,.0f}" if high_val >= 1000 else f"**High:** ${high_val:,.2f}")
-            st.write(f"**Low:** ${low_val:,.0f}" if low_val >= 1000 else f"**Low:** ${low_val:,.2f}")
+        high_val = df['high'].tail(24).max()
+        low_val = df['low'].tail(24).min()
+        st.write(f"**High:** ${high_val:,.0f}" if high_val >= 1000 else f"**High:** ${high_val:,.2f}")
+        st.write(f"**Low:** ${low_val:,.0f}" if low_val >= 1000 else f"**Low:** ${low_val:,.2f}")
     
     with col3:
         st.markdown("#### 📈 Market Data")
-        if market_data:
-            st.write(f"**24h Volume:** ${market_data.get('VOLUME24HOURTO', 0)/1e9:.2f}B")
-            change = market_data.get('CHANGEPCT24HOUR', 0)
-            st.write(f"**24h Change:** {change:+.2f}%")
-        else:
-            st.write(f"**Volume:** ${df['volume'].sum()/1e6:.2f}M")
+        st.write(f"**Volume:** ${df['volume'].sum()/1e6:.2f}M")
+        st.write(f"**Data Points:** {len(df)}")
         
-        # Add specific info for precious metals
         if is_precious_metal:
-            st.info("💎 Price per Troy Ounce")
+            st.info("💎 Troy Ounce")
     
     st.markdown("---")
     
@@ -541,7 +610,6 @@ if df is not None and len(df) > 50:
             for i, pred_price in enumerate(future_prices):
                 with pred_cols[i % 5]:
                     change_pct = ((pred_price - display_price) / display_price) * 100
-                    # Format based on price level
                     if pred_price >= 1000:
                         price_display = f"${pred_price:,.0f}"
                     else:
@@ -681,7 +749,6 @@ if df is not None and len(df) > 50:
     
     col1, col2 = st.columns(2)
     
-    # Determine price formatting based on value
     def format_price(price):
         if price >= 1000:
             return f"${price:,.0f}"
@@ -712,12 +779,22 @@ if df is not None and len(df) > 50:
 
 else:
     st.error("❌ Unable to fetch data. Please try refreshing the page.")
-    st.info("💡 Using CryptoCompare API - Supports Crypto, Gold, Silver & Platinum!")
+    
+    if asset_type == "🏆 Precious Metals":
+        st.info("""
+        💡 **For Gold/Silver Analysis:**
+        
+        You need a FREE Twelve Data API key:
+        
+        1. Get key: https://twelvedata.com/
+        2. Go to: Settings → Secrets
+        3. Add: `TWELVE_DATA_API_KEY = "your_key_here"`
+        """)
     
     # Show debug info
     if st.checkbox("Show Debug Info"):
         st.write(f"Asset Type: {asset_type}")
-        st.write(f"Attempting to fetch data for: {symbol}")
+        st.write(f"Symbol: {symbol}")
         st.write(f"Display Name: {pair_display}")
         st.write(f"Timeframe: {timeframe_name}")
         st.write(f"Config: {timeframe_config}")
@@ -731,7 +808,9 @@ if auto_refresh:
 st.markdown("---")
 st.markdown(f"""
 <div style='text-align: center;'>
-    <p><b>📡 Data Source:</b> CryptoCompare API (Crypto, Gold, Silver & More)</p>
+    <p><b>📡 Data Sources:</b></p>
+    <p>Crypto: Binance API (Primary) + CryptoCompare (Backup)</p>
+    <p>Precious Metals: Twelve Data API</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
     <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
 </div>
