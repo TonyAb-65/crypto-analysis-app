@@ -14,8 +14,8 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Live Market AI Analysis", layout="wide", page_icon="🤖")
 
 # Title
-st.title("🤖 Live Market Analysis & Trading Signals")
-st.markdown("*Real-time Crypto (OKX) + Precious Metals (Twelve Data) with AI Predictions*")
+st.title("🤖 AI Trading Analysis Platform")
+st.markdown("*Crypto, Forex, Metals + AI Chart Image Analysis*")
 
 # Display current time
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -28,7 +28,7 @@ st.sidebar.header("⚙️ Configuration")
 # Asset Type Selection
 asset_type = st.sidebar.selectbox(
     "📊 Select Asset Type",
-    ["💰 Cryptocurrency", "🏆 Precious Metals"],
+    ["💰 Cryptocurrency", "🏆 Precious Metals", "💱 Forex", "🔍 Custom Search", "📸 Analyze Chart Image"],
     index=0
 )
 
@@ -58,13 +58,44 @@ PRECIOUS_METALS = {
     "Palladium (XPD/USD)": "XPD/USD"
 }
 
+FOREX_PAIRS = {
+    "EUR/USD (Euro vs US Dollar)": "EUR/USD",
+    "GBP/USD (British Pound vs US Dollar)": "GBP/USD",
+    "USD/JPY (US Dollar vs Japanese Yen)": "USD/JPY",
+    "USD/CHF (US Dollar vs Swiss Franc)": "USD/CHF",
+    "AUD/USD (Australian Dollar vs US Dollar)": "AUD/USD",
+    "USD/CAD (US Dollar vs Canadian Dollar)": "USD/CAD",
+    "NZD/USD (New Zealand Dollar vs US Dollar)": "NZD/USD",
+    "EUR/GBP (Euro vs British Pound)": "EUR/GBP",
+    "EUR/JPY (Euro vs Japanese Yen)": "EUR/JPY",
+    "GBP/JPY (British Pound vs Japanese Yen)": "GBP/JPY"
+}
+
 # Select symbol based on asset type
 if asset_type == "💰 Cryptocurrency":
     pair_display = st.sidebar.selectbox("Select Cryptocurrency", list(CRYPTO_SYMBOLS.keys()), index=0)
     symbol = CRYPTO_SYMBOLS[pair_display]
-else:
+elif asset_type == "🏆 Precious Metals":
     pair_display = st.sidebar.selectbox("Select Precious Metal", list(PRECIOUS_METALS.keys()), index=0)
     symbol = PRECIOUS_METALS[pair_display]
+elif asset_type == "💱 Forex":
+    pair_display = st.sidebar.selectbox("Select Forex Pair", list(FOREX_PAIRS.keys()), index=0)
+    symbol = FOREX_PAIRS[pair_display]
+elif asset_type == "🔍 Custom Search":
+    st.sidebar.markdown("### 🔍 Enter Custom Symbol")
+    st.sidebar.info("""
+    **Examples:**
+    - Crypto: BTC, ETH, DOGE
+    - Forex: EUR/USD, GBP/JPY
+    - Metals: XAU/USD, XAG/USD
+    - Stocks: AAPL, TSLA, GOOGL
+    """)
+    custom_symbol = st.sidebar.text_input("Enter Symbol:", "BTC").upper()
+    pair_display = f"Custom: {custom_symbol}"
+    symbol = custom_symbol
+else:  # Chart Image Analysis
+    pair_display = "Chart Analysis"
+    symbol = None
 
 # Timeframe selection
 TIMEFRAMES = {
@@ -82,8 +113,12 @@ TIMEFRAMES = {
 timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=5)
 timeframe_config = TIMEFRAMES[timeframe_name]
 
-# Auto-refresh
-auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False)
+# Show timeframe only if not analyzing chart image
+if asset_type != "📸 Analyze Chart Image":
+    # Auto-refresh
+    auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False)
+else:
+    auto_refresh = False
 
 # AI Model Selection
 st.sidebar.markdown("### 🤖 AI Configuration")
@@ -428,6 +463,44 @@ def fetch_market_data(symbol, timeframe_config, asset_type):
         
         return df, source
     
+    elif asset_type == "💱 Forex" or asset_type == "🔍 Custom Search":
+        # Try Twelve Data for Forex and custom symbols
+        st.info("🔄 Fetching from Twelve Data API...")
+        
+        # Check if API key exists
+        api_key = None
+        try:
+            api_key = st.secrets.get("TWELVE_DATA_API_KEY")
+        except:
+            pass
+        
+        if api_key:
+            interval_map = {
+                "minute": "1min",
+                "hour": "1h",
+                "day": "1day"
+            }
+            interval = interval_map.get(timeframe_config["unit"], "1h")
+            df, source = get_twelve_data_commodities(symbol, interval, timeframe_config["limit"])
+            
+            if df is not None:
+                return df, source
+            else:
+                st.warning("⚠️ Twelve Data couldn't fetch this symbol")
+        else:
+            st.error("❌ Twelve Data API key required for Forex and custom symbols")
+            st.info("📝 Add your API key to Settings → Secrets: TWELVE_DATA_API_KEY = 'your_key'")
+        
+        # Try CryptoCompare as fallback for custom crypto symbols
+        if asset_type == "🔍 Custom Search":
+            st.info("🔄 Trying CryptoCompare for custom symbol...")
+            cc_limit = min(timeframe_config["limit"], 2000)
+            df, source = get_cryptocompare_data(symbol, cc_limit, timeframe_config["unit"])
+            if df is not None:
+                return df, source
+        
+        return None, None
+    
     else:  # Precious Metals
         # Try Twelve Data first (Better quality with API key!)
         st.info("🔄 Fetching from Twelve Data API (Primary)...")
@@ -716,10 +789,144 @@ if st.sidebar.button("🔄 Refresh Now", type="primary"):
     st.cache_data.clear()
     st.rerun()
 
-# Live Data
-st.markdown("### 📡 Live Market Data")
+# CHART IMAGE ANALYSIS MODE
+if asset_type == "📸 Analyze Chart Image":
+    st.markdown("### 📸 AI Chart Image Analysis")
+    st.markdown("Upload a trading chart image and get AI-powered technical analysis!")
+    
+    uploaded_file = st.file_uploader(
+        "Upload Chart Image (PNG, JPG, JPEG)",
+        type=["png", "jpg", "jpeg"],
+        help="Upload a screenshot of your trading chart"
+    )
+    
+    if uploaded_file is not None:
+        # Display the uploaded image
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.image(uploaded_file, caption="Uploaded Chart", use_container_width=True)
+        
+        with col2:
+            st.info("🤖 **AI Analysis in Progress...**")
+            
+            # Convert image to base64
+            import base64
+            from io import BytesIO
+            
+            bytes_data = uploaded_file.getvalue()
+            base64_image = base64.b64encode(bytes_data).decode('utf-8')
+            
+            # Determine image type
+            img_type = uploaded_file.type.split('/')[-1]
+            if img_type == 'jpg':
+                img_type = 'jpeg'
+            
+            # Prepare the prompt for Claude API
+            analysis_prompt = """Analyze this trading chart image and provide:
 
-col1, col2, col3 = st.columns(3)
+1. **Trend Analysis**: Current trend (bullish/bearish/sideways)
+2. **Support & Resistance**: Key levels
+3. **Technical Patterns**: Any chart patterns visible (head & shoulders, triangles, etc.)
+4. **Indicators**: Visible indicators and their signals (RSI, MACD, Moving Averages, etc.)
+5. **Trading Signal**: STRONG BUY / BUY / NEUTRAL / SELL / STRONG SELL
+6. **Entry Point**: Suggested entry price (if visible)
+7. **Stop Loss**: Recommended stop loss level
+8. **Take Profit**: Target price levels
+9. **Risk Assessment**: Low/Medium/High risk
+10. **Confidence Level**: Your confidence in this analysis (%)
+
+Be specific, professional, and actionable. Focus on what you can clearly see in the chart."""
+
+            try:
+                # Call Claude API for image analysis
+                response = requests.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": 2000,
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": f"image/{img_type}",
+                                        "data": base64_image
+                                    }
+                                },
+                                {
+                                    "type": "text",
+                                    "text": analysis_prompt
+                                }
+                            ]
+                        }]
+                    },
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    analysis = result['content'][0]['text']
+                    
+                    st.success("✅ **AI Analysis Complete!**")
+                    st.markdown("---")
+                    st.markdown("### 🤖 Claude AI Analysis Results:")
+                    st.markdown(analysis)
+                    
+                    # Extract signal if possible
+                    if "STRONG BUY" in analysis.upper():
+                        st.success("## 🟢 SIGNAL: STRONG BUY")
+                    elif "STRONG SELL" in analysis.upper():
+                        st.error("## 🔴 SIGNAL: STRONG SELL")
+                    elif "BUY" in analysis.upper():
+                        st.success("## 🟢 SIGNAL: BUY")
+                    elif "SELL" in analysis.upper():
+                        st.error("## 🔴 SIGNAL: SELL")
+                    else:
+                        st.warning("## 🟡 SIGNAL: NEUTRAL")
+                        
+                else:
+                    st.error(f"❌ API Error: {response.status_code}")
+                    st.write(response.text)
+                    
+            except Exception as e:
+                st.error(f"❌ Analysis Error: {str(e)}")
+                st.info("💡 Make sure the image is clear and shows technical indicators.")
+    
+    else:
+        st.info("""
+        📸 **How to use Chart Image Analysis:**
+        
+        1. Take a screenshot of your trading chart
+        2. Include visible indicators (RSI, MACD, Moving Averages)
+        3. Upload the image above
+        4. Get AI-powered analysis and trading signals!
+        
+        **Best Results:**
+        - Clear, high-resolution images
+        - Include timeframe information
+        - Show multiple indicators
+        - Include price levels and volume
+        """)
+    
+    st.markdown("---")
+    st.warning("""
+    **⚠️ Important Notes:**
+    - AI analysis is based on visual pattern recognition
+    - Not financial advice - always do your own research
+    - Best used as a second opinion on your analysis
+    - Accuracy depends on image quality and visible information
+    """)
+
+# NORMAL DATA ANALYSIS MODE
+elif symbol is not None:
+    # Live Data
+    st.markdown("### 📡 Live Market Data")
+    
+    col1, col2, col3 = st.columns(3)
 
 # Fetch live data
 with st.spinner(f"🔄 Fetching live data for {pair_display}..."):
@@ -1010,6 +1217,33 @@ else:
         - Try a different timeframe
         - Check back in a few minutes
         """)
+    elif asset_type == "💱 Forex":
+        st.info("""
+        💡 **For Forex Analysis:**
+        
+        **Requires:** Twelve Data API key
+        - Get FREE key: https://twelvedata.com/
+        - Add to Settings → Secrets
+        - Format: `TWELVE_DATA_API_KEY = "your_key"`
+        
+        **Supported Pairs:**
+        - Major: EUR/USD, GBP/USD, USD/JPY, etc.
+        - Crosses: EUR/GBP, GBP/JPY, etc.
+        - All standard forex pairs
+        """)
+    elif asset_type == "🔍 Custom Search":
+        st.info("""
+        💡 **Custom Symbol Search:**
+        
+        **Searches:**
+        1. Twelve Data API (Forex, Stocks, Crypto, Commodities)
+        2. CryptoCompare (Cryptocurrencies)
+        
+        **Tips:**
+        - Use standard symbols (BTC, AAPL, EUR/USD)
+        - Check symbol format for each exchange
+        - Try different variations if it fails
+        """)
     else:
         st.info("""
         💡 **Crypto Data Sources:**
@@ -1033,8 +1267,8 @@ else:
     
     st.info("💡 **Tip:** Try selecting '1 Hour' or '6 Hours' timeframe - shorter timeframes usually work better.")
 
-# Auto-refresh
-if auto_refresh:
+# Auto-refresh (only for normal data mode)
+if auto_refresh and asset_type != "📸 Analyze Chart Image":
     time.sleep(60)
     st.rerun()
 
@@ -1045,6 +1279,8 @@ st.markdown(f"""
     <p><b>📡 Data Sources:</b></p>
     <p>Crypto: OKX API (Primary) → Binance (Backup) → CryptoCompare (Fallback)</p>
     <p>Precious Metals: Twelve Data API (Primary) → Yahoo Finance (Free Backup)</p>
+    <p>Forex: Twelve Data API</p>
+    <p>Chart Analysis: Claude AI (Vision)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
     <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
 </div>
