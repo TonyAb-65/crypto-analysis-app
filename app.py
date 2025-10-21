@@ -79,7 +79,7 @@ TIMEFRAMES = {
     "90 Days": {"limit": 90, "unit": "day", "binance": "1d", "okx": "1D"}
 }
 
-timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=2)
+timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=5)
 timeframe_config = TIMEFRAMES[timeframe_name]
 
 # Auto-refresh
@@ -326,17 +326,24 @@ def get_yahoo_finance_commodities(symbol, period="1d", interval="1h"):
         })
         
         # Make sure timestamp is datetime
-        if 'timestamp' not in df.columns and 'Date' in df.columns:
-            df = df.rename(columns={'Date': 'timestamp'})
+        if 'timestamp' not in df.columns:
+            if 'Date' in df.columns:
+                df = df.rename(columns={'Date': 'timestamp'})
+            elif 'Datetime' in df.columns:
+                df = df.rename(columns={'Datetime': 'timestamp'})
+        
+        # Ensure volume exists (commodities might not have it)
+        if 'volume' not in df.columns:
+            df['volume'] = 0.0
         
         df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        df = df.dropna()
+        df = df.dropna(subset=['open', 'high', 'low', 'close'])  # Only drop if price data is missing
         
         st.success(f"✅ Yahoo Finance: Loaded {len(df)} data points")
         return df, "Yahoo Finance"
         
     except ImportError:
-        st.error("❌ yfinance library not installed. Installing...")
+        st.error("❌ yfinance library not installed. Add 'yfinance' to requirements.txt")
         return None, None
     except Exception as e:
         st.warning(f"⚠️ Yahoo Finance failed: {str(e)[:100]}")
@@ -370,15 +377,23 @@ def get_twelve_data_commodities(symbol, interval="1h", outputsize=100):
         data = response.json()
         
         if 'values' not in data:
-            st.error(f"❌ Twelve Data Error: {data.get('message', 'Unknown error')}")
+            error_msg = data.get('message', data.get('status', 'Unknown error'))
+            st.error(f"❌ Twelve Data Error: {error_msg}")
             return None, None
         
         df = pd.DataFrame(data['values'])
         df['datetime'] = pd.to_datetime(df['datetime'])
         df = df.rename(columns={'datetime': 'timestamp'})
         
-        for col in ['open', 'high', 'low', 'close', 'volume']:
+        for col in ['open', 'high', 'low', 'close']:
             df[col] = df[col].astype(float)
+        
+        # Handle volume - might not exist for commodities
+        if 'volume' in df.columns:
+            df['volume'] = df['volume'].astype(float)
+        else:
+            # Create placeholder volume for commodities (they don't have volume)
+            df['volume'] = 0.0
         
         df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
         df = df.sort_values('timestamp').reset_index(drop=True)
