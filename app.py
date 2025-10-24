@@ -131,7 +131,7 @@ if asset_type != "📸 Analyze Chart Image":
     st.sidebar.markdown("### 📊 Technical Indicators")
     use_sma = st.sidebar.checkbox("SMA (20, 50)", value=True)
     use_ema = st.sidebar.checkbox("EMA (20, 50)", value=True)
-    use_rsi = st.sidebar.checkbox("RSI (14)", value=True)
+    use_rsi = st.sidebar.checkbox("RSI (12, 16, 24)", value=True)
     use_macd = st.sidebar.checkbox("MACD", value=True)
     use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
 else:
@@ -786,7 +786,10 @@ elif symbol is not None:
             df['ema_20'] = calculate_ema(df, 20)
             df['ema_50'] = calculate_ema(df, 50)
         if use_rsi:
-            df['rsi'] = calculate_rsi(df)
+            df['rsi_12'] = calculate_rsi(df, 12)
+            df['rsi_16'] = calculate_rsi(df, 16)
+            df['rsi_24'] = calculate_rsi(df, 24)
+            df['rsi'] = df['rsi_16']  # Keep for backward compatibility
         if use_macd:
             df['macd'], df['macd_signal'], df['macd_hist'] = calculate_macd(df)
         if use_bb:
@@ -929,7 +932,9 @@ elif symbol is not None:
         fig.add_trace(go.Bar(x=df['timestamp'], y=df['volume'], marker_color=colors, showlegend=False), row=2, col=1)
         
         if use_rsi:
-            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi'], name='RSI', line=dict(color='purple')), row=3, col=1)
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi_12'], name='RSI-12', line=dict(color='blue', width=2)), row=3, col=1)
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi_16'], name='RSI-16', line=dict(color='purple', width=2)), row=3, col=1)
+            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi_24'], name='RSI-24', line=dict(color='orange', width=2)), row=3, col=1)
             fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
             fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
         
