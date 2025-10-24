@@ -103,7 +103,9 @@ else:  # Chart Image Analysis
 TIMEFRAMES = {
     "1 Minute": {"limit": 60, "unit": "minute", "binance": "1m", "okx": "1m"},
     "5 Minutes": {"limit": 60, "unit": "minute", "binance": "5m", "okx": "5m"},
+    "10 Minutes": {"limit": 60, "unit": "minute", "binance": "5m", "okx": "5m"},
     "15 Minutes": {"limit": 96, "unit": "minute", "binance": "15m", "okx": "15m"},
+    "30 Minutes": {"limit": 96, "unit": "minute", "binance": "30m", "okx": "30m"},
     "1 Hour": {"limit": 60, "unit": "minute", "binance": "1m", "okx": "1m"},
     "6 Hours": {"limit": 72, "unit": "minute", "binance": "5m", "okx": "5m"},
     "24 Hours": {"limit": 96, "unit": "hour", "binance": "15m", "okx": "15m"},
