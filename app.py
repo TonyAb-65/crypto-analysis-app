@@ -99,7 +99,7 @@ else:  # Chart Image Analysis
     pair_display = "Chart Analysis"
     symbol = None
 
-# Timeframe selection
+# Timeframe selection - UPDATED WITH NEW TIMEFRAMES
 TIMEFRAMES = {
     "1 Minute": {"limit": 60, "unit": "minute", "binance": "1m", "okx": "1m"},
     "5 Minutes": {"limit": 60, "unit": "minute", "binance": "5m", "okx": "5m"},
@@ -773,12 +773,6 @@ else:
                 signal_text = "🔴 STRONG SELL"
                 signal_color = "error"
             
-            # Display the formatted price properly
-            if current_price >= 1000:
-                display_price = f"${current_price:,.0f}"
-            else:
-                display_price = f"${current_price:,.2f}"
-            
             st.markdown(f"""
             **📊 Technical Analysis Summary:**
             - **Current Signal:** {signal_text}
@@ -879,11 +873,10 @@ else:
         fig.update_layout(height=1000, showlegend=True, xaxis_rangeslider_visible=False, hovermode='x unified')
         st.plotly_chart(fig, use_container_width=True)
         
-        # IMPROVED Entry/Exit Section
+        # IMPROVED Entry/Exit Section - FIXED THE BUG HERE
         st.markdown("### 💰 Trading Setup & Recommendations")
         
         is_buy_setup = signal_strength >= 0
-        current_price = display_price
         
         if 'bb_lower' in df.columns and not pd.isna(df['bb_lower'].iloc[-1]):
             support_bb = df['bb_lower'].iloc[-1]
@@ -912,7 +905,8 @@ else:
             with col1:
                 st.markdown("#### 📈 Buy Strategy")
                 
-                entry_price = current_price
+                # FIXED: Use numeric value instead of formatted string
+                entry_price = current_price  # This is already numeric
                 tp1 = entry_price * 1.02
                 tp2 = entry_price * 1.035
                 tp3 = entry_price * 1.05
@@ -960,7 +954,8 @@ else:
             with col1:
                 st.markdown("#### 📉 Sell Strategy")
                 
-                entry_price = current_price
+                # FIXED: Use numeric value instead of formatted string
+                entry_price = current_price  # This is already numeric
                 tp1 = entry_price * 0.98
                 tp2 = entry_price * 0.965
                 tp3 = entry_price * 0.95
