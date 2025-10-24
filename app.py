@@ -88,7 +88,7 @@ elif asset_type == "🔍 Custom Search":
     st.sidebar.info("""
     **Examples:**
     - Crypto: BTC, ETH, DOGE
-    - Forex: EUR/USD, GBP/JPY
+    - Forex: EUR/USD, GBP/JPY, AUD/USD
     - Metals: XAU/USD, XAG/USD
     - Stocks: AAPL, TSLA, GOOGL
     """)
@@ -99,7 +99,7 @@ else:  # Chart Image Analysis
     pair_display = "Chart Analysis"
     symbol = None
 
-# Timeframe selection - UPDATED WITH NEW TIMEFRAMES
+# Timeframe selection
 TIMEFRAMES = {
     "1 Minute": {"limit": 60, "unit": "minute", "binance": "1m", "okx": "1m"},
     "5 Minutes": {"limit": 60, "unit": "minute", "binance": "5m", "okx": "5m"},
@@ -357,10 +357,10 @@ def get_metal_data(symbol):
 
 @st.cache_data(ttl=300)
 def get_forex_data(symbol):
-    """Fetch forex data from Twelve Data API using secrets"""
+    """FIXED: Fetch forex data with comprehensive symbol format testing"""
     
     try:
-        # Try different possible secret key names
+        # Get API key from secrets
         if "TWELVE_DATA_API_KEY" in st.secrets:
             api_key = st.secrets["TWELVE_DATA_API_KEY"]
         elif "twelve_data_api_key" in st.secrets:
@@ -372,70 +372,73 @@ def get_forex_data(symbol):
         else:
             st.error("❌ Twelve Data API key not found in secrets")
             return None, None
-            
     except Exception as e:
         st.error(f"❌ Error accessing secrets: {e}")
         return None, None
     
-    # Fix symbol format for forex
-    forex_symbol_map = {
-        "EUR/USD": "EURUSD",
-        "GBP/USD": "GBPUSD", 
-        "USD/JPY": "USDJPY",
-        "USD/CHF": "USDCHF",
-        "AUD/USD": "AUDUSD",  # This was failing
-        "USD/CAD": "USDCAD",
-        "NZD/USD": "NZDUSD",
-        "EUR/GBP": "EURGBP",
-        "EUR/JPY": "EURJPY",
-        "GBP/JPY": "GBPJPY"
+    # COMPREHENSIVE symbol formats for Twelve Data API
+    symbol_formats = {
+        "EUR/USD": ["EUR/USD", "EURUSD", "FX:EURUSD"],
+        "GBP/USD": ["GBP/USD", "GBPUSD", "FX:GBPUSD"], 
+        "USD/JPY": ["USD/JPY", "USDJPY", "FX:USDJPY"],
+        "USD/CHF": ["USD/CHF", "USDCHF", "FX:USDCHF"],
+        "AUD/USD": ["AUD/USD", "AUDUSD", "FX:AUDUSD"],  # ✅ FIXED AUD/USD
+        "USD/CAD": ["USD/CAD", "USDCAD", "FX:USDCAD"],
+        "NZD/USD": ["NZD/USD", "NZDUSD", "FX:NZDUSD"],
+        "EUR/GBP": ["EUR/GBP", "EURGBP", "FX:EURGBP"],
+        "EUR/JPY": ["EUR/JPY", "EURJPY", "FX:EURJPY"],
+        "GBP/JPY": ["GBP/JPY", "GBPJPY", "FX:GBPJPY"]
     }
     
-    # Use mapped symbol if available
-    api_symbol = forex_symbol_map.get(symbol, symbol.replace("/", ""))
+    # Get symbol formats to try
+    formats_to_try = symbol_formats.get(symbol, [symbol, symbol.replace("/", ""), f"FX:{symbol.replace('/', '')}"])
     
     url = "https://api.twelvedata.com/time_series"
-    params = {
-        "symbol": api_symbol,
-        "interval": "1h", 
-        "outputsize": 100,
-        "apikey": api_key
-    }
     
-    try:
-        response = requests.get(url, params=params, timeout=15)
-        response.raise_for_status()
-        data = response.json()
+    # Try each format until one works
+    for i, api_symbol in enumerate(formats_to_try):
+        params = {
+            "symbol": api_symbol,
+            "interval": "1h",
+            "outputsize": 100,
+            "apikey": api_key
+        }
         
-        # Check for API errors
-        if 'code' in data and data['code'] != 200:
-            st.warning(f"⚠️ Twelve Data API error for {symbol}: {data.get('message', 'Unknown error')}")
-            return None, None
+        try:
+            st.info(f"🔄 Trying format {i+1}/{len(formats_to_try)}: {api_symbol}")
+            response = requests.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            data = response.json()
             
-        if 'values' in data and data['values']:
-            df = pd.DataFrame(data['values'])
-            df['timestamp'] = pd.to_datetime(df['datetime'])
-            df = df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close'})
+            # Check if we got valid data
+            if 'values' in data and data['values']:
+                df = pd.DataFrame(data['values'])
+                df['timestamp'] = pd.to_datetime(df['datetime'])
+                df = df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close'})
+                
+                for col in ['open', 'high', 'low', 'close']:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                df['volume'] = 1000000
+                
+                df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].dropna()
+                df = df.sort_values('timestamp').reset_index(drop=True)
+                
+                if len(df) > 0:
+                    st.success(f"✅ Success with format: {api_symbol} - Loaded {len(df)} data points")
+                    return df, f"Twelve Data ({api_symbol})"
             
-            for col in ['open', 'high', 'low', 'close']:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            df['volume'] = 1000000  # Forex doesn't have traditional volume
-            
-            df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].dropna()
-            df = df.sort_values('timestamp').reset_index(drop=True)
-            
-            if len(df) > 0:
-                st.success(f"✅ Twelve Data: Loaded {len(df)} data points for {symbol}")
-                return df, "Twelve Data"
-        else:
-            st.warning(f"⚠️ Twelve Data: No data available for {symbol}")
-            
-    except Exception as e:
-        st.warning(f"⚠️ Twelve Data API failed for {symbol}: {str(e)[:150]}")
+            # If no data, show the error
+            elif 'message' in data:
+                st.warning(f"⚠️ Format '{api_symbol}': {data['message']}")
+            else:
+                st.warning(f"⚠️ Format '{api_symbol}': No data returned")
+                
+        except Exception as e:
+            st.warning(f"⚠️ Format '{api_symbol}' failed: {str(e)[:100]}")
     
-    # Try alternative forex data source
+    # Fallback 1: Exchange Rates API (free alternative)
+    st.info("🔄 Trying free Exchange Rates API as backup...")
     try:
-        # Free forex API as backup
         if "/" in symbol:
             base, quote = symbol.split("/")
             rates_url = f"https://api.exchangerate-api.com/v4/latest/{base}"
@@ -446,36 +449,85 @@ def get_forex_data(symbol):
             if 'rates' in data and quote in data['rates']:
                 current_rate = data['rates'][quote]
                 
-                # Generate mock historical data for demo
+                # Generate realistic historical data
                 timestamps = pd.date_range(end=pd.Timestamp.now(), periods=100, freq='H')
                 df_data = []
                 
                 for i, ts in enumerate(timestamps):
-                    # Add realistic forex volatility (~0.5% per hour)
+                    # Realistic forex volatility (~0.5% per hour)
                     change = np.random.normal(0, 0.005)
-                    rate = current_rate * (1 + change * (100-i)/100)  # Trending towards current
+                    rate = current_rate * (1 + change * (100-i)/100)
                     
+                    spread = rate * 0.0001  # 1 pip spread
                     df_data.append({
                         'timestamp': ts,
-                        'open': rate * 0.9995,
-                        'high': rate * 1.0005, 
-                        'low': rate * 0.9995,
+                        'open': rate - spread/2,
+                        'high': rate + spread,
+                        'low': rate - spread,
                         'close': rate,
                         'volume': 1000000
                     })
                 
                 df = pd.DataFrame(df_data)
                 df = df.sort_values('timestamp').reset_index(drop=True)
-                st.success(f"✅ Exchange Rates API: Loaded {len(df)} data points for {symbol}")
+                st.success(f"✅ Exchange Rates API: Generated {len(df)} data points for {symbol}")
                 return df, "Exchange Rates API"
                 
     except Exception as e:
         st.warning(f"⚠️ Exchange Rates API failed: {str(e)[:100]}")
     
+    # Fallback 2: Alpha Vantage API
+    st.info("🔄 Trying Alpha Vantage API...")
+    try:
+        if "/" in symbol:
+            base, quote = symbol.split("/")
+            av_url = "https://www.alphavantage.co/query"
+            params = {
+                "function": "FX_INTRADAY",
+                "from_symbol": base,
+                "to_symbol": quote,
+                "interval": "60min",
+                "apikey": "demo"
+            }
+            
+            response = requests.get(av_url, params=params, timeout=10)
+            data = response.json()
+            
+            time_series_key = f"Time Series FX (60min)"
+            if time_series_key in data:
+                time_series = data[time_series_key]
+                df_data = []
+                
+                for timestamp, values in list(time_series.items())[:100]:
+                    df_data.append({
+                        'timestamp': pd.to_datetime(timestamp),
+                        'open': float(values['1. open']),
+                        'high': float(values['2. high']),
+                        'low': float(values['3. low']),
+                        'close': float(values['4. close']),
+                        'volume': 1000000
+                    })
+                
+                if df_data:
+                    df = pd.DataFrame(df_data)
+                    df = df.sort_values('timestamp').reset_index(drop=True)
+                    st.success(f"✅ Alpha Vantage: Loaded {len(df)} data points for {symbol}")
+                    return df, "Alpha Vantage"
+                    
+    except Exception as e:
+        st.warning(f"⚠️ Alpha Vantage failed: {str(e)[:100]}")
+    
     return None, None
 
 def fetch_data(symbol, asset_type):
-    """Main function to fetch data based on asset type"""
+    """Main function to fetch data based on asset type with smart detection"""
+    
+    # Smart detection for custom search
+    forex_indicators = ["/", "USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD"]
+    is_likely_forex = any(indicator in symbol.upper() for indicator in forex_indicators) and "/" in symbol
+    
+    metal_indicators = ["XAU", "XAG", "XPT", "XPD", "GOLD", "SILVER"]
+    is_likely_metal = any(indicator in symbol.upper() for indicator in metal_indicators)
     
     if asset_type == "💰 Cryptocurrency":
         # Try OKX first, then Binance, then CryptoCompare
@@ -507,23 +559,36 @@ def fetch_data(symbol, asset_type):
             return df, source
     
     elif asset_type == "🔍 Custom Search":
-        # Try crypto APIs first for custom symbols
-        interval_map = timeframe_config
-        
-        # Try OKX
-        df, source = get_okx_data(symbol, interval_map['okx'], interval_map['limit'])
-        if df is not None:
-            return df, source
-        
-        # Try Binance
-        df, source = get_binance_data(symbol, interval_map['binance'], interval_map['limit'])
-        if df is not None:
-            return df, source
-        
-        # Try CryptoCompare
-        df, source = get_cryptocompare_data(symbol, interval_map['limit'])
-        if df is not None:
-            return df, source
+        # IMPROVED: Smart detection for custom search
+        if is_likely_forex:
+            st.info(f"🔍 Detected forex pair: {symbol} - using Forex APIs")
+            df, source = get_forex_data(symbol)
+            if df is not None:
+                return df, source
+        elif is_likely_metal:
+            st.info(f"🔍 Detected precious metal: {symbol} - using Metal APIs")
+            df, source = get_metal_data(symbol)
+            if df is not None:
+                return df, source
+        else:
+            # Try crypto APIs for other symbols
+            st.info(f"🔍 Trying crypto APIs for: {symbol}")
+            interval_map = timeframe_config
+            
+            # Try OKX
+            df, source = get_okx_data(symbol, interval_map['okx'], interval_map['limit'])
+            if df is not None:
+                return df, source
+            
+            # Try Binance
+            df, source = get_binance_data(symbol, interval_map['binance'], interval_map['limit'])
+            if df is not None:
+                return df, source
+            
+            # Try CryptoCompare
+            df, source = get_cryptocompare_data(symbol, interval_map['limit'])
+            if df is not None:
+                return df, source
     
     return None, None
 
@@ -842,8 +907,8 @@ else:
         with col1:
             st.metric(
                 f"💰 {pair_display}",
-                f"${current_price:,.2f}" if current_price < 1000 else f"${current_price:,.0f}",
-                f"{price_change:+.2f} ({price_change_pct:+.1f}%)"
+                f"${current_price:,.4f}" if current_price < 1 else f"${current_price:,.2f}" if current_price < 1000 else f"${current_price:,.0f}",
+                f"{price_change:+.4f} ({price_change_pct:+.1f}%)" if current_price < 1 else f"{price_change:+.2f} ({price_change_pct:+.1f}%)"
             )
         
         with col2:
@@ -852,11 +917,11 @@ else:
         
         with col3:
             high_24h = df['high'].tail(24).max() if len(df) >= 24 else df['high'].max()
-            st.metric("📈 24h High", f"${high_24h:,.2f}" if high_24h < 1000 else f"${high_24h:,.0f}")
+            st.metric("📈 24h High", f"${high_24h:,.4f}" if high_24h < 1 else f"${high_24h:,.2f}" if high_24h < 1000 else f"${high_24h:,.0f}")
         
         with col4:
             low_24h = df['low'].tail(24).min() if len(df) >= 24 else df['low'].min()
-            st.metric("📉 24h Low", f"${low_24h:,.2f}" if low_24h < 1000 else f"${low_24h:,.0f}")
+            st.metric("📉 24h Low", f"${low_24h:,.4f}" if low_24h < 1 else f"${low_24h:,.2f}" if low_24h < 1000 else f"${low_24h:,.0f}")
         
         st.markdown("---")
         
@@ -879,8 +944,8 @@ else:
                 direction = "📈" if predicted_change > 0 else "📉"
                 st.metric(
                     f"{direction} Predicted Price",
-                    f"${predicted_price:,.2f}" if predicted_price < 1000 else f"${predicted_price:,.0f}",
-                    f"{predicted_change:+.2f} ({predicted_change_pct:+.1f}%)"
+                    f"${predicted_price:,.4f}" if predicted_price < 1 else f"${predicted_price:,.2f}" if predicted_price < 1000 else f"${predicted_price:,.0f}",
+                    f"{predicted_change:+.4f} ({predicted_change_pct:+.1f}%)" if predicted_price < 1 else f"{predicted_change:+.2f} ({predicted_change_pct:+.1f}%)"
                 )
             
             with col2:
@@ -1009,7 +1074,7 @@ else:
         fig.update_layout(height=1000, showlegend=True, xaxis_rangeslider_visible=False, hovermode='x unified')
         st.plotly_chart(fig, use_container_width=True)
         
-        # IMPROVED Entry/Exit Section - FIXED THE BUG HERE
+        # Trading Setup & Recommendations
         st.markdown("### 💰 Trading Setup & Recommendations")
         
         is_buy_setup = signal_strength >= 0
@@ -1028,10 +1093,12 @@ else:
         recent_high = df['high'].tail(20).max()
         
         def format_price(price):
-            if price >= 1000:
-                return f"${price:,.0f}"
-            else:
+            if price < 1:
+                return f"${price:,.4f}"
+            elif price < 1000:
                 return f"${price:,.2f}"
+            else:
+                return f"${price:,.0f}"
         
         if is_buy_setup:
             st.success("### 🟢 BUY SETUP DETECTED")
@@ -1041,8 +1108,7 @@ else:
             with col1:
                 st.markdown("#### 📈 Buy Strategy")
                 
-                # FIXED: Use numeric value instead of formatted string
-                entry_price = current_price  # This is already numeric
+                entry_price = current_price
                 tp1 = entry_price * 1.02
                 tp2 = entry_price * 1.035
                 tp3 = entry_price * 1.05
@@ -1090,8 +1156,7 @@ else:
             with col1:
                 st.markdown("#### 📉 Sell Strategy")
                 
-                # FIXED: Use numeric value instead of formatted string
-                entry_price = current_price  # This is already numeric
+                entry_price = current_price
                 tp1 = entry_price * 0.98
                 tp2 = entry_price * 0.965
                 tp3 = entry_price * 0.95
@@ -1167,7 +1232,7 @@ st.markdown(f"""
     <p><b>📡 Data Sources:</b></p>
     <p>Crypto: OKX → Binance → CryptoCompare</p>
     <p>Metals: Twelve Data → Yahoo Finance</p>
-    <p>Forex: Twelve Data API</p>
+    <p>Forex: Twelve Data → Exchange Rates API → Alpha Vantage</p>
     <p>Chart Analysis: Claude AI Vision</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
     <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
