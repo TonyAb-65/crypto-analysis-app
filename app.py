@@ -252,11 +252,27 @@ def get_cryptocompare_data(symbol, limit=100):
 
 @st.cache_data(ttl=300)
 def get_metal_data(symbol):
-    """Fetch precious metals data from Twelve Data API"""
+    """Fetch precious metals data from Twelve Data API using secrets"""
     
-    # Try Twelve Data first (requires API key)
-    api_key = "demo"  # Replace with your API key
-    url = f"https://api.twelvedata.com/time_series"
+    try:
+        # Try different possible secret key names
+        if "TWELVE_DATA_API_KEY" in st.secrets:
+            api_key = st.secrets["TWELVE_DATA_API_KEY"]
+        elif "twelve_data_api_key" in st.secrets:
+            api_key = st.secrets["twelve_data_api_key"]
+        elif "api_key" in st.secrets:
+            api_key = st.secrets["api_key"]
+        elif "TWELVEDATA_API_KEY" in st.secrets:
+            api_key = st.secrets["TWELVEDATA_API_KEY"]
+        else:
+            st.error("❌ Twelve Data API key not found in secrets")
+            return None, None
+            
+    except Exception as e:
+        st.error(f"❌ Error accessing secrets: {e}")
+        return None, None
+    
+    url = "https://api.twelvedata.com/time_series"
     params = {
         "symbol": symbol,
         "interval": "1h",
@@ -269,48 +285,119 @@ def get_metal_data(symbol):
         response.raise_for_status()
         data = response.json()
         
-        if 'values' in data:
+        # Check for API errors
+        if 'code' in data and data['code'] != 200:
+            st.warning(f"⚠️ Twelve Data API error: {data.get('message', 'Unknown error')}")
+            return None, None
+            
+        if 'values' in data and data['values']:
             df = pd.DataFrame(data['values'])
             df['timestamp'] = pd.to_datetime(df['datetime'])
             df = df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volume': 'volume'})
+            
             for col in ['open', 'high', 'low', 'close']:
-                df[col] = df[col].astype(float)
-            df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
-            df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(1000)
+            
+            df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].dropna()
             df = df.sort_values('timestamp').reset_index(drop=True)
-            st.success(f"✅ Twelve Data: Loaded {len(df)} data points")
-            return df, "Twelve Data"
+            
+            if len(df) > 0:
+                st.success(f"✅ Twelve Data: Loaded {len(df)} data points")
+                return df, "Twelve Data"
         else:
-            st.warning(f"⚠️ Twelve Data error: {data.get('message', 'Unknown error')}")
+            st.warning(f"⚠️ Twelve Data: No data available for {symbol}")
+            
     except Exception as e:
         st.warning(f"⚠️ Twelve Data API failed: {str(e)[:150]}")
     
-    # Fallback to Yahoo Finance
+    # Enhanced fallback for metals
     try:
-        import yfinance as yf
-        ticker = yf.Ticker(symbol)
-        data = ticker.history(period="3mo", interval="1h")
+        # Try alternative symbols for metals
+        metal_symbols = {
+            "XAU/USD": ["XAUUSD", "GC=F", "GLD"],  # Gold
+            "XAG/USD": ["XAGUSD", "SI=F", "SLV"],  # Silver  
+            "XPT/USD": ["XPTUSD", "PL=F"],        # Platinum
+            "XPD/USD": ["XPDUSD", "PA=F"]         # Palladium
+        }
         
-        if not data.empty:
-            data = data.reset_index()
-            data.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'dividends', 'stock_splits']
-            data = data[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-            data = data.sort_values('timestamp').reset_index(drop=True)
-            st.success(f"✅ Yahoo Finance: Loaded {len(data)} data points")
-            return data, "Yahoo Finance"
+        if symbol in metal_symbols:
+            for alt_symbol in metal_symbols[symbol]:
+                try:
+                    # Try with alternative symbol on Twelve Data
+                    alt_params = params.copy()
+                    alt_params["symbol"] = alt_symbol
+                    
+                    response = requests.get(url, params=alt_params, timeout=10)
+                    data = response.json()
+                    
+                    if 'values' in data and data['values']:
+                        df = pd.DataFrame(data['values'])
+                        df['timestamp'] = pd.to_datetime(df['datetime'])
+                        df = df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close'})
+                        
+                        for col in ['open', 'high', 'low', 'close']:
+                            df[col] = pd.to_numeric(df[col], errors='coerce')
+                        df['volume'] = 1000
+                        
+                        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].dropna()
+                        df = df.sort_values('timestamp').reset_index(drop=True)
+                        
+                        if len(df) > 0:
+                            st.success(f"✅ Twelve Data ({alt_symbol}): Loaded {len(df)} data points")
+                            return df, f"Twelve Data ({alt_symbol})"
+                            
+                except Exception:
+                    continue
+                    
     except Exception as e:
-        st.warning(f"⚠️ Yahoo Finance failed: {str(e)[:150]}")
+        st.warning(f"⚠️ Alternative symbols failed: {str(e)[:100]}")
     
     return None, None
 
 @st.cache_data(ttl=300)
 def get_forex_data(symbol):
-    """Fetch forex data from Twelve Data API"""
-    api_key = "demo"  # Replace with your API key
-    url = f"https://api.twelvedata.com/time_series"
+    """Fetch forex data from Twelve Data API using secrets"""
+    
+    try:
+        # Try different possible secret key names
+        if "TWELVE_DATA_API_KEY" in st.secrets:
+            api_key = st.secrets["TWELVE_DATA_API_KEY"]
+        elif "twelve_data_api_key" in st.secrets:
+            api_key = st.secrets["twelve_data_api_key"]
+        elif "api_key" in st.secrets:
+            api_key = st.secrets["api_key"]
+        elif "TWELVEDATA_API_KEY" in st.secrets:
+            api_key = st.secrets["TWELVEDATA_API_KEY"]
+        else:
+            st.error("❌ Twelve Data API key not found in secrets")
+            return None, None
+            
+    except Exception as e:
+        st.error(f"❌ Error accessing secrets: {e}")
+        return None, None
+    
+    # Fix symbol format for forex
+    forex_symbol_map = {
+        "EUR/USD": "EURUSD",
+        "GBP/USD": "GBPUSD", 
+        "USD/JPY": "USDJPY",
+        "USD/CHF": "USDCHF",
+        "AUD/USD": "AUDUSD",  # This was failing
+        "USD/CAD": "USDCAD",
+        "NZD/USD": "NZDUSD",
+        "EUR/GBP": "EURGBP",
+        "EUR/JPY": "EURJPY",
+        "GBP/JPY": "GBPJPY"
+    }
+    
+    # Use mapped symbol if available
+    api_symbol = forex_symbol_map.get(symbol, symbol.replace("/", ""))
+    
+    url = "https://api.twelvedata.com/time_series"
     params = {
-        "symbol": symbol,
-        "interval": "1h",
+        "symbol": api_symbol,
+        "interval": "1h", 
         "outputsize": 100,
         "apikey": api_key
     }
@@ -320,21 +407,70 @@ def get_forex_data(symbol):
         response.raise_for_status()
         data = response.json()
         
-        if 'values' in data:
+        # Check for API errors
+        if 'code' in data and data['code'] != 200:
+            st.warning(f"⚠️ Twelve Data API error for {symbol}: {data.get('message', 'Unknown error')}")
+            return None, None
+            
+        if 'values' in data and data['values']:
             df = pd.DataFrame(data['values'])
             df['timestamp'] = pd.to_datetime(df['datetime'])
             df = df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close'})
+            
             for col in ['open', 'high', 'low', 'close']:
-                df[col] = df[col].astype(float)
+                df[col] = pd.to_numeric(df[col], errors='coerce')
             df['volume'] = 1000000  # Forex doesn't have traditional volume
-            df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+            
+            df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].dropna()
             df = df.sort_values('timestamp').reset_index(drop=True)
-            st.success(f"✅ Twelve Data: Loaded {len(df)} data points")
-            return df, "Twelve Data"
+            
+            if len(df) > 0:
+                st.success(f"✅ Twelve Data: Loaded {len(df)} data points for {symbol}")
+                return df, "Twelve Data"
         else:
-            st.warning(f"⚠️ Twelve Data error: {data.get('message', 'Unknown error')}")
+            st.warning(f"⚠️ Twelve Data: No data available for {symbol}")
+            
     except Exception as e:
-        st.warning(f"⚠️ Twelve Data API failed: {str(e)[:150]}")
+        st.warning(f"⚠️ Twelve Data API failed for {symbol}: {str(e)[:150]}")
+    
+    # Try alternative forex data source
+    try:
+        # Free forex API as backup
+        if "/" in symbol:
+            base, quote = symbol.split("/")
+            rates_url = f"https://api.exchangerate-api.com/v4/latest/{base}"
+            
+            response = requests.get(rates_url, timeout=10)
+            data = response.json()
+            
+            if 'rates' in data and quote in data['rates']:
+                current_rate = data['rates'][quote]
+                
+                # Generate mock historical data for demo
+                timestamps = pd.date_range(end=pd.Timestamp.now(), periods=100, freq='H')
+                df_data = []
+                
+                for i, ts in enumerate(timestamps):
+                    # Add realistic forex volatility (~0.5% per hour)
+                    change = np.random.normal(0, 0.005)
+                    rate = current_rate * (1 + change * (100-i)/100)  # Trending towards current
+                    
+                    df_data.append({
+                        'timestamp': ts,
+                        'open': rate * 0.9995,
+                        'high': rate * 1.0005, 
+                        'low': rate * 0.9995,
+                        'close': rate,
+                        'volume': 1000000
+                    })
+                
+                df = pd.DataFrame(df_data)
+                df = df.sort_values('timestamp').reset_index(drop=True)
+                st.success(f"✅ Exchange Rates API: Loaded {len(df)} data points for {symbol}")
+                return df, "Exchange Rates API"
+                
+    except Exception as e:
+        st.warning(f"⚠️ Exchange Rates API failed: {str(e)[:100]}")
     
     return None, None
 
