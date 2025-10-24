@@ -15,7 +15,6 @@ import base64
 from io import BytesIO
 from scipy import stats
 from scipy.signal import find_peaks
-import talib
 warnings.filterwarnings('ignore')
 
 # Page configuration
