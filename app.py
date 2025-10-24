@@ -99,10 +99,10 @@ else:
 
 # Timeframe selection
 TIMEFRAMES = {
-    "1 Hour": {"limit": 168, "unit": "hour", "binance": "1h", "okx": "1H"},
-    "4 Hours": {"limit": 168, "unit": "hour", "binance": "4h", "okx": "4H"},
-    "1 Day": {"limit": 365, "unit": "day", "binance": "1d", "okx": "1D"},
-    "1 Week": {"limit": 104, "unit": "week", "binance": "1w", "okx": "1W"}
+    "15 Minutes": {"limit": 500, "unit": "minute", "binance": "15m", "okx": "15m"},
+    "1 Hour": {"limit": 500, "unit": "hour", "binance": "1h", "okx": "1H"},
+    "4 Hours": {"limit": 500, "unit": "hour", "binance": "4h", "okx": "4H"},
+    "1 Day": {"limit": 500, "unit": "day", "binance": "1d", "okx": "1D"}
 }
 
 if asset_type != "📸 Analyze Chart Image":
@@ -137,6 +137,8 @@ else:
 def calculate_advanced_features(df):
     """Calculate 50+ advanced technical features"""
     
+    data_length = len(df)
+    
     # Price-based features
     df['returns'] = df['close'].pct_change()
     df['log_returns'] = np.log(df['close'] / df['close'].shift(1))
@@ -151,13 +153,22 @@ def calculate_advanced_features(df):
     df['roc_10'] = ((df['close'] - df['close'].shift(10)) / df['close'].shift(10)) * 100
     df['roc_20'] = ((df['close'] - df['close'].shift(20)) / df['close'].shift(20)) * 100
     
-    # Moving averages
+    # Moving averages (adaptive to data length)
     df['sma_5'] = df['close'].rolling(5).mean()
     df['sma_10'] = df['close'].rolling(10).mean()
     df['sma_20'] = df['close'].rolling(20).mean()
     df['sma_50'] = df['close'].rolling(50).mean()
-    df['sma_100'] = df['close'].rolling(100).mean()
-    df['sma_200'] = df['close'].rolling(200).mean()
+    
+    # Only calculate longer MAs if we have enough data
+    if data_length >= 120:
+        df['sma_100'] = df['close'].rolling(100).mean()
+    else:
+        df['sma_100'] = df['sma_50']  # Use sma_50 as fallback
+    
+    if data_length >= 220:
+        df['sma_200'] = df['close'].rolling(200).mean()
+    else:
+        df['sma_200'] = df['sma_100']  # Use sma_100 as fallback
     
     df['ema_5'] = df['close'].ewm(span=5, adjust=False).mean()
     df['ema_10'] = df['close'].ewm(span=10, adjust=False).mean()
@@ -233,8 +244,9 @@ def calculate_advanced_features(df):
     df['lower_shadow'] = np.minimum(df['close'], df['open']) - df['low']
     df['body_ratio'] = df['body'] / (df['high'] - df['low'] + 0.0001)
     
-    # Trend strength
-    df['adx'] = calculate_adx(df, 14)
+    # Trend strength (adaptive period)
+    adx_period = min(14, data_length // 10) if data_length >= 30 else 5
+    df['adx'] = calculate_adx(df, adx_period)
     
     # Statistical features
     df['skew_10'] = df['returns'].rolling(10).skew()
@@ -249,7 +261,8 @@ def calculate_advanced_features(df):
         df['day_of_month'] = pd.to_datetime(df['timestamp']).dt.day
     
     # Market regime (simplified)
-    df['regime'] = detect_market_regime(df)
+    regime_window = min(50, data_length // 4) if data_length >= 60 else 10
+    df['regime'] = detect_market_regime(df, regime_window)
     
     return df
 
@@ -380,7 +393,7 @@ class AdvancedEnsemble:
 
 # ==================== VALIDATION & BACKTESTING ====================
 
-def walk_forward_validation(df, model, lookback=100, test_size=20):
+def walk_forward_validation(df, model, lookback=None, test_size=None):
     """Walk-forward validation for time series"""
     
     feature_cols = [col for col in df.columns if col not in 
@@ -394,20 +407,36 @@ def walk_forward_validation(df, model, lookback=100, test_size=20):
     # Remove NaN values
     df_clean = df[feature_cols + ['target']].dropna()
     
-    if len(df_clean) < lookback + test_size:
+    # Adaptive parameters based on data length
+    data_length = len(df_clean)
+    if lookback is None:
+        lookback = min(100, data_length // 3)  # Use 1/3 of data for training
+    if test_size is None:
+        test_size = min(20, data_length // 10)  # Use 1/10 for each test
+    
+    if data_length < lookback + test_size:
+        st.warning(f"⚠️ Limited data ({data_length} points). Using simplified validation.")
+        lookback = max(50, data_length // 2)
+        test_size = max(10, data_length // 5)
+    
+    if data_length < lookback + test_size:
         return None, None, None, None
     
     # Walk forward through time
-    for i in range(lookback, len(df_clean) - test_size, test_size):
+    num_walks = max(1, (data_length - lookback) // test_size)
+    for i in range(lookback, min(lookback + num_walks * test_size, data_length - test_size), test_size):
         # Training set: past data
-        train_data = df_clean.iloc[i-lookback:i]
+        train_data = df_clean.iloc[max(0, i-lookback):i]
         X_train = train_data[feature_cols]
         y_train = train_data['target']
         
         # Test set: future data
-        test_data = df_clean.iloc[i:i+test_size]
+        test_data = df_clean.iloc[i:min(i+test_size, data_length)]
         X_test = test_data[feature_cols]
         y_test = test_data['target']
+        
+        if len(X_train) < 30 or len(X_test) < 5:  # Skip if too small
+            continue
         
         # Train model
         model.fit(X_train, y_train)
@@ -589,7 +618,8 @@ if asset_type != "📸 Analyze Chart Image" and symbol:
         )
     
     if df is not None and len(df) > 100:
-        st.success(f"✅ Loaded {len(df)} data points from {data_source}")
+        st.success(f"✅ Loaded {len(df)} raw data points from {data_source}")
+        st.info(f"ℹ️ After calculating technical indicators, expect ~{len(df) - 60} usable data points")
         
         # Calculate advanced features
         with st.spinner("🧮 Calculating 50+ advanced features..."):
@@ -626,7 +656,9 @@ if asset_type != "📸 Analyze Chart Image" and symbol:
         # Remove rows with NaN
         df_model = df[feature_cols + ['target', 'timestamp', 'close']].dropna()
         
-        if len(df_model) > 150:
+        if len(df_model) > 100:
+            
+            st.info(f"✅ Using {len(df_model)} data points for modeling (after feature calculation)")
             
             # Initialize model
             model = AdvancedEnsemble()
@@ -893,7 +925,22 @@ if asset_type != "📸 Analyze Chart Image" and symbol:
             st.plotly_chart(fig, use_container_width=True)
             
         else:
-            st.error("❌ Insufficient data for modeling (need at least 150 points)")
+            st.error(f"❌ Insufficient data for modeling")
+            st.warning(f"""
+            **Current data points after feature calculation:** {len(df_model)}
+            **Required:** At least 100 points
+            
+            **Suggestions to fix this:**
+            1. ✅ **Try a different timeframe** (15 Minutes or 1 Hour recommended)
+            2. ✅ **Try a different asset** (BTC or ETH have most data)
+            3. ✅ **Wait a few minutes** (APIs might be rate-limited)
+            4. ℹ️ The platform fetches {len(df)} raw data points, but after calculating technical indicators (which need historical data), {len(df_model)} usable points remain
+            
+            **Most common causes:**
+            - New/low-volume cryptocurrencies (not enough history)
+            - API rate limits (try again in 1-2 minutes)
+            - Some forex/metals pairs have limited free data
+            """)
         
         st.markdown("---")
         st.warning("""
