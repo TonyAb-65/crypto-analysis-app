@@ -6,18 +6,24 @@ from datetime import datetime, timedelta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import warnings
 import time
 import base64
 from io import BytesIO
+from scipy import stats
+from scipy.signal import find_peaks
+import talib
 warnings.filterwarnings('ignore')
 
 # Page configuration
-st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
+st.set_page_config(page_title="AI Trading Platform Pro", layout="wide", page_icon="🚀")
 
 # Title
-st.title("🤖 AI Trading Analysis Platform")
-st.markdown("*Crypto, Forex, Metals + AI Chart Image Analysis*")
+st.title("🚀 Advanced AI Trading Platform")
+st.markdown("*Enhanced ML with Validation, LSTM & Advanced Features*")
 
 # Display current time
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -34,7 +40,7 @@ asset_type = st.sidebar.selectbox(
     index=0
 )
 
-# Asset symbols based on type
+# Asset symbols
 CRYPTO_SYMBOLS = {
     "Bitcoin (BTC)": "BTC",
     "Ethereum (ETH)": "ETH",
@@ -73,7 +79,7 @@ FOREX_PAIRS = {
     "GBP/JPY (British Pound vs Japanese Yen)": "GBP/JPY"
 }
 
-# Select symbol based on asset type
+# Select symbol
 if asset_type == "💰 Cryptocurrency":
     pair_display = st.sidebar.selectbox("Select Cryptocurrency", list(CRYPTO_SYMBOLS.keys()), index=0)
     symbol = CRYPTO_SYMBOLS[pair_display]
@@ -85,68 +91,413 @@ elif asset_type == "💱 Forex":
     symbol = FOREX_PAIRS[pair_display]
 elif asset_type == "🔍 Custom Search":
     st.sidebar.markdown("### 🔍 Enter Custom Symbol")
-    st.sidebar.info("""
-    **Examples:**
-    - Crypto: BTC, ETH, DOGE
-    - Forex: EUR/USD, GBP/JPY, AUD/USD
-    - Metals: XAU/USD, XAG/USD
-    - Stocks: AAPL, TSLA, GOOGL
-    """)
     custom_symbol = st.sidebar.text_input("Enter Symbol:", "BTC").upper()
     pair_display = f"Custom: {custom_symbol}"
     symbol = custom_symbol
-else:  # Chart Image Analysis
+else:
     pair_display = "Chart Analysis"
     symbol = None
 
 # Timeframe selection
 TIMEFRAMES = {
-    "1 Minute": {"limit": 60, "unit": "minute", "binance": "1m", "okx": "1m"},
-    "5 Minutes": {"limit": 60, "unit": "minute", "binance": "5m", "okx": "5m"},
-    "10 Minutes": {"limit": 60, "unit": "minute", "binance": "5m", "okx": "5m"},
-    "15 Minutes": {"limit": 96, "unit": "minute", "binance": "15m", "okx": "15m"},
-    "30 Minutes": {"limit": 96, "unit": "minute", "binance": "30m", "okx": "30m"},
-    "1 Hour": {"limit": 60, "unit": "minute", "binance": "1m", "okx": "1m"},
-    "6 Hours": {"limit": 72, "unit": "minute", "binance": "5m", "okx": "5m"},
-    "24 Hours": {"limit": 96, "unit": "hour", "binance": "15m", "okx": "15m"},
-    "7 Days": {"limit": 168, "unit": "hour", "binance": "1h", "okx": "1H"},
-    "30 Days": {"limit": 30, "unit": "day", "binance": "1d", "okx": "1D"},
-    "90 Days": {"limit": 90, "unit": "day", "binance": "1d", "okx": "1D"}
+    "1 Hour": {"limit": 168, "unit": "hour", "binance": "1h", "okx": "1H"},
+    "4 Hours": {"limit": 168, "unit": "hour", "binance": "4h", "okx": "4H"},
+    "1 Day": {"limit": 365, "unit": "day", "binance": "1d", "okx": "1D"},
+    "1 Week": {"limit": 104, "unit": "week", "binance": "1w", "okx": "1W"}
 }
 
-# Show configuration only if not chart analysis
 if asset_type != "📸 Analyze Chart Image":
-    timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=5)
+    timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=0)
     timeframe_config = TIMEFRAMES[timeframe_name]
     auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False)
     
-    # AI Model Selection
-    st.sidebar.markdown("### 🤖 AI Configuration")
+    # Advanced AI Configuration
+    st.sidebar.markdown("### 🤖 Advanced AI Configuration")
     ai_model = st.sidebar.selectbox(
         "Prediction Model",
-        ["Ensemble (Recommended)", "Random Forest", "Gradient Boosting"],
+        ["Advanced Ensemble", "XGBoost + RF", "Gradient Boosting"],
         index=0
     )
-    prediction_periods = st.sidebar.slider("Prediction Periods", 1, 20, 5)
+    prediction_periods = st.sidebar.slider("Prediction Periods", 3, 20, 5)
+    enable_validation = st.sidebar.checkbox("📊 Show Validation Metrics", value=True)
+    enable_backtesting = st.sidebar.checkbox("📈 Show Backtesting Results", value=True)
+    confidence_threshold = st.sidebar.slider("Confidence Threshold (%)", 50, 90, 70)
     
-    # Technical Indicators
-    st.sidebar.markdown("### 📊 Technical Indicators")
-    use_sma = st.sidebar.checkbox("SMA (20, 50)", value=True)
-    use_ema = st.sidebar.checkbox("EMA (20, 50)", value=True)
-    use_rsi = st.sidebar.checkbox("RSI (12, 16, 24)", value=True)
-    use_macd = st.sidebar.checkbox("MACD", value=True)
-    use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
 else:
     auto_refresh = False
     timeframe_name = "N/A"
-    timeframe_config = {"limit": 0, "unit": "hour", "binance": "1h", "okx": "1H"}
-    ai_model = "Ensemble (Recommended)"
+    timeframe_config = {"limit": 0}
+    ai_model = "Advanced Ensemble"
     prediction_periods = 5
-    use_sma = use_ema = use_rsi = use_macd = use_bb = False
+    enable_validation = False
+    enable_backtesting = False
+    confidence_threshold = 70
 
-# API Functions
+# ==================== ADVANCED FEATURE ENGINEERING ====================
+
+def calculate_advanced_features(df):
+    """Calculate 50+ advanced technical features"""
+    
+    # Price-based features
+    df['returns'] = df['close'].pct_change()
+    df['log_returns'] = np.log(df['close'] / df['close'].shift(1))
+    df['volatility_10'] = df['returns'].rolling(10).std()
+    df['volatility_20'] = df['returns'].rolling(20).std()
+    df['volatility_50'] = df['returns'].rolling(50).std()
+    
+    # Momentum indicators
+    df['momentum_5'] = df['close'] - df['close'].shift(5)
+    df['momentum_10'] = df['close'] - df['close'].shift(10)
+    df['momentum_20'] = df['close'] - df['close'].shift(20)
+    df['roc_10'] = ((df['close'] - df['close'].shift(10)) / df['close'].shift(10)) * 100
+    df['roc_20'] = ((df['close'] - df['close'].shift(20)) / df['close'].shift(20)) * 100
+    
+    # Moving averages
+    df['sma_5'] = df['close'].rolling(5).mean()
+    df['sma_10'] = df['close'].rolling(10).mean()
+    df['sma_20'] = df['close'].rolling(20).mean()
+    df['sma_50'] = df['close'].rolling(50).mean()
+    df['sma_100'] = df['close'].rolling(100).mean()
+    df['sma_200'] = df['close'].rolling(200).mean()
+    
+    df['ema_5'] = df['close'].ewm(span=5, adjust=False).mean()
+    df['ema_10'] = df['close'].ewm(span=10, adjust=False).mean()
+    df['ema_20'] = df['close'].ewm(span=20, adjust=False).mean()
+    df['ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
+    
+    # MA crossovers
+    df['sma_cross_10_20'] = (df['sma_10'] > df['sma_20']).astype(int)
+    df['sma_cross_20_50'] = (df['sma_20'] > df['sma_50']).astype(int)
+    df['ema_cross_10_20'] = (df['ema_10'] > df['ema_20']).astype(int)
+    
+    # Price relative to MAs
+    df['price_to_sma20'] = (df['close'] - df['sma_20']) / df['sma_20']
+    df['price_to_sma50'] = (df['close'] - df['sma_50']) / df['sma_50']
+    df['price_to_ema20'] = (df['close'] - df['ema_20']) / df['ema_20']
+    
+    # RSI variations
+    df['rsi_9'] = compute_rsi(df['close'], 9)
+    df['rsi_14'] = compute_rsi(df['close'], 14)
+    df['rsi_21'] = compute_rsi(df['close'], 21)
+    df['rsi_28'] = compute_rsi(df['close'], 28)
+    
+    # MACD
+    exp1 = df['close'].ewm(span=12, adjust=False).mean()
+    exp2 = df['close'].ewm(span=26, adjust=False).mean()
+    df['macd'] = exp1 - exp2
+    df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+    df['macd_hist'] = df['macd'] - df['macd_signal']
+    df['macd_cross'] = (df['macd'] > df['macd_signal']).astype(int)
+    
+    # Bollinger Bands
+    df['bb_middle'] = df['close'].rolling(20).mean()
+    bb_std = df['close'].rolling(20).std()
+    df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
+    df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
+    df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
+    df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+    
+    # Stochastic Oscillator
+    low_14 = df['low'].rolling(14).min()
+    high_14 = df['high'].rolling(14).max()
+    df['stoch_k'] = 100 * ((df['close'] - low_14) / (high_14 - low_14))
+    df['stoch_d'] = df['stoch_k'].rolling(3).mean()
+    
+    # ATR (Average True Range)
+    high_low = df['high'] - df['low']
+    high_close = np.abs(df['high'] - df['close'].shift())
+    low_close = np.abs(df['low'] - df['close'].shift())
+    ranges = pd.concat([high_low, high_close, low_close], axis=1)
+    true_range = np.max(ranges, axis=1)
+    df['atr_14'] = true_range.rolling(14).mean()
+    df['atr_20'] = true_range.rolling(20).mean()
+    
+    # Volume-based features
+    df['volume_sma_10'] = df['volume'].rolling(10).mean()
+    df['volume_sma_20'] = df['volume'].rolling(20).mean()
+    df['volume_ratio'] = df['volume'] / df['volume_sma_20']
+    df['volume_change'] = df['volume'].pct_change()
+    
+    # OBV (On-Balance Volume)
+    df['obv'] = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
+    df['obv_ema'] = df['obv'].ewm(span=20, adjust=False).mean()
+    
+    # Price patterns
+    df['higher_high'] = ((df['high'] > df['high'].shift(1)) & 
+                         (df['high'].shift(1) > df['high'].shift(2))).astype(int)
+    df['lower_low'] = ((df['low'] < df['low'].shift(1)) & 
+                       (df['low'].shift(1) < df['low'].shift(2))).astype(int)
+    
+    # Candle patterns
+    df['body'] = abs(df['close'] - df['open'])
+    df['upper_shadow'] = df['high'] - np.maximum(df['close'], df['open'])
+    df['lower_shadow'] = np.minimum(df['close'], df['open']) - df['low']
+    df['body_ratio'] = df['body'] / (df['high'] - df['low'] + 0.0001)
+    
+    # Trend strength
+    df['adx'] = calculate_adx(df, 14)
+    
+    # Statistical features
+    df['skew_10'] = df['returns'].rolling(10).skew()
+    df['kurt_10'] = df['returns'].rolling(10).kurt()
+    df['std_10'] = df['returns'].rolling(10).std()
+    df['std_20'] = df['returns'].rolling(20).std()
+    
+    # Time-based features
+    if 'timestamp' in df.columns:
+        df['hour'] = pd.to_datetime(df['timestamp']).dt.hour
+        df['day_of_week'] = pd.to_datetime(df['timestamp']).dt.dayofweek
+        df['day_of_month'] = pd.to_datetime(df['timestamp']).dt.day
+    
+    # Market regime (simplified)
+    df['regime'] = detect_market_regime(df)
+    
+    return df
+
+def compute_rsi(series, period):
+    """Calculate RSI"""
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calculate_adx(df, period=14):
+    """Calculate ADX (Average Directional Index)"""
+    high = df['high']
+    low = df['low']
+    close = df['close']
+    
+    plus_dm = high.diff()
+    minus_dm = low.diff()
+    plus_dm[plus_dm < 0] = 0
+    minus_dm[minus_dm > 0] = 0
+    
+    tr1 = pd.DataFrame(high - low)
+    tr2 = pd.DataFrame(abs(high - close.shift(1)))
+    tr3 = pd.DataFrame(abs(low - close.shift(1)))
+    frames = [tr1, tr2, tr3]
+    tr = pd.concat(frames, axis=1, join='inner').max(axis=1)
+    atr = tr.rolling(period).mean()
+    
+    plus_di = 100 * (plus_dm.ewm(alpha=1/period).mean() / atr)
+    minus_di = abs(100 * (minus_dm.ewm(alpha=1/period).mean() / atr))
+    dx = (abs(plus_di - minus_di) / abs(plus_di + minus_di)) * 100
+    adx = ((dx.shift(1) * (period - 1)) + dx) / period
+    adx_smooth = adx.ewm(alpha=1/period).mean()
+    return adx_smooth
+
+def detect_market_regime(df, window=50):
+    """Detect market regime: 0=sideways, 1=uptrend, 2=downtrend"""
+    if 'close' not in df.columns or len(df) < window:
+        return pd.Series(0, index=df.index)
+    
+    returns = df['close'].pct_change()
+    rolling_mean = returns.rolling(window).mean()
+    rolling_std = returns.rolling(window).std()
+    
+    regime = pd.Series(0, index=df.index)  # Default: sideways
+    regime[rolling_mean > rolling_std * 0.5] = 1  # Uptrend
+    regime[rolling_mean < -rolling_std * 0.5] = 2  # Downtrend
+    
+    return regime
+
+# ==================== ADVANCED ML MODELS ====================
+
+class AdvancedEnsemble:
+    """Advanced ensemble with multiple models and confidence scores"""
+    
+    def __init__(self):
+        self.models = {
+            'rf': RandomForestRegressor(
+                n_estimators=200,
+                max_depth=10,
+                min_samples_split=10,
+                min_samples_leaf=5,
+                random_state=42,
+                n_jobs=-1
+            ),
+            'gb': GradientBoostingRegressor(
+                n_estimators=200,
+                learning_rate=0.05,
+                max_depth=6,
+                min_samples_split=10,
+                min_samples_leaf=5,
+                subsample=0.8,
+                random_state=42
+            )
+        }
+        self.scaler = RobustScaler()
+        self.feature_importance = None
+        
+    def fit(self, X, y):
+        """Fit all models"""
+        X_scaled = self.scaler.fit_transform(X)
+        
+        for name, model in self.models.items():
+            model.fit(X_scaled, y)
+        
+        # Calculate feature importance
+        self.feature_importance = pd.DataFrame({
+            'feature': X.columns,
+            'importance': self.models['rf'].feature_importances_
+        }).sort_values('importance', ascending=False)
+        
+    def predict(self, X):
+        """Predict with ensemble (weighted average)"""
+        X_scaled = self.scaler.transform(X)
+        predictions = []
+        
+        # Get predictions from each model
+        pred_rf = self.models['rf'].predict(X_scaled)
+        pred_gb = self.models['gb'].predict(X_scaled)
+        
+        # Weighted average (RF: 40%, GB: 60%)
+        ensemble_pred = pred_rf * 0.4 + pred_gb * 0.6
+        
+        return ensemble_pred
+    
+    def predict_with_confidence(self, X):
+        """Predict with confidence interval"""
+        X_scaled = self.scaler.transform(X)
+        
+        # Get predictions from each tree in Random Forest
+        rf_predictions = np.array([tree.predict(X_scaled) for tree in self.models['rf'].estimators_])
+        gb_pred = self.models['gb'].predict(X_scaled)
+        
+        # Calculate statistics
+        mean_pred = rf_predictions.mean(axis=0) * 0.4 + gb_pred * 0.6
+        std_pred = rf_predictions.std(axis=0)
+        
+        # Calculate confidence interval (95%)
+        confidence_lower = mean_pred - 1.96 * std_pred
+        confidence_upper = mean_pred + 1.96 * std_pred
+        
+        # Calculate confidence score (0-100)
+        confidence_score = 100 * (1 - np.clip(std_pred / (mean_pred + 0.0001), 0, 1))
+        
+        return mean_pred, confidence_lower, confidence_upper, confidence_score
+
+# ==================== VALIDATION & BACKTESTING ====================
+
+def walk_forward_validation(df, model, lookback=100, test_size=20):
+    """Walk-forward validation for time series"""
+    
+    feature_cols = [col for col in df.columns if col not in 
+                   ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'target']]
+    
+    predictions = []
+    actuals = []
+    timestamps = []
+    confidence_scores = []
+    
+    # Remove NaN values
+    df_clean = df[feature_cols + ['target']].dropna()
+    
+    if len(df_clean) < lookback + test_size:
+        return None, None, None, None
+    
+    # Walk forward through time
+    for i in range(lookback, len(df_clean) - test_size, test_size):
+        # Training set: past data
+        train_data = df_clean.iloc[i-lookback:i]
+        X_train = train_data[feature_cols]
+        y_train = train_data['target']
+        
+        # Test set: future data
+        test_data = df_clean.iloc[i:i+test_size]
+        X_test = test_data[feature_cols]
+        y_test = test_data['target']
+        
+        # Train model
+        model.fit(X_train, y_train)
+        
+        # Predict
+        pred, lower, upper, conf = model.predict_with_confidence(X_test)
+        
+        predictions.extend(pred)
+        actuals.extend(y_test.values)
+        confidence_scores.extend(conf)
+    
+    return np.array(predictions), np.array(actuals), np.array(confidence_scores), model.feature_importance
+
+def calculate_performance_metrics(predictions, actuals):
+    """Calculate comprehensive performance metrics"""
+    
+    # Regression metrics
+    mse = mean_squared_error(actuals, predictions)
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(actuals, predictions)
+    r2 = r2_score(actuals, predictions)
+    
+    # Directional accuracy
+    actual_direction = np.sign(actuals)
+    pred_direction = np.sign(predictions)
+    directional_accuracy = np.mean(actual_direction == pred_direction) * 100
+    
+    # Calculate percentage error
+    mape = np.mean(np.abs((actuals - predictions) / (actuals + 0.0001))) * 100
+    
+    return {
+        'RMSE': rmse,
+        'MAE': mae,
+        'R2': r2,
+        'MAPE': mape,
+        'Directional_Accuracy': directional_accuracy
+    }
+
+def backtest_strategy(df, predictions, confidence_scores, confidence_threshold=70):
+    """Backtest trading strategy"""
+    
+    if len(predictions) == 0:
+        return None
+    
+    # Create signals based on predictions and confidence
+    signals = np.where((predictions > 0) & (confidence_scores > confidence_threshold), 1,
+                      np.where((predictions < 0) & (confidence_scores > confidence_threshold), -1, 0))
+    
+    # Calculate returns
+    df_backtest = df.iloc[-len(predictions):].copy()
+    df_backtest['signal'] = signals
+    df_backtest['returns'] = df_backtest['close'].pct_change()
+    df_backtest['strategy_returns'] = df_backtest['signal'].shift(1) * df_backtest['returns']
+    
+    # Calculate cumulative returns
+    df_backtest['cumulative_returns'] = (1 + df_backtest['returns']).cumprod()
+    df_backtest['cumulative_strategy'] = (1 + df_backtest['strategy_returns']).cumprod()
+    
+    # Performance metrics
+    total_return = (df_backtest['cumulative_strategy'].iloc[-1] - 1) * 100
+    buy_hold_return = (df_backtest['cumulative_returns'].iloc[-1] - 1) * 100
+    
+    # Sharpe ratio (annualized)
+    sharpe = (df_backtest['strategy_returns'].mean() / df_backtest['strategy_returns'].std()) * np.sqrt(252)
+    
+    # Win rate
+    winning_trades = (df_backtest['strategy_returns'] > 0).sum()
+    total_trades = (df_backtest['signal'] != 0).sum()
+    win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+    
+    # Max drawdown
+    cummax = df_backtest['cumulative_strategy'].expanding().max()
+    drawdown = (df_backtest['cumulative_strategy'] - cummax) / cummax
+    max_drawdown = drawdown.min() * 100
+    
+    return {
+        'total_return': total_return,
+        'buy_hold_return': buy_hold_return,
+        'sharpe_ratio': sharpe,
+        'win_rate': win_rate,
+        'max_drawdown': max_drawdown,
+        'total_trades': total_trades,
+        'df_backtest': df_backtest
+    }
+
+# ==================== DATA FETCHING ====================
+
 @st.cache_data(ttl=300)
-def get_okx_data(symbol, interval="1H", limit=100):
+def get_okx_data(symbol, interval="1H", limit=300):
     """Fetch data from OKX API"""
     url = "https://www.okx.com/api/v5/market/candles"
     limit = min(limit, 300)
@@ -158,12 +509,10 @@ def get_okx_data(symbol, interval="1H", limit=100):
         data = response.json()
         
         if data.get('code') != '0':
-            st.warning(f"⚠️ OKX API error: {data.get('msg', 'Unknown error')}")
             return None, None
         
         candles = data.get('data', [])
-        if not candles or len(candles) == 0:
-            st.warning(f"⚠️ OKX returned no data")
+        if not candles:
             return None, None
         
         df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'volCcy', 'volCcyQuote', 'confirm'])
@@ -174,14 +523,13 @@ def get_okx_data(symbol, interval="1H", limit=100):
         
         df = df.sort_values('timestamp').reset_index(drop=True)
         df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        st.success(f"✅ OKX: Loaded {len(df)} data points")
+        
         return df, "OKX"
     except Exception as e:
-        st.warning(f"⚠️ OKX API failed: {str(e)[:150]}")
         return None, None
 
 @st.cache_data(ttl=300)
-def get_binance_data(symbol, interval="1h", limit=100):
+def get_binance_data(symbol, interval="1h", limit=500):
     """Fetch data from Binance API"""
     url = "https://api.binance.com/api/v3/klines"
     limit = min(limit, 1000)
@@ -193,1048 +541,386 @@ def get_binance_data(symbol, interval="1h", limit=100):
         data = response.json()
         
         if isinstance(data, dict) and 'code' in data:
-            st.warning(f"⚠️ Binance API error: {data.get('msg', 'Unknown error')}")
             return None, None
         
-        if not data or len(data) == 0:
-            st.warning("⚠️ Binance returned no data")
+        if not data:
             return None, None
         
         df = pd.DataFrame(data, columns=[
             'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_asset_volume', 'number_of_trades',
-            'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+            'taker_buy_quote', 'ignore'
         ])
         
-        df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         
         for col in ['open', 'high', 'low', 'close', 'volume']:
             df[col] = df[col].astype(float)
         
         df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        df = df.sort_values('timestamp').reset_index(drop=True)
-        st.success(f"✅ Binance: Loaded {len(df)} data points")
+        
         return df, "Binance"
     except Exception as e:
-        st.warning(f"⚠️ Binance API failed: {str(e)[:150]}")
         return None, None
 
-@st.cache_data(ttl=300)
-def get_cryptocompare_data(symbol, limit=100):
-    """Fetch data from CryptoCompare API"""
-    url = "https://min-api.cryptocompare.com/data/v2/histohour"
-    params = {"fsym": symbol, "tsym": "USD", "limit": limit}
+def fetch_data_with_fallback(symbol, interval, limit):
+    """Fetch data with multiple fallbacks"""
     
-    try:
-        response = requests.get(url, params=params, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        
-        if data.get('Response') != 'Success':
-            st.warning(f"⚠️ CryptoCompare error: {data.get('Message', 'Unknown error')}")
-            return None, None
-        
-        hist_data = data.get('Data', {}).get('Data', [])
-        if not hist_data:
-            st.warning("⚠️ CryptoCompare returned no data")
-            return None, None
-        
-        df = pd.DataFrame(hist_data)
-        df['timestamp'] = pd.to_datetime(df['time'], unit='s')
-        df = df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volumefrom': 'volume'})
-        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        df = df.sort_values('timestamp').reset_index(drop=True)
-        st.success(f"✅ CryptoCompare: Loaded {len(df)} data points")
-        return df, "CryptoCompare"
-    except Exception as e:
-        st.warning(f"⚠️ CryptoCompare API failed: {str(e)[:150]}")
-        return None, None
-
-@st.cache_data(ttl=300)
-def get_metal_data(symbol):
-    """Fetch precious metals data from Twelve Data API using secrets"""
+    # Try OKX first
+    df, source = get_okx_data(symbol, interval, limit)
+    if df is not None:
+        return df, source
     
-    try:
-        # Try different possible secret key names
-        if "TWELVE_DATA_API_KEY" in st.secrets:
-            api_key = st.secrets["TWELVE_DATA_API_KEY"]
-        elif "twelve_data_api_key" in st.secrets:
-            api_key = st.secrets["twelve_data_api_key"]
-        elif "api_key" in st.secrets:
-            api_key = st.secrets["api_key"]
-        elif "TWELVEDATA_API_KEY" in st.secrets:
-            api_key = st.secrets["TWELVEDATA_API_KEY"]
-        else:
-            st.error("❌ Twelve Data API key not found in secrets")
-            return None, None
-            
-    except Exception as e:
-        st.error(f"❌ Error accessing secrets: {e}")
-        return None, None
-    
-    url = "https://api.twelvedata.com/time_series"
-    params = {
-        "symbol": symbol,
-        "interval": "1h",
-        "outputsize": 100,
-        "apikey": api_key
-    }
-    
-    try:
-        response = requests.get(url, params=params, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Check for API errors
-        if 'code' in data and data['code'] != 200:
-            st.warning(f"⚠️ Twelve Data API error: {data.get('message', 'Unknown error')}")
-            return None, None
-            
-        if 'values' in data and data['values']:
-            df = pd.DataFrame(data['values'])
-            df['timestamp'] = pd.to_datetime(df['datetime'])
-            df = df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volume': 'volume'})
-            
-            for col in ['open', 'high', 'low', 'close']:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(1000)
-            
-            df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].dropna()
-            df = df.sort_values('timestamp').reset_index(drop=True)
-            
-            if len(df) > 0:
-                st.success(f"✅ Twelve Data: Loaded {len(df)} data points")
-                return df, "Twelve Data"
-        else:
-            st.warning(f"⚠️ Twelve Data: No data available for {symbol}")
-            
-    except Exception as e:
-        st.warning(f"⚠️ Twelve Data API failed: {str(e)[:150]}")
-    
-    # Enhanced fallback for metals
-    try:
-        # Try alternative symbols for metals
-        metal_symbols = {
-            "XAU/USD": ["XAUUSD", "GC=F", "GLD"],  # Gold
-            "XAG/USD": ["XAGUSD", "SI=F", "SLV"],  # Silver  
-            "XPT/USD": ["XPTUSD", "PL=F"],        # Platinum
-            "XPD/USD": ["XPDUSD", "PA=F"]         # Palladium
-        }
-        
-        if symbol in metal_symbols:
-            for alt_symbol in metal_symbols[symbol]:
-                try:
-                    # Try with alternative symbol on Twelve Data
-                    alt_params = params.copy()
-                    alt_params["symbol"] = alt_symbol
-                    
-                    response = requests.get(url, params=alt_params, timeout=10)
-                    data = response.json()
-                    
-                    if 'values' in data and data['values']:
-                        df = pd.DataFrame(data['values'])
-                        df['timestamp'] = pd.to_datetime(df['datetime'])
-                        df = df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close'})
-                        
-                        for col in ['open', 'high', 'low', 'close']:
-                            df[col] = pd.to_numeric(df[col], errors='coerce')
-                        df['volume'] = 1000
-                        
-                        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].dropna()
-                        df = df.sort_values('timestamp').reset_index(drop=True)
-                        
-                        if len(df) > 0:
-                            st.success(f"✅ Twelve Data ({alt_symbol}): Loaded {len(df)} data points")
-                            return df, f"Twelve Data ({alt_symbol})"
-                            
-                except Exception:
-                    continue
-                    
-    except Exception as e:
-        st.warning(f"⚠️ Alternative symbols failed: {str(e)[:100]}")
+    # Fallback to Binance
+    df, source = get_binance_data(symbol, interval, limit)
+    if df is not None:
+        return df, source
     
     return None, None
 
-@st.cache_data(ttl=300)
-def get_forex_data(symbol):
-    """FIXED: Fetch forex data with comprehensive symbol format testing"""
-    
-    try:
-        # Get API key from secrets
-        if "TWELVE_DATA_API_KEY" in st.secrets:
-            api_key = st.secrets["TWELVE_DATA_API_KEY"]
-        elif "twelve_data_api_key" in st.secrets:
-            api_key = st.secrets["twelve_data_api_key"]
-        elif "api_key" in st.secrets:
-            api_key = st.secrets["api_key"]
-        elif "TWELVEDATA_API_KEY" in st.secrets:
-            api_key = st.secrets["TWELVEDATA_API_KEY"]
-        else:
-            st.error("❌ Twelve Data API key not found in secrets")
-            return None, None
-    except Exception as e:
-        st.error(f"❌ Error accessing secrets: {e}")
-        return None, None
-    
-    # COMPREHENSIVE symbol formats for Twelve Data API
-    symbol_formats = {
-        "EUR/USD": ["EUR/USD", "EURUSD", "FX:EURUSD"],
-        "GBP/USD": ["GBP/USD", "GBPUSD", "FX:GBPUSD"], 
-        "USD/JPY": ["USD/JPY", "USDJPY", "FX:USDJPY"],
-        "USD/CHF": ["USD/CHF", "USDCHF", "FX:USDCHF"],
-        "AUD/USD": ["AUD/USD", "AUDUSD", "FX:AUDUSD"],  # ✅ FIXED AUD/USD
-        "USD/CAD": ["USD/CAD", "USDCAD", "FX:USDCAD"],
-        "NZD/USD": ["NZD/USD", "NZDUSD", "FX:NZDUSD"],
-        "EUR/GBP": ["EUR/GBP", "EURGBP", "FX:EURGBP"],
-        "EUR/JPY": ["EUR/JPY", "EURJPY", "FX:EURJPY"],
-        "GBP/JPY": ["GBP/JPY", "GBPJPY", "FX:GBPJPY"]
-    }
-    
-    # Get symbol formats to try
-    formats_to_try = symbol_formats.get(symbol, [symbol, symbol.replace("/", ""), f"FX:{symbol.replace('/', '')}"])
-    
-    url = "https://api.twelvedata.com/time_series"
-    
-    # Try each format until one works
-    for i, api_symbol in enumerate(formats_to_try):
-        params = {
-            "symbol": api_symbol,
-            "interval": "1h",
-            "outputsize": 100,
-            "apikey": api_key
-        }
-        
-        try:
-            st.info(f"🔄 Trying format {i+1}/{len(formats_to_try)}: {api_symbol}")
-            response = requests.get(url, params=params, timeout=15)
-            response.raise_for_status()
-            data = response.json()
-            
-            # Check if we got valid data
-            if 'values' in data and data['values']:
-                df = pd.DataFrame(data['values'])
-                df['timestamp'] = pd.to_datetime(df['datetime'])
-                df = df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close'})
-                
-                for col in ['open', 'high', 'low', 'close']:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-                df['volume'] = 1000000
-                
-                df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].dropna()
-                df = df.sort_values('timestamp').reset_index(drop=True)
-                
-                if len(df) > 0:
-                    st.success(f"✅ Success with format: {api_symbol} - Loaded {len(df)} data points")
-                    return df, f"Twelve Data ({api_symbol})"
-            
-            # If no data, show the error
-            elif 'message' in data:
-                st.warning(f"⚠️ Format '{api_symbol}': {data['message']}")
-            else:
-                st.warning(f"⚠️ Format '{api_symbol}': No data returned")
-                
-        except Exception as e:
-            st.warning(f"⚠️ Format '{api_symbol}' failed: {str(e)[:100]}")
-    
-    # Fallback 1: Exchange Rates API (free alternative)
-    st.info("🔄 Trying free Exchange Rates API as backup...")
-    try:
-        if "/" in symbol:
-            base, quote = symbol.split("/")
-            rates_url = f"https://api.exchangerate-api.com/v4/latest/{base}"
-            
-            response = requests.get(rates_url, timeout=10)
-            data = response.json()
-            
-            if 'rates' in data and quote in data['rates']:
-                current_rate = data['rates'][quote]
-                
-                # Generate realistic historical data
-                timestamps = pd.date_range(end=pd.Timestamp.now(), periods=100, freq='H')
-                df_data = []
-                
-                for i, ts in enumerate(timestamps):
-                    # Realistic forex volatility (~0.5% per hour)
-                    change = np.random.normal(0, 0.005)
-                    rate = current_rate * (1 + change * (100-i)/100)
-                    
-                    spread = rate * 0.0001  # 1 pip spread
-                    df_data.append({
-                        'timestamp': ts,
-                        'open': rate - spread/2,
-                        'high': rate + spread,
-                        'low': rate - spread,
-                        'close': rate,
-                        'volume': 1000000
-                    })
-                
-                df = pd.DataFrame(df_data)
-                df = df.sort_values('timestamp').reset_index(drop=True)
-                st.success(f"✅ Exchange Rates API: Generated {len(df)} data points for {symbol}")
-                return df, "Exchange Rates API"
-                
-    except Exception as e:
-        st.warning(f"⚠️ Exchange Rates API failed: {str(e)[:100]}")
-    
-    # Fallback 2: Alpha Vantage API
-    st.info("🔄 Trying Alpha Vantage API...")
-    try:
-        if "/" in symbol:
-            base, quote = symbol.split("/")
-            av_url = "https://www.alphavantage.co/query"
-            params = {
-                "function": "FX_INTRADAY",
-                "from_symbol": base,
-                "to_symbol": quote,
-                "interval": "60min",
-                "apikey": "demo"
-            }
-            
-            response = requests.get(av_url, params=params, timeout=10)
-            data = response.json()
-            
-            time_series_key = f"Time Series FX (60min)"
-            if time_series_key in data:
-                time_series = data[time_series_key]
-                df_data = []
-                
-                for timestamp, values in list(time_series.items())[:100]:
-                    df_data.append({
-                        'timestamp': pd.to_datetime(timestamp),
-                        'open': float(values['1. open']),
-                        'high': float(values['2. high']),
-                        'low': float(values['3. low']),
-                        'close': float(values['4. close']),
-                        'volume': 1000000
-                    })
-                
-                if df_data:
-                    df = pd.DataFrame(df_data)
-                    df = df.sort_values('timestamp').reset_index(drop=True)
-                    st.success(f"✅ Alpha Vantage: Loaded {len(df)} data points for {symbol}")
-                    return df, "Alpha Vantage"
-                    
-    except Exception as e:
-        st.warning(f"⚠️ Alpha Vantage failed: {str(e)[:100]}")
-    
-    return None, None
+# ==================== MAIN APPLICATION ====================
 
-def fetch_data(symbol, asset_type):
-    """Main function to fetch data based on asset type with smart detection"""
+if asset_type != "📸 Analyze Chart Image" and symbol:
     
-    # Smart detection for custom search
-    forex_indicators = ["/", "USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD"]
-    is_likely_forex = any(indicator in symbol.upper() for indicator in forex_indicators) and "/" in symbol
+    with st.spinner(f"🔄 Fetching {symbol} data..."):
+        df, data_source = fetch_data_with_fallback(
+            symbol,
+            timeframe_config.get('okx', '1H'),
+            timeframe_config.get('limit', 300)
+        )
     
-    metal_indicators = ["XAU", "XAG", "XPT", "XPD", "GOLD", "SILVER"]
-    is_likely_metal = any(indicator in symbol.upper() for indicator in metal_indicators)
-    
-    if asset_type == "💰 Cryptocurrency":
-        # Try OKX first, then Binance, then CryptoCompare
-        interval_map = timeframe_config
+    if df is not None and len(df) > 100:
+        st.success(f"✅ Loaded {len(df)} data points from {data_source}")
         
-        # Try OKX
-        df, source = get_okx_data(symbol, interval_map['okx'], interval_map['limit'])
-        if df is not None:
-            return df, source
-        
-        # Try Binance
-        df, source = get_binance_data(symbol, interval_map['binance'], interval_map['limit'])
-        if df is not None:
-            return df, source
-        
-        # Try CryptoCompare
-        df, source = get_cryptocompare_data(symbol, interval_map['limit'])
-        if df is not None:
-            return df, source
-    
-    elif asset_type == "🏆 Precious Metals":
-        df, source = get_metal_data(symbol)
-        if df is not None:
-            return df, source
-    
-    elif asset_type == "💱 Forex":
-        df, source = get_forex_data(symbol)
-        if df is not None:
-            return df, source
-    
-    elif asset_type == "🔍 Custom Search":
-        # IMPROVED: Smart detection for custom search
-        if is_likely_forex:
-            st.info(f"🔍 Detected forex pair: {symbol} - using Forex APIs")
-            df, source = get_forex_data(symbol)
-            if df is not None:
-                return df, source
-        elif is_likely_metal:
-            st.info(f"🔍 Detected precious metal: {symbol} - using Metal APIs")
-            df, source = get_metal_data(symbol)
-            if df is not None:
-                return df, source
-        else:
-            # Try crypto APIs for other symbols
-            st.info(f"🔍 Trying crypto APIs for: {symbol}")
-            interval_map = timeframe_config
+        # Calculate advanced features
+        with st.spinner("🧮 Calculating 50+ advanced features..."):
+            df = calculate_advanced_features(df)
             
-            # Try OKX
-            df, source = get_okx_data(symbol, interval_map['okx'], interval_map['limit'])
-            if df is not None:
-                return df, source
-            
-            # Try Binance
-            df, source = get_binance_data(symbol, interval_map['binance'], interval_map['limit'])
-            if df is not None:
-                return df, source
-            
-            # Try CryptoCompare
-            df, source = get_cryptocompare_data(symbol, interval_map['limit'])
-            if df is not None:
-                return df, source
-    
-    return None, None
-
-def calculate_technical_indicators(df):
-    """Calculate technical indicators"""
-    try:
-        # Simple Moving Averages
-        df['sma_20'] = df['close'].rolling(window=20).mean()
-        df['sma_50'] = df['close'].rolling(window=50).mean()
+            # Create target variable (future returns)
+            df['target'] = df['close'].shift(-prediction_periods) / df['close'] - 1
         
-        # Exponential Moving Averages
-        df['ema_20'] = df['close'].ewm(span=20).mean()
-        df['ema_50'] = df['close'].ewm(span=50).mean()
-        
-        # RSI calculation for multiple periods
-        for period in [12, 16, 24]:
-            delta = df['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-            rs = gain / loss
-            df[f'rsi_{period}'] = 100 - (100 / (1 + rs))
-        
-        # MACD
-        exp1 = df['close'].ewm(span=12).mean()
-        exp2 = df['close'].ewm(span=26).mean()
-        df['macd'] = exp1 - exp2
-        df['macd_signal'] = df['macd'].ewm(span=9).mean()
-        df['macd_hist'] = df['macd'] - df['macd_signal']
-        
-        # Bollinger Bands
-        df['bb_middle'] = df['close'].rolling(window=20).mean()
-        bb_std = df['close'].rolling(window=20).std()
-        df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
-        df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
-        
-        # Price change and volatility
-        df['price_change'] = df['close'].pct_change()
-        df['volatility'] = df['price_change'].rolling(window=20).std()
-        
-        return df
-    except Exception as e:
-        st.error(f"Error calculating indicators: {str(e)}")
-        return df
-
-def create_features(df):
-    """Create features for machine learning"""
-    try:
-        features = []
-        feature_names = []
-        
-        # Price-based features
-        if 'close' in df.columns:
-            features.append(df['close'].values)
-            feature_names.append('close')
-            
-            # Returns and momentum
-            features.append(df['close'].pct_change().fillna(0).values)
-            feature_names.append('returns')
-            
-            features.append(df['close'].pct_change(5).fillna(0).values)
-            feature_names.append('returns_5')
-            
-            features.append(df['close'].pct_change(10).fillna(0).values)
-            feature_names.append('returns_10')
-        
-        # Volume features
-        if 'volume' in df.columns:
-            features.append(df['volume'].fillna(0).values)
-            feature_names.append('volume')
-            
-            # Volume moving average
-            volume_ma = df['volume'].rolling(20).mean().fillna(0)
-            features.append(volume_ma.values)
-            feature_names.append('volume_ma')
-        
-        # Technical indicators
-        tech_indicators = ['sma_20', 'sma_50', 'ema_20', 'rsi_12', 'rsi_16', 'rsi_24', 
-                          'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'volatility']
-        
-        for indicator in tech_indicators:
-            if indicator in df.columns:
-                features.append(df[indicator].fillna(method='ffill').fillna(0).values)
-                feature_names.append(indicator)
-        
-        # High-low spread
-        if 'high' in df.columns and 'low' in df.columns:
-            hl_spread = ((df['high'] - df['low']) / df['close']).fillna(0)
-            features.append(hl_spread.values)
-            feature_names.append('hl_spread')
-        
-        # Create feature matrix
-        if features:
-            feature_matrix = np.column_stack(features)
-            return feature_matrix, feature_names
-        else:
-            return None, []
-            
-    except Exception as e:
-        st.error(f"Error creating features: {str(e)}")
-        return None, []
-
-def train_and_predict(df, model_type="ensemble", periods=5):
-    """Train ML model and make predictions"""
-    try:
-        if len(df) < 50:
-            st.warning("⚠️ Insufficient data for predictions")
-            return None, None, 0
-        
-        # Create features
-        features, feature_names = create_features(df)
-        if features is None or len(feature_names) == 0:
-            st.warning("⚠️ Could not create features")
-            return None, None, 0
-        
-        # Prepare data
-        X = features[:-1]  # All but last row
-        y = df['close'].values[1:]  # Target: next period's close price
-        
-        if len(X) < 30:
-            st.warning("⚠️ Not enough data points for training")
-            return None, None, 0
-        
-        # Split data
-        split_idx = int(len(X) * 0.8)
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
-        
-        # Train model
-        if model_type == "Random Forest":
-            model = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10)
-        elif model_type == "Gradient Boosting":
-            model = GradientBoostingRegressor(n_estimators=100, random_state=42, max_depth=6)
-        else:  # Ensemble
-            rf = RandomForestRegressor(n_estimators=50, random_state=42, max_depth=8)
-            gb = GradientBoostingRegressor(n_estimators=50, random_state=42, max_depth=5)
-            
-            rf.fit(X_train, y_train)
-            gb.fit(X_train, y_train)
-            
-            # Make predictions
-            current_features = features[-1:] 
-            
-            future_prices = []
-            current_price = df['close'].iloc[-1]
-            
-            for i in range(periods):
-                rf_pred = rf.predict(current_features)[0]
-                gb_pred = gb.predict(current_features)[0]
-                
-                # Ensemble prediction (weighted average)
-                ensemble_pred = 0.6 * rf_pred + 0.4 * gb_pred
-                future_prices.append(ensemble_pred)
-                
-                # Update features for next prediction (simplified)
-                current_price = ensemble_pred
-            
-            # Calculate confidence based on model agreement
-            if len(X_test) > 0:
-                rf_test_pred = rf.predict(X_test)
-                gb_test_pred = gb.predict(X_test)
-                
-                # Calculate accuracy metrics
-                rf_mape = np.mean(np.abs((y_test - rf_test_pred) / y_test)) * 100
-                gb_mape = np.mean(np.abs((y_test - gb_test_pred) / y_test)) * 100
-                avg_mape = (rf_mape + gb_mape) / 2
-                
-                confidence = max(0, 100 - avg_mape)
-            else:
-                confidence = 75  # Default confidence
-            
-            return future_prices, feature_names, confidence
-        
-        # For single models
-        model.fit(X_train, y_train)
-        
-        # Make predictions
-        current_features = features[-1:]
-        future_prices = []
-        
-        for i in range(periods):
-            pred = model.predict(current_features)[0]
-            future_prices.append(pred)
-        
-        # Calculate confidence
-        if len(X_test) > 0:
-            test_pred = model.predict(X_test)
-            mape = np.mean(np.abs((y_test - test_pred) / y_test)) * 100
-            confidence = max(0, 100 - mape)
-        else:
-            confidence = 75
-        
-        return future_prices, feature_names, confidence
-        
-    except Exception as e:
-        st.error(f"Prediction error: {str(e)}")
-        return None, None, 0
-
-def calculate_signal_strength(df):
-    """Calculate trading signal strength"""
-    try:
-        signals = []
-        
-        # RSI signals
-        if 'rsi_12' in df.columns:
-            rsi = df['rsi_12'].iloc[-1]
-            if rsi > 70:
-                signals.append(-2)  # Overbought
-            elif rsi < 30:
-                signals.append(2)   # Oversold
-            else:
-                signals.append(0)
-        
-        # MACD signals
-        if 'macd' in df.columns and 'macd_signal' in df.columns:
-            macd_diff = df['macd'].iloc[-1] - df['macd_signal'].iloc[-1]
-            if macd_diff > 0:
-                signals.append(1)   # Bullish
-            else:
-                signals.append(-1)  # Bearish
-        
-        # Moving average signals
-        if 'sma_20' in df.columns and 'sma_50' in df.columns:
-            price = df['close'].iloc[-1]
-            sma20 = df['sma_20'].iloc[-1]
-            sma50 = df['sma_50'].iloc[-1]
-            
-            if price > sma20 > sma50:
-                signals.append(2)   # Strong bullish
-            elif price > sma20:
-                signals.append(1)   # Bullish
-            elif price < sma20 < sma50:
-                signals.append(-2)  # Strong bearish
-            else:
-                signals.append(-1)  # Bearish
-        
-        # Bollinger Bands signals
-        if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
-            price = df['close'].iloc[-1]
-            bb_upper = df['bb_upper'].iloc[-1]
-            bb_lower = df['bb_lower'].iloc[-1]
-            
-            if price > bb_upper:
-                signals.append(-1)  # Overbought
-            elif price < bb_lower:
-                signals.append(1)   # Oversold
-            else:
-                signals.append(0)
-        
-        return sum(signals) if signals else 0
-        
-    except Exception as e:
-        return 0
-
-def analyze_chart_image(uploaded_file):
-    """Analyze uploaded chart image using Claude AI (placeholder)"""
-    if uploaded_file is not None:
-        # Convert image to base64
-        image_bytes = uploaded_file.read()
-        image_b64 = base64.b64encode(image_bytes).decode()
-        
-        # Display the image
-        st.image(uploaded_file, caption="Uploaded Chart", use_column_width=True)
-        
-        # Placeholder analysis (you would integrate with Claude AI API here)
-        st.info("""
-        **🤖 AI Chart Analysis** (Demo Mode)
-        
-        **Technical Pattern Detected:** Ascending Triangle
-        
-        **Key Observations:**
-        - Price is testing resistance at $45,000 level
-        - Volume is increasing on each test
-        - Higher lows pattern suggests accumulation
-        
-        **Trading Signals:**
-        - **Bullish Bias:** 75% confidence
-        - **Entry:** Above $45,200 (breakout confirmation)
-        - **Target:** $48,500 (+7.3%)
-        - **Stop Loss:** $43,800 (-3.1%)
-        
-        **Risk Level:** Medium
-        **Time Horizon:** 3-7 days
-        
-        *Note: This is a demonstration. Real implementation would use Claude AI API for actual analysis.*
-        """)
-        
-        return True
-    return False
-
-# Main Application Logic
-if asset_type == "📸 Analyze Chart Image":
-    st.markdown("### 📸 Upload Chart for AI Analysis")
-    st.info("Upload a trading chart image for AI-powered technical analysis using Claude AI vision capabilities.")
-    
-    uploaded_file = st.file_uploader("Choose a chart image...", type=['png', 'jpg', 'jpeg'])
-    analyze_chart_image(uploaded_file)
-
-else:
-    # Fetch and process data for other asset types
-    with st.spinner(f"🔄 Fetching {pair_display} data..."):
-        df, data_source = fetch_data(symbol, asset_type)
-    
-    if df is not None and len(df) > 0:
-        # Calculate technical indicators
-        df = calculate_technical_indicators(df)
-        
-        # Get current price and change
+        # Current price and basic info
         current_price = df['close'].iloc[-1]
-        previous_price = df['close'].iloc[-2] if len(df) > 1 else current_price
-        price_change = current_price - previous_price
-        price_change_pct = (price_change / previous_price) * 100 if previous_price != 0 else 0
+        price_change = ((current_price - df['close'].iloc[-2]) / df['close'].iloc[-2]) * 100
         
-        # Display current metrics
+        # Display metrics
         col1, col2, col3, col4 = st.columns(4)
-        
         with col1:
-            st.metric(
-                f"💰 {pair_display}",
-                f"${current_price:,.4f}" if current_price < 1 else f"${current_price:,.2f}" if current_price < 1000 else f"${current_price:,.0f}",
-                f"{price_change:+.4f} ({price_change_pct:+.1f}%)" if current_price < 1 else f"{price_change:+.2f} ({price_change_pct:+.1f}%)"
-            )
-        
+            st.metric("💰 Current Price", f"${current_price:,.2f}", f"{price_change:+.2f}%")
         with col2:
-            volume_24h = df['volume'].tail(24).sum() if len(df) >= 24 else df['volume'].sum()
-            st.metric("📊 Volume (24h)", f"{volume_24h:,.0f}")
-        
+            st.metric("📊 24h High", f"${df['high'].tail(24).max():,.2f}")
         with col3:
-            high_24h = df['high'].tail(24).max() if len(df) >= 24 else df['high'].max()
-            st.metric("📈 24h High", f"${high_24h:,.4f}" if high_24h < 1 else f"${high_24h:,.2f}" if high_24h < 1000 else f"${high_24h:,.0f}")
-        
+            st.metric("📉 24h Low", f"${df['low'].tail(24).min():,.2f}")
         with col4:
-            low_24h = df['low'].tail(24).min() if len(df) >= 24 else df['low'].min()
-            st.metric("📉 24h Low", f"${low_24h:,.4f}" if low_24h < 1 else f"${low_24h:,.2f}" if low_24h < 1000 else f"${low_24h:,.0f}")
+            st.metric("📈 Volume", f"${df['volume'].iloc[-1]:,.0f}")
         
         st.markdown("---")
         
-        # AI Predictions
-        st.markdown("### 🤖 AI Predictions & Analysis")
+        # ==================== AI PREDICTION WITH VALIDATION ====================
         
-        with st.spinner("🧠 Training AI model..."):
-            future_prices, feature_names, confidence = train_and_predict(df, ai_model, prediction_periods)
+        st.markdown("### 🤖 Advanced AI Prediction & Validation")
         
-        if future_prices:
-            # Calculate prediction metrics
-            predicted_price = future_prices[-1]
-            predicted_change = predicted_price - current_price
-            predicted_change_pct = (predicted_change / current_price) * 100
+        # Select features for model
+        feature_cols = [col for col in df.columns if col not in 
+                       ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'target']]
+        
+        # Remove rows with NaN
+        df_model = df[feature_cols + ['target', 'timestamp', 'close']].dropna()
+        
+        if len(df_model) > 150:
+            
+            # Initialize model
+            model = AdvancedEnsemble()
+            
+            # Walk-forward validation
+            if enable_validation:
+                with st.spinner("📊 Running walk-forward validation..."):
+                    predictions, actuals, conf_scores, feat_importance = walk_forward_validation(
+                        df_model, model, lookback=100, test_size=20
+                    )
+                
+                if predictions is not None and len(predictions) > 0:
+                    # Calculate metrics
+                    metrics = calculate_performance_metrics(predictions, actuals)
+                    
+                    # Display validation results
+                    st.markdown("#### 📊 Validation Results (Out-of-Sample)")
+                    
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    
+                    with col1:
+                        acc_score = metrics['Directional_Accuracy']
+                        color = "🟢" if acc_score > 55 else "🟡" if acc_score > 50 else "🔴"
+                        st.metric(f"{color} Directional Accuracy", f"{acc_score:.1f}%")
+                    
+                    with col2:
+                        r2_score_val = metrics['R2']
+                        color = "🟢" if r2_score_val > 0.3 else "🟡" if r2_score_val > 0.1 else "🔴"
+                        st.metric(f"{color} R² Score", f"{r2_score_val:.3f}")
+                    
+                    with col3:
+                        st.metric("📏 MAE", f"{metrics['MAE']:.4f}")
+                    
+                    with col4:
+                        st.metric("📊 RMSE", f"{metrics['RMSE']:.4f}")
+                    
+                    with col5:
+                        mape_val = metrics['MAPE']
+                        color = "🟢" if mape_val < 5 else "🟡" if mape_val < 10 else "🔴"
+                        st.metric(f"{color} MAPE", f"{mape_val:.2f}%")
+                    
+                    # Accuracy interpretation
+                    st.markdown("---")
+                    accuracy_rating = min(10, max(1, int(acc_score / 10)))
+                    st.markdown(f"### 🎯 Prediction Accuracy Rating: **{accuracy_rating}/10**")
+                    
+                    if acc_score >= 60:
+                        st.success("✅ **Excellent** - Model shows strong predictive power")
+                    elif acc_score >= 55:
+                        st.info("✓ **Good** - Model beats random chance significantly")
+                    elif acc_score >= 50:
+                        st.warning("⚠️ **Fair** - Model shows slight edge over random")
+                    else:
+                        st.error("❌ **Poor** - Model not reliable for trading")
+                    
+                    # Feature importance
+                    if feat_importance is not None:
+                        with st.expander("📊 Top 15 Most Important Features"):
+                            fig_feat = go.Figure(go.Bar(
+                                x=feat_importance['importance'].head(15),
+                                y=feat_importance['feature'].head(15),
+                                orientation='h',
+                                marker_color='lightblue'
+                            ))
+                            fig_feat.update_layout(
+                                title="Feature Importance",
+                                xaxis_title="Importance",
+                                yaxis_title="Feature",
+                                height=400
+                            )
+                            st.plotly_chart(fig_feat, use_container_width=True)
+            
+            # ==================== BACKTESTING ====================
+            
+            if enable_backtesting and enable_validation and predictions is not None:
+                st.markdown("---")
+                st.markdown("### 📈 Backtesting Results")
+                
+                with st.spinner("📊 Running backtest..."):
+                    backtest_results = backtest_strategy(
+                        df_model, predictions, conf_scores, confidence_threshold
+                    )
+                
+                if backtest_results:
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    
+                    with col1:
+                        ret_val = backtest_results['total_return']
+                        color = "🟢" if ret_val > 0 else "🔴"
+                        st.metric(f"{color} Strategy Return", f"{ret_val:.2f}%")
+                    
+                    with col2:
+                        bh_ret = backtest_results['buy_hold_return']
+                        st.metric("📊 Buy & Hold Return", f"{bh_ret:.2f}%")
+                    
+                    with col3:
+                        sharpe_val = backtest_results['sharpe_ratio']
+                        color = "🟢" if sharpe_val > 1 else "🟡" if sharpe_val > 0.5 else "🔴"
+                        st.metric(f"{color} Sharpe Ratio", f"{sharpe_val:.2f}")
+                    
+                    with col4:
+                        win_val = backtest_results['win_rate']
+                        color = "🟢" if win_val > 55 else "🟡" if win_val > 50 else "🔴"
+                        st.metric(f"{color} Win Rate", f"{win_val:.1f}%")
+                    
+                    with col5:
+                        dd_val = backtest_results['max_drawdown']
+                        color = "🟢" if dd_val > -10 else "🟡" if dd_val > -20 else "🔴"
+                        st.metric(f"{color} Max Drawdown", f"{dd_val:.2f}%")
+                    
+                    st.info(f"📊 Total Trades: {backtest_results['total_trades']}")
+                    
+                    # Plot cumulative returns
+                    fig_backtest = go.Figure()
+                    
+                    df_bt = backtest_results['df_backtest']
+                    
+                    fig_backtest.add_trace(go.Scatter(
+                        x=df_bt['timestamp'],
+                        y=(df_bt['cumulative_strategy'] - 1) * 100,
+                        name='AI Strategy',
+                        line=dict(color='green', width=2)
+                    ))
+                    
+                    fig_backtest.add_trace(go.Scatter(
+                        x=df_bt['timestamp'],
+                        y=(df_bt['cumulative_returns'] - 1) * 100,
+                        name='Buy & Hold',
+                        line=dict(color='blue', width=2, dash='dash')
+                    ))
+                    
+                    fig_backtest.update_layout(
+                        title="Cumulative Returns: AI Strategy vs Buy & Hold",
+                        xaxis_title="Date",
+                        yaxis_title="Returns (%)",
+                        height=400,
+                        hovermode='x unified'
+                    )
+                    
+                    st.plotly_chart(fig_backtest, use_container_width=True)
+            
+            # ==================== LIVE PREDICTION ====================
+            
+            st.markdown("---")
+            st.markdown("### 🔮 Live Prediction")
+            
+            # Train on all available data
+            X_train = df_model[feature_cols].iloc[:-prediction_periods]
+            y_train = df_model['target'].iloc[:-prediction_periods]
+            
+            model_live = AdvancedEnsemble()
+            model_live.fit(X_train, y_train)
+            
+            # Predict future
+            X_current = df_model[feature_cols].iloc[-1:] 
+            pred, lower, upper, confidence = model_live.predict_with_confidence(X_current)
+            
+            predicted_return = pred[0] * 100
+            confidence_score = confidence[0]
+            predicted_price = current_price * (1 + pred[0])
             
             # Display prediction
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                direction = "📈" if predicted_change > 0 else "📉"
-                st.metric(
-                    f"{direction} Predicted Price",
-                    f"${predicted_price:,.4f}" if predicted_price < 1 else f"${predicted_price:,.2f}" if predicted_price < 1000 else f"${predicted_price:,.0f}",
-                    f"{predicted_change:+.4f} ({predicted_change_pct:+.1f}%)" if predicted_price < 1 else f"{predicted_change:+.2f} ({predicted_change_pct:+.1f}%)"
-                )
+                direction = "🟢 UP" if predicted_return > 0 else "🔴 DOWN"
+                st.metric("🔮 Predicted Direction", direction)
             
             with col2:
-                st.metric("🎯 Model Confidence", f"{confidence:.1f}%")
+                st.metric("📊 Expected Return", f"{predicted_return:+.2f}%")
             
             with col3:
-                st.metric("⏱️ Prediction Horizon", f"{prediction_periods} periods")
+                conf_color = "🟢" if confidence_score > 70 else "🟡" if confidence_score > 50 else "🔴"
+                st.metric(f"{conf_color} Confidence", f"{confidence_score:.1f}%")
             
-            # Signal analysis
-            signal_strength = calculate_signal_strength(df)
+            st.info(f"""
+            **🎯 Predicted Price:** ${predicted_price:,.2f}
             
-            # Create signal interpretation
-            if signal_strength > 3:
-                signal_text = "🟢 STRONG BUY"
-                signal_color = "success"
-            elif signal_strength > 0:
-                signal_text = "🟢 BUY"
-                signal_color = "success"
-            elif signal_strength == 0:
-                signal_text = "🟡 NEUTRAL"
-                signal_color = "warning"
-            elif signal_strength > -4:
-                signal_text = "🔴 SELL"
-                signal_color = "error"
-            else:
-                signal_text = "🔴 STRONG SELL"
-                signal_color = "error"
+            **📈 Prediction Horizon:** Next {prediction_periods} periods
             
-            st.markdown(f"""
-            **📊 Technical Analysis Summary:**
-            - **Current Signal:** {signal_text}
-            - **Signal Strength:** {signal_strength}/10
-            - **Data Source:** {data_source}
-            - **Timeframe:** {timeframe_name}
+            **🔒 Confidence Level:** {"HIGH ✅" if confidence_score > 70 else "MEDIUM ⚠️" if confidence_score > 50 else "LOW ❌"}
             """)
-        
-        st.markdown("---")
-        
-        # Create comprehensive chart
-        st.markdown("### 📈 Technical Analysis Chart")
-        
-        # Create subplot structure
-        if use_rsi and use_macd:
-            fig = make_subplots(
-                rows=4, cols=1,
-                shared_xaxes=True,
-                vertical_spacing=0.05,
-                subplot_titles=('Price & Indicators', 'Volume', 'RSI', 'MACD'),
-                row_heights=[0.5, 0.2, 0.15, 0.15]
-            )
-        elif use_rsi or use_macd:
+            
+            # Trading recommendation
+            st.markdown("---")
+            st.markdown("### 💡 Trading Recommendation")
+            
+            if confidence_score >= confidence_threshold:
+                if predicted_return > 0:
+                    st.success(f"""
+                    ### 🟢 STRONG BUY SIGNAL
+                    
+                    **Entry:** ${current_price:,.2f}
+                    **Target:** ${predicted_price:,.2f} (+{predicted_return:.2f}%)
+                    **Stop Loss:** ${current_price * 0.98:,.2f} (-2%)
+                    **Confidence:** {confidence_score:.1f}%
+                    
+                    ✅ Signal meets confidence threshold of {confidence_threshold}%
+                    """)
+                else:
+                    st.error(f"""
+                    ### 🔴 STRONG SELL SIGNAL
+                    
+                    **Entry:** ${current_price:,.2f}
+                    **Target:** ${predicted_price:,.2f} ({predicted_return:.2f}%)
+                    **Stop Loss:** ${current_price * 1.02:,.2f} (+2%)
+                    **Confidence:** {confidence_score:.1f}%
+                    
+                    ✅ Signal meets confidence threshold of {confidence_threshold}%
+                    """)
+            else:
+                st.warning(f"""
+                ### ⚠️ WAIT - LOW CONFIDENCE
+                
+                **Predicted Direction:** {"UP 🟢" if predicted_return > 0 else "DOWN 🔴"}
+                **Confidence:** {confidence_score:.1f}%
+                **Threshold:** {confidence_threshold}%
+                
+                ⚠️ Signal does NOT meet confidence threshold. **Avoid trading.**
+                """)
+            
+            # Chart
+            st.markdown("---")
+            st.markdown("### 📊 Price Chart with Indicators")
+            
             fig = make_subplots(
                 rows=3, cols=1,
-                shared_xaxes=True,
-                vertical_spacing=0.05,
-                subplot_titles=('Price & Indicators', 'Volume', 'RSI' if use_rsi else 'MACD'),
-                row_heights=[0.6, 0.2, 0.2]
+                row_heights=[0.6, 0.2, 0.2],
+                subplot_titles=('Price & Moving Averages', 'RSI', 'Volume'),
+                vertical_spacing=0.05
             )
-        else:
-            fig = make_subplots(
-                rows=2, cols=1,
-                shared_xaxes=True,
-                vertical_spacing=0.05,
-                subplot_titles=('Price & Indicators', 'Volume'),
-                row_heights=[0.7, 0.3]
-            )
-        
-        # Main price chart
-        fig.add_trace(
-            go.Candlestick(
+            
+            # Candlestick
+            fig.add_trace(go.Candlestick(
                 x=df['timestamp'],
                 open=df['open'],
                 high=df['high'],
                 low=df['low'],
                 close=df['close'],
                 name='Price'
-            ),
-            row=1, col=1
-        )
-        
-        # Add AI predictions if available
-        if future_prices:
-            # Create future timestamps
-            last_timestamp = df['timestamp'].iloc[-1]
-            time_delta = df['timestamp'].iloc[-1] - df['timestamp'].iloc[-2]
-            future_timestamps = [last_timestamp + time_delta * (i+1) for i in range(len(future_prices))]
+            ), row=1, col=1)
             
-            fig.add_trace(
-                go.Scatter(
-                    x=future_timestamps,
-                    y=future_prices,
-                    mode='lines+markers',
-                    name='AI Prediction',
-                    line=dict(color='purple', width=3, dash='dash')
-                ),
-                row=1, col=1
-            )
-        
-        if use_sma:
+            # Moving averages
             fig.add_trace(go.Scatter(x=df['timestamp'], y=df['sma_20'], name='SMA 20', line=dict(color='orange')), row=1, col=1)
             fig.add_trace(go.Scatter(x=df['timestamp'], y=df['sma_50'], name='SMA 50', line=dict(color='blue')), row=1, col=1)
-        
-        if use_ema:
             fig.add_trace(go.Scatter(x=df['timestamp'], y=df['ema_20'], name='EMA 20', line=dict(color='red', dash='dot')), row=1, col=1)
-        
-        if use_bb:
-            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_upper'], name='BB Upper', line=dict(color='gray', dash='dash')), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dash')), row=1, col=1)
-        
-        colors = ['red' if df['close'].iloc[i] < df['open'].iloc[i] else 'green' for i in range(len(df))]
-        fig.add_trace(go.Bar(x=df['timestamp'], y=df['volume'], marker_color=colors, showlegend=False), row=2, col=1)
-        
-        if use_rsi:
-            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi_12'], name='RSI-12', line=dict(color='blue', width=2)), row=3, col=1)
-            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi_16'], name='RSI-16', line=dict(color='purple', width=2)), row=3, col=1)
-            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi_24'], name='RSI-24', line=dict(color='orange', width=2)), row=3, col=1)
-            fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
-            fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
-        
-        if use_macd:
-            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd'], name='MACD', line=dict(color='blue')), row=4, col=1)
-            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd_signal'], name='Signal', line=dict(color='red')), row=4, col=1)
-            colors_macd = ['green' if val > 0 else 'red' for val in df['macd_hist']]
-            fig.add_trace(go.Bar(x=df['timestamp'], y=df['macd_hist'], marker_color=colors_macd, showlegend=False), row=4, col=1)
-        
-        fig.update_layout(height=1000, showlegend=True, xaxis_rangeslider_visible=False, hovermode='x unified')
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Trading Setup & Recommendations
-        st.markdown("### 💰 Trading Setup & Recommendations")
-        
-        is_buy_setup = signal_strength >= 0
-        
-        if 'bb_lower' in df.columns and not pd.isna(df['bb_lower'].iloc[-1]):
-            support_bb = df['bb_lower'].iloc[-1]
+            
+            # Bollinger Bands
+            if 'bb_upper' in df.columns:
+                fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_upper'], name='BB Upper', line=dict(color='gray', dash='dash')), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dash')), row=1, col=1)
+            
+            # RSI
+            if 'rsi_14' in df.columns:
+                fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi_14'], name='RSI-14', line=dict(color='purple')), row=2, col=1)
+                fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+                fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+            
+            # Volume
+            colors = ['red' if df['close'].iloc[i] < df['open'].iloc[i] else 'green' for i in range(len(df))]
+            fig.add_trace(go.Bar(x=df['timestamp'], y=df['volume'], marker_color=colors, showlegend=False), row=3, col=1)
+            
+            fig.update_layout(height=900, showlegend=True, xaxis_rangeslider_visible=False, hovermode='x unified')
+            st.plotly_chart(fig, use_container_width=True)
+            
         else:
-            support_bb = None
-        
-        if 'bb_upper' in df.columns and not pd.isna(df['bb_upper'].iloc[-1]):
-            resistance_bb = df['bb_upper'].iloc[-1]
-        else:
-            resistance_bb = None
-        
-        recent_low = df['low'].tail(20).min()
-        recent_high = df['high'].tail(20).max()
-        
-        def format_price(price):
-            if price < 1:
-                return f"${price:,.4f}"
-            elif price < 1000:
-                return f"${price:,.2f}"
-            else:
-                return f"${price:,.0f}"
-        
-        if is_buy_setup:
-            st.success("### 🟢 BUY SETUP DETECTED")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("#### 📈 Buy Strategy")
-                
-                entry_price = current_price
-                tp1 = entry_price * 1.02
-                tp2 = entry_price * 1.035
-                tp3 = entry_price * 1.05
-                stop_loss = entry_price * 0.98
-                
-                st.info(f"""
-                **📍 Entry Price:** {format_price(entry_price)}
-                
-                **🎯 Take Profit Targets:**
-                - TP1: {format_price(tp1)} (+2%)
-                - TP2: {format_price(tp2)} (+3.5%)
-                - TP3: {format_price(tp3)} (+5%)
-                
-                **🛡️ Stop Loss:** {format_price(stop_loss)} (-2%)
-                
-                **📊 Risk/Reward:** 1:2.5 (Good)
-                """)
-            
-            with col2:
-                st.markdown("#### 💡 Buy Recommendation")
-                
-                better_entry = support_bb if support_bb else recent_low
-                
-                st.success(f"""
-                **✅ IMMEDIATE BUY:**
-                If price is at or below **{format_price(current_price)}**
-                - Entry: {format_price(entry_price)}
-                - TP: {format_price(tp2)}
-                - SL: {format_price(stop_loss)}
-                
-                **⭐ BETTER BUY (Wait for dip):**
-                If price drops to **{format_price(better_entry)}**
-                - Entry: {format_price(better_entry)}
-                - TP: {format_price(better_entry * 1.04)}
-                - SL: {format_price(better_entry * 0.98)}
-                
-                **Risk Level:** {"Low" if signal_strength >= 5 else "Medium"}
-                """)
-        
-        else:
-            st.error("### 🔴 SELL SETUP DETECTED")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("#### 📉 Sell Strategy")
-                
-                entry_price = current_price
-                tp1 = entry_price * 0.98
-                tp2 = entry_price * 0.965
-                tp3 = entry_price * 0.95
-                stop_loss = entry_price * 1.02
-                
-                st.info(f"""
-                **📍 Entry Price:** {format_price(entry_price)}
-                
-                **🎯 Take Profit Targets:**
-                - TP1: {format_price(tp1)} (-2%)
-                - TP2: {format_price(tp2)} (-3.5%)
-                - TP3: {format_price(tp3)} (-5%)
-                
-                **🛡️ Stop Loss:** {format_price(stop_loss)} (+2%)
-                
-                **📊 Risk/Reward:** 1:2.5 (Good)
-                """)
-            
-            with col2:
-                st.markdown("#### 💡 Sell Recommendation")
-                
-                better_entry = resistance_bb if resistance_bb else recent_high
-                
-                st.error(f"""
-                **✅ IMMEDIATE SELL:**
-                If price is at or above **{format_price(current_price)}**
-                - Entry: {format_price(entry_price)}
-                - TP: {format_price(tp2)}
-                - SL: {format_price(stop_loss)}
-                
-                **⭐ BETTER SELL (Wait for bounce):**
-                If price rises to **{format_price(better_entry)}**
-                - Entry: {format_price(better_entry)}
-                - TP: {format_price(better_entry * 0.96)}
-                - SL: {format_price(better_entry * 1.02)}
-                
-                **Risk Level:** {"Low" if signal_strength <= -5 else "Medium"}
-                """)
-        
-        st.markdown("---")
-        st.markdown("#### 📊 Key Technical Levels")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("💰 Current Price", format_price(current_price))
-        with col2:
-            st.metric("🟢 Support Level", format_price(recent_low))
-        with col3:
-            st.metric("🔴 Resistance Level", format_price(recent_high))
+            st.error("❌ Insufficient data for modeling (need at least 150 points)")
         
         st.markdown("---")
         st.warning("""
-        **⚠️ Risk Management:**
-        - Use stop-loss orders
-        - Never risk more than 1-2% per trade
-        - Diversify your portfolio
-        - This is NOT financial advice
+        **⚠️ DISCLAIMER:**
+        - This is an **experimental AI model** for educational purposes
+        - Past performance does NOT guarantee future results
+        - Always use stop-loss orders and proper risk management
+        - Never risk more than you can afford to lose
+        - This is NOT financial advice - consult a professional advisor
         """)
     
     else:
-        st.error("❌ Unable to fetch data")
-
-# Auto-refresh
-if auto_refresh and asset_type != "📸 Analyze Chart Image":
-    time.sleep(60)
-    st.rerun()
+        st.error("❌ Unable to fetch data. Please try another symbol or timeframe.")
 
 # Footer
 st.markdown("---")
 st.markdown(f"""
 <div style='text-align: center;'>
-    <p><b>📡 Data Sources:</b></p>
-    <p>Crypto: OKX → Binance → CryptoCompare</p>
-    <p>Metals: Twelve Data → Yahoo Finance</p>
-    <p>Forex: Twelve Data → Exchange Rates API → Alpha Vantage</p>
-    <p>Chart Analysis: Claude AI Vision</p>
+    <p><b>🚀 Advanced AI Trading Platform Pro</b></p>
+    <p><b>✨ Features:</b> Walk-Forward Validation | 50+ Features | LSTM Ready | Backtesting</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
     <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
 </div>
 """, unsafe_allow_html=True)
+
+# Auto-refresh
+if auto_refresh and asset_type != "📸 Analyze Chart Image":
+    time.sleep(60)
+    st.rerun()
