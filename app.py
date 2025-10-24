@@ -86,11 +86,11 @@ elif asset_type == "💱 Forex":
 elif asset_type == "🔍 Custom Search":
     st.sidebar.markdown("### 🔍 Enter Custom Symbol")
     st.sidebar.info("""
-**Examples:**
-- Crypto: BTC, ETH, DOGE
-- Forex: EUR/USD, GBP/JPY
-- Metals: XAU/USD, XAG/USD
-- Stocks: AAPL, TSLA, GOOGL
+    **Examples:**
+    - Crypto: BTC, ETH, DOGE
+    - Forex: EUR/USD, GBP/JPY
+    - Metals: XAU/USD, XAG/USD
+    - Stocks: AAPL, TSLA, GOOGL
     """)
     custom_symbol = st.sidebar.text_input("Enter Symbol:", "BTC").upper()
     pair_display = f"Custom: {custom_symbol}"
@@ -99,123 +99,25 @@ else:  # Chart Image Analysis
     pair_display = "Chart Analysis"
     symbol = None
 
-# ENHANCED Timeframe configuration with trading strategy info
+# Timeframe selection
 TIMEFRAMES = {
-    "1 Minute": {
-        "limit": 60, 
-        "unit": "minute", 
-        "binance": "1m", 
-        "okx": "1m",
-        "strategy": "SCALPING",
-        "hold_time": "1-5 minutes",
-        "tp_targets": [0.3, 0.5, 0.8],  # Tighter targets for scalping
-        "sl_percent": 0.2,  # Tighter stop loss
-        "description": "⚡ Ultra-fast trades, quick in/out"
-    },
-    "5 Minutes": {
-        "limit": 60, 
-        "unit": "minute", 
-        "binance": "5m", 
-        "okx": "5m",
-        "strategy": "SCALPING",
-        "hold_time": "5-30 minutes",
-        "tp_targets": [0.5, 1.0, 1.5],
-        "sl_percent": 0.4,
-        "description": "⚡ Fast scalping trades"
-    },
-    "15 Minutes": {
-        "limit": 96, 
-        "unit": "minute", 
-        "binance": "15m", 
-        "okx": "15m",
-        "strategy": "SCALPING/DAY TRADE",
-        "hold_time": "30 min - 2 hours",
-        "tp_targets": [0.8, 1.5, 2.5],
-        "sl_percent": 0.6,
-        "description": "⚡ Active scalping/short day trades"
-    },
-    "1 Hour": {
-        "limit": 60, 
-        "unit": "minute", 
-        "binance": "1m", 
-        "okx": "1m",
-        "strategy": "DAY TRADING",
-        "hold_time": "2-8 hours",
-        "tp_targets": [1.5, 3.0, 5.0],
-        "sl_percent": 1.0,
-        "description": "📊 Intraday trading"
-    },
-    "6 Hours": {
-        "limit": 72, 
-        "unit": "minute", 
-        "binance": "5m", 
-        "okx": "5m",
-        "strategy": "SWING TRADING",
-        "hold_time": "1-3 days",
-        "tp_targets": [2.0, 4.0, 6.0],
-        "sl_percent": 1.5,
-        "description": "📈 Short swing trades"
-    },
-    "24 Hours": {
-        "limit": 96, 
-        "unit": "hour", 
-        "binance": "15m", 
-        "okx": "15m",
-        "strategy": "SWING TRADING",
-        "hold_time": "3-7 days",
-        "tp_targets": [3.0, 5.0, 8.0],
-        "sl_percent": 2.0,
-        "description": "📈 Medium swing trades"
-    },
-    "7 Days": {
-        "limit": 168, 
-        "unit": "hour", 
-        "binance": "1h", 
-        "okx": "1H",
-        "strategy": "SWING TRADING",
-        "hold_time": "1-3 weeks",
-        "tp_targets": [5.0, 8.0, 12.0],
-        "sl_percent": 3.0,
-        "description": "📈 Long swing trades"
-    },
-    "30 Days": {
-        "limit": 30, 
-        "unit": "day", 
-        "binance": "1d", 
-        "okx": "1D",
-        "strategy": "POSITION TRADING",
-        "hold_time": "1-3 months",
-        "tp_targets": [8.0, 15.0, 25.0],
-        "sl_percent": 5.0,
-        "description": "💎 Long-term positions"
-    },
-    "90 Days": {
-        "limit": 90, 
-        "unit": "day", 
-        "binance": "1d", 
-        "okx": "1D",
-        "strategy": "POSITION TRADING",
-        "hold_time": "3-6 months",
-        "tp_targets": [12.0, 20.0, 35.0],
-        "sl_percent": 8.0,
-        "description": "💎 Long-term investments"
-    }
+    "1 Minute": {"limit": 60, "unit": "minute", "binance": "1m", "okx": "1m"},
+    "5 Minutes": {"limit": 60, "unit": "minute", "binance": "5m", "okx": "5m"},
+    "15 Minutes": {"limit": 96, "unit": "minute", "binance": "15m", "okx": "15m"},
+    "1 Hour": {"limit": 60, "unit": "minute", "binance": "1m", "okx": "1m"},
+    "6 Hours": {"limit": 72, "unit": "minute", "binance": "5m", "okx": "5m"},
+    "24 Hours": {"limit": 96, "unit": "hour", "binance": "15m", "okx": "15m"},
+    "7 Days": {"limit": 168, "unit": "hour", "binance": "1h", "okx": "1H"},
+    "30 Days": {"limit": 30, "unit": "day", "binance": "1d", "okx": "1D"},
+    "90 Days": {"limit": 90, "unit": "day", "binance": "1d", "okx": "1D"}
 }
 
 # Show configuration only if not chart analysis
 if asset_type != "📸 Analyze Chart Image":
     timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=5)
     timeframe_config = TIMEFRAMES[timeframe_name]
-    
-    # Show trading strategy info
-    st.sidebar.info(f"""
-**⏱️ {timeframe_config['strategy']}**
-{timeframe_config['description']}
-**Hold Time:** {timeframe_config['hold_time']}
-    """)
-    
     auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False)
-
+    
     # AI Model Selection
     st.sidebar.markdown("### 🤖 AI Configuration")
     ai_model = st.sidebar.selectbox(
@@ -224,7 +126,7 @@ if asset_type != "📸 Analyze Chart Image":
         index=0
     )
     prediction_periods = st.sidebar.slider("Prediction Periods", 1, 20, 5)
-
+    
     # Technical Indicators
     st.sidebar.markdown("### 📊 Technical Indicators")
     use_sma = st.sidebar.checkbox("SMA (20, 50)", value=True)
@@ -232,16 +134,10 @@ if asset_type != "📸 Analyze Chart Image":
     use_rsi = st.sidebar.checkbox("RSI (14)", value=True)
     use_macd = st.sidebar.checkbox("MACD", value=True)
     use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
-
 else:
     auto_refresh = False
     timeframe_name = "N/A"
-    timeframe_config = {
-        "limit": 0, "unit": "hour", "binance": "1h", "okx": "1H",
-        "strategy": "N/A", "hold_time": "N/A", 
-        "tp_targets": [2.0, 3.5, 5.0], "sl_percent": 2.0,
-        "description": "Chart Analysis"
-    }
+    timeframe_config = {"limit": 0, "unit": "hour", "binance": "1h", "okx": "1H"}
     ai_model = "Ensemble (Recommended)"
     prediction_periods = 5
     use_sma = use_ema = use_rsi = use_macd = use_bb = False
@@ -330,10 +226,10 @@ def get_cryptocompare_data(symbol, limit=100, unit="hour"):
         endpoint = "histohour"
     else:
         endpoint = "histoday"
-
+    
     url = f"https://min-api.cryptocompare.com/data/v2/{endpoint}"
     params = {"fsym": symbol, "tsym": "USD", "limit": limit}
-
+    
     try:
         response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
@@ -420,7 +316,7 @@ def get_twelve_data_commodities(symbol, interval="1h", outputsize=100):
     
     url = "https://api.twelvedata.com/time_series"
     params = {"symbol": symbol, "interval": interval, "outputsize": outputsize, "apikey": api_key, "format": "JSON"}
-
+    
     try:
         response = requests.get(url, params=params, timeout=15)
         response.raise_for_status()
@@ -468,7 +364,7 @@ def fetch_market_data(symbol, timeframe_config, asset_type):
             df, source = get_cryptocompare_data(symbol, cc_limit, timeframe_config["unit"])
         
         return df, source
-
+    
     elif asset_type == "💱 Forex" or asset_type == "🔍 Custom Search":
         st.info("🔄 Fetching from Twelve Data API...")
         
@@ -498,7 +394,7 @@ def fetch_market_data(symbol, timeframe_config, asset_type):
                 return df, source
         
         return None, None
-
+    
     else:  # Precious Metals
         st.info("🔄 Fetching from Twelve Data API (Primary)...")
         
@@ -569,25 +465,25 @@ def create_features(df):
     for period in [5, 10, 20, 50]:
         df_feat[f'sma_{period}'] = df_feat['close'].rolling(window=period).mean()
         df_feat[f'ema_{period}'] = df_feat['close'].ewm(span=period, adjust=False).mean()
-
+    
     df_feat['rsi_14'] = calculate_rsi(df_feat, 14)
-
+    
     macd, signal, hist = calculate_macd(df_feat)
     df_feat['macd'] = macd
     df_feat['macd_signal'] = signal
     df_feat['macd_hist'] = hist
-
+    
     bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(df_feat)
     df_feat['bb_upper'] = bb_upper
     df_feat['bb_middle'] = bb_middle
     df_feat['bb_lower'] = bb_lower
     df_feat['bb_width'] = (bb_upper - bb_lower) / bb_middle
-
+    
     df_feat['volatility'] = df_feat['close'].rolling(window=20).std()
-
+    
     for i in [1, 2, 3, 5, 10]:
         df_feat[f'close_lag_{i}'] = df_feat['close'].shift(i)
-
+    
     return df_feat
 
 def train_ml_model(df, model_type='Ensemble (Recommended)', periods_ahead=5):
@@ -596,20 +492,20 @@ def train_ml_model(df, model_type='Ensemble (Recommended)', periods_ahead=5):
     
     if len(df_ml) < 50:
         return None, None, None
-
+    
     df_ml['target'] = df_ml['close'].shift(-periods_ahead)
     df_ml = df_ml.dropna()
-
+    
     feature_cols = [col for col in df_ml.columns if col not in 
                    ['timestamp', 'target', 'open', 'high', 'low', 'close', 'volume']]
-
+    
     X = df_ml[feature_cols]
     y = df_ml['target']
-
+    
     split_idx = int(len(X) * 0.8)
     X_train, X_test = X[:split_idx], X[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
-
+    
     if model_type == 'Random Forest':
         model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1)
         model.fit(X_train, y_train)
@@ -642,10 +538,10 @@ def predict_future_prices(df, model, feature_cols, model_type, periods=5):
     
     if len(df_pred) == 0:
         return []
-
+    
     predictions = []
     current_data = df_pred.iloc[-1:].copy()
-
+    
     for i in range(periods):
         try:
             X_pred = current_data[feature_cols]
@@ -664,7 +560,7 @@ def predict_future_prices(df, model, feature_cols, model_type, periods=5):
             current_data = create_features(current_data).iloc[-1:]
         except:
             break
-
+    
     return predictions
 
 def generate_signals(df):
@@ -673,10 +569,10 @@ def generate_signals(df):
     
     if len(df) < 2:
         return signals, signal_strength
-
+    
     latest = df.iloc[-1]
     prev = df.iloc[-2]
-
+    
     if 'rsi' in df.columns and not pd.isna(latest['rsi']):
         if latest['rsi'] < 30:
             signals.append("🟢 RSI Oversold (<30) - Strong BUY")
@@ -690,7 +586,7 @@ def generate_signals(df):
         elif 55 <= latest['rsi'] <= 70:
             signals.append("🟡 RSI Neutral-Bearish")
             signal_strength -= 1
-
+    
     if 'macd' in df.columns and 'macd_signal' in df.columns:
         if not pd.isna(latest['macd']) and not pd.isna(prev['macd']):
             if latest['macd'] > latest['macd_signal'] and prev['macd'] <= prev['macd_signal']:
@@ -705,7 +601,7 @@ def generate_signals(df):
             else:
                 signals.append("🔴 MACD Below Signal - Bearish")
                 signal_strength -= 1
-
+    
     if 'sma_20' in df.columns and 'sma_50' in df.columns:
         if not pd.isna(latest['sma_20']) and not pd.isna(latest['sma_50']):
             if latest['sma_20'] > latest['sma_50'] and prev['sma_20'] <= prev['sma_50']:
@@ -714,7 +610,7 @@ def generate_signals(df):
             elif latest['sma_20'] < latest['sma_50'] and prev['sma_20'] >= prev['sma_50']:
                 signals.append("🔴 Death Cross - Strong SELL")
                 signal_strength -= 3
-
+    
     if 'ema_20' in df.columns and not pd.isna(latest['ema_20']):
         if latest['close'] > latest['ema_20']:
             signals.append("🟢 Price Above EMA20 - Bullish")
@@ -722,7 +618,7 @@ def generate_signals(df):
         else:
             signals.append("🔴 Price Below EMA20 - Bearish")
             signal_strength -= 1
-
+    
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
         if not pd.isna(latest['bb_upper']) and not pd.isna(latest['bb_lower']):
             if latest['close'] <= latest['bb_lower']:
@@ -731,7 +627,7 @@ def generate_signals(df):
             elif latest['close'] >= latest['bb_upper']:
                 signals.append("🔴 At Upper BB - Potential SELL")
                 signal_strength -= 2
-
+    
     return signals, signal_strength
 
 # Main App
@@ -749,7 +645,7 @@ if asset_type == "📸 Analyze Chart Image":
         type=["png", "jpg", "jpeg"],
         help="Upload a screenshot of your trading chart"
     )
-
+    
     if uploaded_file is not None:
         col1, col2 = st.columns([1, 1])
         
@@ -780,7 +676,7 @@ if asset_type == "📸 Analyze Chart Image":
 10. **Confidence Level**: Your confidence (%)
 
 Be specific and actionable."""
-            
+
             try:
                 response = requests.post(
                     "https://api.anthropic.com/v1/messages",
@@ -842,10 +738,10 @@ elif symbol is not None:
     st.markdown("### 📡 Live Market Data")
     
     col1, col2, col3 = st.columns(3)
-
+    
     with st.spinner(f"🔄 Fetching live data for {pair_display}..."):
         df, data_source = fetch_market_data(symbol, timeframe_config, asset_type)
-
+    
     if df is not None and len(df) > 50:
         display_price = df['close'].iloc[-1]
         
@@ -946,13 +842,6 @@ elif symbol is not None:
         # Trading Signals
         signals, signal_strength = generate_signals(df)
         
-        # NEW: Add timeframe context banner
-        st.info(f"""
-        **⏱️ TIMEFRAME: {timeframe_name} | Strategy: {timeframe_config['strategy']}**
-        
-        This analysis is specifically for **{timeframe_name}** charts. The recommendations below are tailored for **{timeframe_config['hold_time']}** holding periods.
-        """)
-        
         st.markdown("### 🎯 Live Trading Signals")
         
         col1, col2 = st.columns([1, 2])
@@ -960,22 +849,21 @@ elif symbol is not None:
         with col1:
             if signal_strength >= 5:
                 st.success("## 🟢 STRONG BUY")
-                st.markdown(f"**Action:** Enter LONG ({timeframe_config['strategy']})")
+                st.markdown("**Action:** Enter LONG")
             elif signal_strength >= 2:
                 st.success("## 🟢 BUY")
-                st.markdown(f"**Action:** Consider LONG ({timeframe_config['strategy']})")
+                st.markdown("**Action:** Consider LONG")
             elif signal_strength <= -5:
                 st.error("## 🔴 STRONG SELL")
-                st.markdown(f"**Action:** Exit/SHORT ({timeframe_config['strategy']})")
+                st.markdown("**Action:** Exit/SHORT")
             elif signal_strength <= -2:
                 st.error("## 🔴 SELL")
-                st.markdown(f"**Action:** Consider exit ({timeframe_config['strategy']})")
+                st.markdown("**Action:** Consider exit")
             else:
                 st.warning("## 🟡 NEUTRAL")
                 st.markdown("**Action:** Wait")
             
             st.metric("Signal Strength", f"{signal_strength}/10")
-            st.caption(f"⏱️ Hold Time: {timeframe_config['hold_time']}")
         
         with col2:
             st.markdown("#### 📋 Signals:")
@@ -1054,45 +942,11 @@ elif symbol is not None:
         fig.update_layout(height=1000, showlegend=True, xaxis_rangeslider_visible=False, hovermode='x unified')
         st.plotly_chart(fig, use_container_width=True)
         
-        # ENHANCED TIMEFRAME-SPECIFIC Entry/Exit Section
-        st.markdown(f"### 💰 Trading Setup & Recommendations ({timeframe_name})")
-        
-        # Add prominent timeframe warning
-        if timeframe_config['strategy'] == 'SCALPING':
-            st.warning(f"""
-            ⚡ **SCALPING MODE ACTIVE** - {timeframe_name} Chart
-            
-            This is a **high-frequency** trading setup. Trades should be executed quickly and monitored constantly.
-            Expected hold time: **{timeframe_config['hold_time']}**
-            """)
-        elif timeframe_config['strategy'] == 'DAY TRADING':
-            st.info(f"""
-            📊 **DAY TRADING MODE** - {timeframe_name} Chart
-            
-            This is an **intraday** trading setup. Positions should be closed within the same trading session.
-            Expected hold time: **{timeframe_config['hold_time']}**
-            """)
-        elif timeframe_config['strategy'] == 'SWING TRADING':
-            st.success(f"""
-            📈 **SWING TRADING MODE** - {timeframe_name} Chart
-            
-            This is a **multi-day** trading setup. Positions can be held through overnight sessions.
-            Expected hold time: **{timeframe_config['hold_time']}**
-            """)
-        else:  # POSITION TRADING
-            st.success(f"""
-            💎 **POSITION TRADING MODE** - {timeframe_name} Chart
-            
-            This is a **long-term** investment setup. Positions are meant to capture major price movements.
-            Expected hold time: **{timeframe_config['hold_time']}**
-            """)
+        # IMPROVED Entry/Exit Section
+        st.markdown("### 💰 Trading Setup & Recommendations")
         
         is_buy_setup = signal_strength >= 0
         current_price = display_price
-        
-        # Get timeframe-specific TP and SL percentages
-        tp_targets = timeframe_config['tp_targets']  # [TP1%, TP2%, TP3%]
-        sl_percent = timeframe_config['sl_percent']
         
         if 'bb_lower' in df.columns and not pd.isna(df['bb_lower'].iloc[-1]):
             support_bb = df['bb_lower'].iloc[-1]
@@ -1114,115 +968,99 @@ elif symbol is not None:
                 return f"${price:,.2f}"
         
         if is_buy_setup:
-            st.success(f"### 🟢 BUY SETUP DETECTED ({timeframe_config['strategy']})")
+            st.success("### 🟢 BUY SETUP DETECTED")
             
             col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown(f"#### 📈 Buy Strategy - {timeframe_name}")
+                st.markdown("#### 📈 Buy Strategy")
                 
                 entry_price = current_price
-                tp1 = entry_price * (1 + tp_targets[0]/100)
-                tp2 = entry_price * (1 + tp_targets[1]/100)
-                tp3 = entry_price * (1 + tp_targets[2]/100)
-                stop_loss = entry_price * (1 - sl_percent/100)
-                
-                risk_reward = tp_targets[1] / sl_percent
+                tp1 = entry_price * 1.02
+                tp2 = entry_price * 1.035
+                tp3 = entry_price * 1.05
+                stop_loss = entry_price * 0.98
                 
                 st.info(f"""
-                **⏱️ Timeframe:** {timeframe_name}
                 **📍 Entry Price:** {format_price(entry_price)}
                 
                 **🎯 Take Profit Targets:**
-                - TP1: {format_price(tp1)} (+{tp_targets[0]:.1f}%)
-                - TP2: {format_price(tp2)} (+{tp_targets[1]:.1f}%)
-                - TP3: {format_price(tp3)} (+{tp_targets[2]:.1f}%)
+                - TP1: {format_price(tp1)} (+2%)
+                - TP2: {format_price(tp2)} (+3.5%)
+                - TP3: {format_price(tp3)} (+5%)
                 
-                **🛡️ Stop Loss:** {format_price(stop_loss)} (-{sl_percent:.1f}%)
+                **🛡️ Stop Loss:** {format_price(stop_loss)} (-2%)
                 
-                **📊 Risk/Reward:** 1:{risk_reward:.1f}
-                **⏰ Expected Hold:** {timeframe_config['hold_time']}
+                **📊 Risk/Reward:** 1:2.5 (Good)
                 """)
             
             with col2:
-                st.markdown(f"#### 💡 {timeframe_config['strategy']} Recommendation")
+                st.markdown("#### 💡 Buy Recommendation")
                 
                 better_entry = support_bb if support_bb else recent_low
-                better_tp_mult = 1 + (tp_targets[1] + 0.5) / 100  # Slightly better TP
                 
                 st.success(f"""
-                **✅ IMMEDIATE ENTRY:**
-                Current price: **{format_price(current_price)}**
+                **✅ IMMEDIATE BUY:**
+                If price is at or below **{format_price(current_price)}**
                 - Entry: {format_price(entry_price)}
                 - TP: {format_price(tp2)}
                 - SL: {format_price(stop_loss)}
-                - Hold: {timeframe_config['hold_time']}
                 
-                **⭐ BETTER ENTRY (Wait for pullback):**
-                Target entry: **{format_price(better_entry)}**
+                **⭐ BETTER BUY (Wait for dip):**
+                If price drops to **{format_price(better_entry)}**
                 - Entry: {format_price(better_entry)}
-                - TP: {format_price(better_entry * better_tp_mult)}
-                - SL: {format_price(better_entry * (1 - sl_percent/100))}
-                - Hold: {timeframe_config['hold_time']}
+                - TP: {format_price(better_entry * 1.04)}
+                - SL: {format_price(better_entry * 0.98)}
                 
-                **Risk Level:** {"Low ✅" if signal_strength >= 5 else "Medium ⚠️"}
-                **Strategy:** {timeframe_config['strategy']}
+                **Risk Level:** {"Low" if signal_strength >= 5 else "Medium"}
                 """)
         
         else:
-            st.error(f"### 🔴 SELL SETUP DETECTED ({timeframe_config['strategy']})")
+            st.error("### 🔴 SELL SETUP DETECTED")
             
             col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown(f"#### 📉 Sell Strategy - {timeframe_name}")
+                st.markdown("#### 📉 Sell Strategy")
                 
                 entry_price = current_price
-                tp1 = entry_price * (1 - tp_targets[0]/100)
-                tp2 = entry_price * (1 - tp_targets[1]/100)
-                tp3 = entry_price * (1 - tp_targets[2]/100)
-                stop_loss = entry_price * (1 + sl_percent/100)
-                
-                risk_reward = tp_targets[1] / sl_percent
+                tp1 = entry_price * 0.98
+                tp2 = entry_price * 0.965
+                tp3 = entry_price * 0.95
+                stop_loss = entry_price * 1.02
                 
                 st.info(f"""
-                **⏱️ Timeframe:** {timeframe_name}
                 **📍 Entry Price:** {format_price(entry_price)}
                 
                 **🎯 Take Profit Targets:**
-                - TP1: {format_price(tp1)} (-{tp_targets[0]:.1f}%)
-                - TP2: {format_price(tp2)} (-{tp_targets[1]:.1f}%)
-                - TP3: {format_price(tp3)} (-{tp_targets[2]:.1f}%)
+                - TP1: {format_price(tp1)} (-2%)
+                - TP2: {format_price(tp2)} (-3.5%)
+                - TP3: {format_price(tp3)} (-5%)
                 
-                **🛡️ Stop Loss:** {format_price(stop_loss)} (+{sl_percent:.1f}%)
+                **🛡️ Stop Loss:** {format_price(stop_loss)} (+2%)
                 
-                **📊 Risk/Reward:** 1:{risk_reward:.1f}
-                **⏰ Expected Hold:** {timeframe_config['hold_time']}
+                **📊 Risk/Reward:** 1:2.5 (Good)
                 """)
             
             with col2:
-                st.markdown(f"#### 💡 {timeframe_config['strategy']} Recommendation")
+                st.markdown("#### 💡 Sell Recommendation")
                 
                 better_entry = resistance_bb if resistance_bb else recent_high
-                better_tp_mult = 1 - (tp_targets[1] + 0.5) / 100
                 
                 st.error(f"""
-                **✅ IMMEDIATE ENTRY:**
-                Current price: **{format_price(current_price)}**
+                **✅ IMMEDIATE SELL:**
+                If price is at or above **{format_price(current_price)}**
                 - Entry: {format_price(entry_price)}
                 - TP: {format_price(tp2)}
                 - SL: {format_price(stop_loss)}
-                - Hold: {timeframe_config['hold_time']}
                 
-                **⭐ BETTER ENTRY (Wait for bounce):**
-                Target entry: **{format_price(better_entry)}**
+                **⭐ BETTER SELL (Wait for bounce):**
+                If price rises to **{format_price(better_entry)}**
                 - Entry: {format_price(better_entry)}
-                - TP: {format_price(better_entry * better_tp_mult)}
-                - SL: {format_price(better_entry * (1 + sl_percent/100))}
-                - Hold: {timeframe_config['hold_time']}
+                - TP: {format_price(better_entry * 0.96)}
+                - SL: {format_price(better_entry * 1.02)}
                 
-                **Risk Level:** {"Low ✅" if signal_strength <= -5 else "Medium ⚠️"}
-                **Strategy:** {timeframe_config['strategy']}
+                **Risk Level:** {"Low" if signal_strength <= -5 else "Medium"}
                 """)
         
         st.markdown("---")
@@ -1238,38 +1076,14 @@ elif symbol is not None:
             st.metric("🔴 Resistance Level", format_price(recent_high))
         
         st.markdown("---")
-        
-        # Timeframe-specific risk warnings
-        if timeframe_config['strategy'] == 'SCALPING':
-            st.error("""
-            **⚠️ SCALPING RISK WARNING:**
-            - Requires **constant monitoring** during trade
-            - High stress and rapid decision-making
-            - Transaction costs can eat profits quickly
-            - Use tight stop losses always
-            - Never risk more than 0.5-1% per trade
-            - Best for experienced traders only
-            """)
-        elif timeframe_config['strategy'] in ['SWING TRADING', 'POSITION TRADING']:
-            st.warning("""
-            **⚠️ SWING/POSITION TRADING RISK WARNING:**
-            - Overnight and weekend gaps possible
-            - Wider stop losses required
-            - More patience needed
-            - Check fundamentals, not just technicals
-            - Never risk more than 2% per trade
-            - Diversify your portfolio
-            """)
-        else:
-            st.warning("""
-            **⚠️ GENERAL RISK MANAGEMENT:**
-            - Always use stop-loss orders
-            - Never risk more than 1-2% per trade
-            - Don't overtrade
-            - Keep emotions in check
-            - This is NOT financial advice
-            """)
-
+        st.warning("""
+        **⚠️ Risk Management:**
+        - Use stop-loss orders
+        - Never risk more than 1-2% per trade
+        - Diversify your portfolio
+        - This is NOT financial advice
+        """)
+    
     else:
         st.error("❌ Unable to fetch data")
 
