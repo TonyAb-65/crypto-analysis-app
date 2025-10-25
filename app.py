@@ -135,7 +135,7 @@ else:
 # ==================== ADVANCED FEATURE ENGINEERING ====================
 
 def calculate_advanced_features(df):
-    """Calculate 50+ advanced technical features"""
+    """Calculate advanced technical features - adaptive to data length"""
     
     data_length = len(df)
     
@@ -144,7 +144,12 @@ def calculate_advanced_features(df):
     df['log_returns'] = np.log(df['close'] / df['close'].shift(1))
     df['volatility_10'] = df['returns'].rolling(10).std()
     df['volatility_20'] = df['returns'].rolling(20).std()
-    df['volatility_50'] = df['returns'].rolling(50).std()
+    
+    # Only calculate volatility_50 if we have enough data
+    if data_length >= 100:
+        df['volatility_50'] = df['returns'].rolling(50).std()
+    else:
+        df['volatility_50'] = df['volatility_20']
     
     # Momentum indicators
     df['momentum_5'] = df['close'] - df['close'].shift(5)
@@ -153,27 +158,29 @@ def calculate_advanced_features(df):
     df['roc_10'] = ((df['close'] - df['close'].shift(10)) / df['close'].shift(10)) * 100
     df['roc_20'] = ((df['close'] - df['close'].shift(20)) / df['close'].shift(20)) * 100
     
-    # Moving averages (adaptive to data length)
+    # Moving averages - SHORT PERIODS ONLY
     df['sma_5'] = df['close'].rolling(5).mean()
     df['sma_10'] = df['close'].rolling(10).mean()
     df['sma_20'] = df['close'].rolling(20).mean()
-    df['sma_50'] = df['close'].rolling(50).mean()
     
-    # Only calculate longer MAs if we have enough data
-    if data_length >= 120:
-        df['sma_100'] = df['close'].rolling(100).mean()
+    # Only add longer SMAs if we have enough data
+    if data_length >= 80:
+        df['sma_50'] = df['close'].rolling(50).mean()
     else:
-        df['sma_100'] = df['sma_50']  # Use sma_50 as fallback
+        df['sma_50'] = df['sma_20']  # Use shorter period as fallback
     
-    if data_length >= 220:
-        df['sma_200'] = df['close'].rolling(200).mean()
-    else:
-        df['sma_200'] = df['sma_100']  # Use sma_100 as fallback
+    # Skip long-period SMAs to preserve data
+    df['sma_100'] = df['sma_50']  # Just duplicate shorter period
+    df['sma_200'] = df['sma_50']  # Just duplicate shorter period
     
     df['ema_5'] = df['close'].ewm(span=5, adjust=False).mean()
     df['ema_10'] = df['close'].ewm(span=10, adjust=False).mean()
     df['ema_20'] = df['close'].ewm(span=20, adjust=False).mean()
-    df['ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
+    
+    if data_length >= 80:
+        df['ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
+    else:
+        df['ema_50'] = df['ema_20']
     
     # MA crossovers
     df['sma_cross_10_20'] = (df['sma_10'] > df['sma_20']).astype(int)
@@ -181,15 +188,17 @@ def calculate_advanced_features(df):
     df['ema_cross_10_20'] = (df['ema_10'] > df['ema_20']).astype(int)
     
     # Price relative to MAs
-    df['price_to_sma20'] = (df['close'] - df['sma_20']) / df['sma_20']
-    df['price_to_sma50'] = (df['close'] - df['sma_50']) / df['sma_50']
-    df['price_to_ema20'] = (df['close'] - df['ema_20']) / df['ema_20']
+    df['price_to_sma20'] = (df['close'] - df['sma_20']) / (df['sma_20'] + 0.0001)
+    df['price_to_sma50'] = (df['close'] - df['sma_50']) / (df['sma_50'] + 0.0001)
+    df['price_to_ema20'] = (df['close'] - df['ema_20']) / (df['ema_20'] + 0.0001)
     
     # RSI variations
     df['rsi_9'] = compute_rsi(df['close'], 9)
     df['rsi_14'] = compute_rsi(df['close'], 14)
     df['rsi_21'] = compute_rsi(df['close'], 21)
-    df['rsi_28'] = compute_rsi(df['close'], 28)
+    
+    # Skip RSI 28 to save data
+    df['rsi_28'] = df['rsi_21']
     
     # MACD
     exp1 = df['close'].ewm(span=12, adjust=False).mean()
@@ -204,13 +213,13 @@ def calculate_advanced_features(df):
     bb_std = df['close'].rolling(20).std()
     df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
     df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
-    df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
-    df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+    df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / (df['bb_middle'] + 0.0001)
+    df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'] + 0.0001)
     
     # Stochastic Oscillator
     low_14 = df['low'].rolling(14).min()
     high_14 = df['high'].rolling(14).max()
-    df['stoch_k'] = 100 * ((df['close'] - low_14) / (high_14 - low_14))
+    df['stoch_k'] = 100 * ((df['close'] - low_14) / (high_14 - low_14 + 0.0001))
     df['stoch_d'] = df['stoch_k'].rolling(3).mean()
     
     # ATR (Average True Range)
@@ -225,7 +234,7 @@ def calculate_advanced_features(df):
     # Volume-based features
     df['volume_sma_10'] = df['volume'].rolling(10).mean()
     df['volume_sma_20'] = df['volume'].rolling(20).mean()
-    df['volume_ratio'] = df['volume'] / df['volume_sma_20']
+    df['volume_ratio'] = df['volume'] / (df['volume_sma_20'] + 0.0001)
     df['volume_change'] = df['volume'].pct_change()
     
     # OBV (On-Balance Volume)
@@ -244,8 +253,8 @@ def calculate_advanced_features(df):
     df['lower_shadow'] = np.minimum(df['close'], df['open']) - df['low']
     df['body_ratio'] = df['body'] / (df['high'] - df['low'] + 0.0001)
     
-    # Trend strength (adaptive period)
-    adx_period = min(14, data_length // 10) if data_length >= 30 else 5
+    # Trend strength (use shorter period)
+    adx_period = min(14, max(5, data_length // 15))
     df['adx'] = calculate_adx(df, adx_period)
     
     # Statistical features
@@ -260,8 +269,8 @@ def calculate_advanced_features(df):
         df['day_of_week'] = pd.to_datetime(df['timestamp']).dt.dayofweek
         df['day_of_month'] = pd.to_datetime(df['timestamp']).dt.day
     
-    # Market regime (simplified)
-    regime_window = min(50, data_length // 4) if data_length >= 60 else 10
+    # Market regime (use shorter window)
+    regime_window = min(30, max(10, data_length // 6))
     df['regime'] = detect_market_regime(df, regime_window)
     
     return df
@@ -409,33 +418,46 @@ def walk_forward_validation(df, model, lookback=None, test_size=None):
     
     # Adaptive parameters based on data length
     data_length = len(df_clean)
+    
+    # Be very conservative with requirements
     if lookback is None:
-        lookback = min(100, data_length // 3)  # Use 1/3 of data for training
+        lookback = min(60, data_length // 3)  # Use smaller lookback
     if test_size is None:
-        test_size = min(20, data_length // 10)  # Use 1/10 for each test
+        test_size = min(15, data_length // 8)  # Use smaller test size
+    
+    # Ensure minimum sizes
+    lookback = max(30, lookback)  # At least 30 for training
+    test_size = max(10, test_size)  # At least 10 for testing
     
     if data_length < lookback + test_size:
-        st.warning(f"⚠️ Limited data ({data_length} points). Using simplified validation.")
-        lookback = max(50, data_length // 2)
-        test_size = max(10, data_length // 5)
+        st.warning(f"⚠️ Limited data ({data_length} points). Using minimal validation.")
+        lookback = max(30, data_length // 2)
+        test_size = max(10, data_length - lookback - 5)
     
-    if data_length < lookback + test_size:
+    if data_length < lookback + test_size or test_size < 5:
         return None, None, None, None
     
-    # Walk forward through time
-    num_walks = max(1, (data_length - lookback) // test_size)
-    for i in range(lookback, min(lookback + num_walks * test_size, data_length - test_size), test_size):
+    # Walk forward through time - but don't do too many walks with small data
+    max_walks = max(1, min(5, (data_length - lookback) // test_size))
+    
+    for walk_num in range(max_walks):
+        i = lookback + (walk_num * test_size)
+        
+        if i + test_size > data_length:
+            break
+        
         # Training set: past data
         train_data = df_clean.iloc[max(0, i-lookback):i]
         X_train = train_data[feature_cols]
         y_train = train_data['target']
         
         # Test set: future data
-        test_data = df_clean.iloc[i:min(i+test_size, data_length)]
+        test_end = min(i + test_size, data_length)
+        test_data = df_clean.iloc[i:test_end]
         X_test = test_data[feature_cols]
         y_test = test_data['target']
         
-        if len(X_train) < 30 or len(X_test) < 5:  # Skip if too small
+        if len(X_train) < 20 or len(X_test) < 5:  # Skip if too small
             continue
         
         # Train model
@@ -447,6 +469,9 @@ def walk_forward_validation(df, model, lookback=None, test_size=None):
         predictions.extend(pred)
         actuals.extend(y_test.values)
         confidence_scores.extend(conf)
+    
+    if len(predictions) == 0:
+        return None, None, None, None
     
     return np.array(predictions), np.array(actuals), np.array(confidence_scores), model.feature_importance
 
@@ -525,9 +550,11 @@ def backtest_strategy(df, predictions, confidence_scores, confidence_threshold=7
 # ==================== DATA FETCHING ====================
 
 @st.cache_data(ttl=300)
-def get_okx_data(symbol, interval="1H", limit=300):
+def get_okx_data(symbol, interval="1H", limit=500):
     """Fetch data from OKX API"""
     url = "https://www.okx.com/api/v5/market/candles"
+    # OKX actually supports up to 300 per request, but we can make multiple requests
+    # For now, just use their max
     limit = min(limit, 300)
     params = {"instId": f"{symbol}-USDT", "bar": interval, "limit": str(limit)}
     
@@ -617,9 +644,10 @@ if asset_type != "📸 Analyze Chart Image" and symbol:
             timeframe_config.get('limit', 300)
         )
     
-    if df is not None and len(df) > 100:
+    if df is not None and len(df) > 50:
         st.success(f"✅ Loaded {len(df)} raw data points from {data_source}")
-        st.info(f"ℹ️ After calculating technical indicators, expect ~{len(df) - 60} usable data points")
+        expected_usable = max(50, len(df) - 60)  # Lose ~60 points to indicators
+        st.info(f"ℹ️ After calculating technical indicators, expect ~{expected_usable} usable data points")
         
         # Calculate advanced features
         with st.spinner("🧮 Calculating 50+ advanced features..."):
@@ -656,7 +684,7 @@ if asset_type != "📸 Analyze Chart Image" and symbol:
         # Remove rows with NaN
         df_model = df[feature_cols + ['target', 'timestamp', 'close']].dropna()
         
-        if len(df_model) > 100:
+        if len(df_model) > 80:
             
             st.info(f"✅ Using {len(df_model)} data points for modeling (after feature calculation)")
             
@@ -928,18 +956,18 @@ if asset_type != "📸 Analyze Chart Image" and symbol:
             st.error(f"❌ Insufficient data for modeling")
             st.warning(f"""
             **Current data points after feature calculation:** {len(df_model)}
-            **Required:** At least 100 points
+            **Required:** At least 80 points
             
             **Suggestions to fix this:**
-            1. ✅ **Try a different timeframe** (15 Minutes or 1 Hour recommended)
+            1. ✅ **Try a different timeframe** (1 Hour or 4 Hours recommended)
             2. ✅ **Try a different asset** (BTC or ETH have most data)
             3. ✅ **Wait a few minutes** (APIs might be rate-limited)
             4. ℹ️ The platform fetches {len(df)} raw data points, but after calculating technical indicators (which need historical data), {len(df_model)} usable points remain
             
             **Most common causes:**
-            - New/low-volume cryptocurrencies (not enough history)
             - API rate limits (try again in 1-2 minutes)
             - Some forex/metals pairs have limited free data
+            - Very new/low-volume cryptocurrencies
             """)
         
         st.markdown("---")
