@@ -34,8 +34,7 @@ def init_database():
             confidence REAL NOT NULL,
             signal_strength INTEGER,
             features TEXT,
-            status TEXT DEFAULT 'analysis_only',
-            trade_decision TEXT DEFAULT NULL
+            status TEXT DEFAULT 'analysis_only'
         )
     ''')
     
@@ -81,8 +80,8 @@ def save_prediction(asset_type, pair, timeframe, current_price, predicted_price,
     cursor.execute('''
         INSERT INTO predictions 
         (timestamp, asset_type, pair, timeframe, current_price, predicted_price, 
-         prediction_horizon, confidence, signal_strength, features, status, trade_decision)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         prediction_horizon, confidence, signal_strength, features, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         datetime.now().isoformat(),
         asset_type,
@@ -94,8 +93,7 @@ def save_prediction(asset_type, pair, timeframe, current_price, predicted_price,
         confidence,
         signal_strength,
         json.dumps(features) if features else None,
-        'analysis_only',  # Default: just analysis, not traded yet
-        None
+        'analysis_only'  # Default: just analysis, not traded yet
     ))
     
     prediction_id = cursor.lastrowid
@@ -111,7 +109,7 @@ def mark_prediction_for_trading(prediction_id):
     # Mark this prediction as "will_trade"
     cursor.execute('''
         UPDATE predictions 
-        SET status = 'will_trade', trade_decision = 'selected_for_trade'
+        SET status = 'will_trade'
         WHERE id = ?
     ''', (prediction_id,))
     
@@ -125,7 +123,7 @@ def get_all_recent_predictions(limit=20):
     
     query = '''
         SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
-               predicted_price, confidence, signal_strength, status, trade_decision
+               predicted_price, confidence, signal_strength, status
         FROM predictions 
         WHERE status != 'completed'
         ORDER BY timestamp DESC
