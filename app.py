@@ -27,6 +27,9 @@ st.markdown("---")
 # Sidebar configuration
 st.sidebar.header("⚙️ Configuration")
 
+# Debug mode
+debug_mode = st.sidebar.checkbox("🔧 Debug Mode", value=False, help="Show detailed API information")
+
 # Asset Type Selection
 asset_type = st.sidebar.selectbox(
     "📊 Select Asset Type",
@@ -99,6 +102,45 @@ use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
 
 # API Functions
 @st.cache_data(ttl=300)
+def get_okx_data(symbol, interval="1H", limit=100):
+    """Fetch data from OKX API - PRIMARY BACKUP"""
+    url = "https://www.okx.com/api/v5/market/candles"
+    limit = min(limit, 300)
+    params = {"instId": f"{symbol}-USDT", "bar": interval, "limit": str(limit)}
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('code') != '0':
+            error_msg = data.get('msg', 'Unknown error')
+            st.warning(f"⚠️ OKX error: {error_msg}")
+            return None, None
+        
+        candles = data.get('data', [])
+        if not candles or len(candles) == 0:
+            st.warning(f"⚠️ OKX returned no data")
+            return None, None
+        
+        df = pd.DataFrame(candles, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume', 
+            'volCcy', 'volCcyQuote', 'confirm'
+        ])
+        df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
+        
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        st.success(f"✅ Loaded {len(df)} data points from OKX")
+        return df, "OKX"
+    except Exception as e:
+        st.warning(f"⚠️ OKX API failed: {str(e)}")
+        return None, None
+
+@st.cache_data(ttl=300)
 def get_binance_data(symbol, interval="1h", limit=100):
     """Fetch data from Binance API"""
     url = "https://api.binance.com/api/v3/klines"
@@ -110,6 +152,11 @@ def get_binance_data(symbol, interval="1h", limit=100):
         data = response.json()
         
         if isinstance(data, dict) and 'code' in data:
+            st.warning(f"⚠️ Binance error: {data.get('msg', 'Unknown')}")
+            return None, None
+        
+        if not data or len(data) == 0:
+            st.warning("⚠️ Binance returned no data")
             return None, None
         
         df = pd.DataFrame(data, columns=[
@@ -124,17 +171,156 @@ def get_binance_data(symbol, interval="1h", limit=100):
         
         df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
         df = df.sort_values('timestamp').reset_index(drop=True)
+        st.success(f"✅ Loaded {len(df)} data points from Binance")
         return df, "Binance"
-    except:
+    except Exception as e:
+        st.warning(f"⚠️ Binance API failed: {str(e)}")
+        return None, None
+
+@st.cache_data(ttl=300)
+def get_cryptocompare_data(symbol, limit=100):
+    """Fetch data from CryptoCompare API (Backup)"""
+    url = "https://min-api.cryptocompare.com/data/v2/histohour"
+    params = {"fsym": symbol, "tsym": "USD", "limit": limit}
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('Response') != 'Success':
+            st.warning(f"⚠️ CryptoCompare error: {data.get('Message', 'Unknown')}")
+            return None, None
+        
+        hist_data = data.get('Data', {}).get('Data', [])
+        if not hist_data:
+            st.warning("⚠️ CryptoCompare returned no data")
+            return None, None
+        
+        df = pd.DataFrame(hist_data)
+        df['timestamp'] = pd.to_datetime(df['time'], unit='s')
+        df = df.rename(columns={
+            'open': 'open', 
+            'high': 'high', 
+            'low': 'low', 
+            'close': 'close', 
+            'volumefrom': 'volume'
+        })
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        st.success(f"✅ Loaded {len(df)} data points from CryptoCompare")
+        return df, "CryptoCompare"
+    except Exception as e:
+        st.warning(f"⚠️ CryptoCompare API failed: {str(e)}")
+        return None, None
+
+@st.cache_data(ttl=300)
+def get_coingecko_data(symbol, limit=100):
+    """Fetch data from CoinGecko API (Backup 2)"""
+    # Map common symbols to CoinGecko IDs
+    symbol_map = {
+        'BTC': 'bitcoin',
+        'ETH': 'ethereum',
+        'BNB': 'binancecoin',
+        'XRP': 'ripple',
+        'ADA': 'cardano',
+        'SOL': 'solana',
+        'DOGE': 'dogecoin',
+        'MATIC': 'matic-network',
+        'DOT': 'polkadot',
+        'AVAX': 'avalanche-2'
+    }
+    
+    coin_id = symbol_map.get(symbol, symbol.lower())
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+    params = {"vs_currency": "usd", "days": "7", "interval": "hourly"}
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'prices' not in data:
+            st.warning("⚠️ CoinGecko: No price data")
+            return None, None
+        
+        # Convert to DataFrame
+        prices = data['prices']
+        volumes = data.get('total_volumes', [[p[0], 1000000] for p in prices])
+        
+        df = pd.DataFrame({
+            'timestamp': [pd.to_datetime(p[0], unit='ms') for p in prices],
+            'close': [p[1] for p in prices],
+            'volume': [v[1] for v in volumes]
+        })
+        
+        # Create OHLC from close (approximation)
+        df['open'] = df['close']
+        df['high'] = df['close'] * 1.001
+        df['low'] = df['close'] * 0.999
+        
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.tail(limit).reset_index(drop=True)
+        st.success(f"✅ Loaded {len(df)} data points from CoinGecko")
+        return df, "CoinGecko"
+    except Exception as e:
+        st.warning(f"⚠️ CoinGecko API failed: {str(e)}")
         return None, None
 
 def fetch_data(symbol, asset_type):
-    """Main function to fetch data"""
+    """Main function to fetch data with multiple fallbacks"""
     if asset_type == "💰 Cryptocurrency" or asset_type == "🔍 Custom Search":
         interval_map = timeframe_config
+        
+        st.info(f"🔄 Trying to fetch {symbol} data...")
+        
+        # Try Binance first
         df, source = get_binance_data(symbol, interval_map['binance'], interval_map['limit'])
-        if df is not None:
+        if df is not None and len(df) > 0:
             return df, source
+        
+        # Try OKX as primary backup
+        st.info("🔄 Trying backup API (OKX)...")
+        df, source = get_okx_data(symbol, interval_map['okx'], interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        # Try CryptoCompare
+        st.info("🔄 Trying backup API (CryptoCompare)...")
+        df, source = get_cryptocompare_data(symbol, interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        # Try CoinGecko
+        st.info("🔄 Trying backup API (CoinGecko)...")
+        df, source = get_coingecko_data(symbol, interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        # All APIs failed
+        st.error(f"""
+        ❌ **Could not fetch data for {symbol}**
+        
+        **APIs Tried (in order):**
+        1. ❌ Binance
+        2. ❌ OKX
+        3. ❌ CryptoCompare
+        4. ❌ CoinGecko
+        
+        **Possible reasons:**
+        - Symbol might be incorrect (try: BTC, ETH, BNB, SOL, ADA, DOGE)
+        - All APIs are down or rate-limited
+        - Internet connection issues
+        - Symbol not available on these exchanges
+        
+        **Try:**
+        - Use major coins: BTC, ETH, BNB, SOL, ADA
+        - Wait a few minutes and refresh
+        - Check your internet connection
+        - Make sure symbol is correct (uppercase)
+        """)
+        return None, None
+    
     return None, None
 
 def calculate_technical_indicators(df):
