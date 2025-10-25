@@ -408,7 +408,7 @@ def build_feature_matrix(df):
 
     valid = pd.concat([shifted, target], axis=1).dropna()
     X = valid[base_cols].values
-    y = valid['close'].values  # should be 1d already
+    y = valid['close'].values  # 1d already
 
     df['regime'] = df.apply(detect_regime, axis=1)
     regime_shifted = df['regime'].shift(1).reindex(valid.index)
@@ -417,8 +417,8 @@ def build_feature_matrix(df):
 
 def train_models_by_regime(X, y, regimes, model_choice):
     """
-    Train 3 models: up, down, chop.
-    Return dict of models with fit_score for each regime.
+    Train models for up / down / chop regimes.
+    Handles small sample edge cases safely.
     """
     models = {}
     for label in ["up","down","chop"]:
@@ -426,18 +426,30 @@ def train_models_by_regime(X, y, regimes, model_choice):
         X_sub = X[mask]
         y_sub = y[mask]
 
+        # Need enough samples to even try
         if len(X_sub) < 30:
             models[label] = None
             continue
 
+        # split
         split_idx = int(len(X_sub)*0.8)
+        if split_idx < 1:
+            split_idx = 1
+        if split_idx >= len(X_sub):
+            split_idx = len(X_sub) - 1
+
         X_train, X_test = X_sub[:split_idx], X_sub[split_idx:]
         y_train, y_test = y_sub[:split_idx], y_sub[split_idx:]
 
-        # ensure 1d target for sklearn
-        y_train_flat = np.ravel(y_train)
-        y_test_flat = np.ravel(y_test)
+        # guard against empty after split
+        if len(X_train) == 0 or len(y_train) == 0:
+            models[label] = None
+            continue
 
+        y_train_flat = np.ravel(y_train)
+        y_test_flat = np.ravel(y_test) if len(y_test) > 0 else np.array([])
+
+        # choose model
         if model_choice == "Random Forest":
             model = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10)
             model.fit(X_train, y_train_flat)
@@ -500,8 +512,7 @@ def train_models_by_regime(X, y, regimes, model_choice):
 
 def predict_next_close(models, last_features, current_regime):
     """
-    Pick model for current regime.
-    Fall back if missing.
+    Pick model for current regime or fallback.
     """
     order = [current_regime, "up", "down", "chop"]
     for reg in order:
@@ -627,7 +638,7 @@ else:
 
         st.markdown("### 🤖 AI Predictions & Analysis")
 
-        # build features and train per-regime models
+        # build features and train regime models
         X, y, regimes, feature_names, valid_index = build_feature_matrix(df)
 
         future_prices = None
@@ -801,6 +812,7 @@ else:
         stop_dist_abs = current_price * recent_vol * k
         tp_mults = [2.0, 3.0]
 
+        signal_strength = calculate_signal_strength(df)
         bullish_bias = signal_strength >= 2
         bearish_bias = signal_strength <= -2
 
@@ -812,18 +824,18 @@ else:
                 tps = [entry_price + stop_dist_abs * m for m in tp_mults]
 
                 st.info(f"""
-                Entry (long bias): {format_price(entry_price)}
+Entry (long bias): {format_price(entry_price)}
 
-                Take Profit Targets:
-                - TP1: {format_price(tps[0])}
-                - TP2: {format_price(tps[1])}
+Take Profit Targets:
+- TP1: {format_price(tps[0])}
+- TP2: {format_price(tps[1])}
 
-                Protective Stop:
-                - SL: {format_price(stop_loss)}
+Protective Stop:
+- SL: {format_price(stop_loss)}
 
-                Volatility (recent): {recent_vol:.4f}
-                Bias Strength Score: {signal_strength}
-                """)
+Volatility (recent): {recent_vol:.4f}
+Bias Strength Score: {signal_strength}
+""")
 
             if bearish_bias:
                 st.error("#### 🔴 Bearish Scenario")
@@ -832,18 +844,18 @@ else:
                 tps = [entry_price - stop_dist_abs * m for m in tp_mults]
 
                 st.warning(f"""
-                Entry (short bias): {format_price(entry_price)}
+Entry (short bias): {format_price(entry_price)}
 
-                Take Profit Targets:
-                - TP1: {format_price(tps[0])}
-                - TP2: {format_price(tps[1])}
+Take Profit Targets:
+- TP1: {format_price(tps[0])}
+- TP2: {format_price(tps[1])}
 
-                Protective Stop:
-                - SL: {format_price(stop_loss)}
+Protective Stop:
+- SL: {format_price(stop_loss)}
 
-                Volatility (recent): {recent_vol:.4f}
-                Bias Strength Score: {signal_strength}
-                """)
+Volatility (recent): {recent_vol:.4f}
+Bias Strength Score: {signal_strength}
+""")
         else:
             st.warning("No high-conviction scenario. Market viewed as neutral or noisy (|Bias Strength Score| < 2).")
 
@@ -864,15 +876,14 @@ else:
         st.markdown("---")
 
         st.warning("""
-        Risk Management:
-        - This dashboard estimates bias and next-bar move. It is not a guarantee.
-        - Volatility-based SL and TP sizing is used to normalize risk.
-        - Model Fit Score is historical fit, not win probability.
-        - Educational purposes only. Not financial advice.
-        """)
+Risk Management:
+- This dashboard estimates bias and next-bar move. It is not a guarantee.
+- Volatility-based SL and TP sizing is used to normalize risk.
+- Model Fit Score is historical fit, not win probability.
+- Educational purposes only. Not financial advice.
+""")
 
-        # logging prediction
-        if predicted_next_close is not None:
+        if 'predicted_next_close' in locals() and predicted_next_close is not None:
             log_row = {
                 "timestamp": datetime.utcnow().isoformat(),
                 "symbol": symbol,
