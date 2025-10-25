@@ -102,7 +102,6 @@ else:
 
 # =========================================================
 # Timeframes
-# We normalize to realistic exchange intervals now.
 # =========================================================
 TIMEFRAMES = {
     "5 Minutes":  {"limit": 200, "binance": "5m",  "okx": "5m",  "interval_label": "5m"},
@@ -124,7 +123,6 @@ if asset_type != "📸 Analyze Chart Image":
         index=0
     )
 
-    # we will only use 1-step forecast for trading logic
     prediction_periods = st.sidebar.slider("Forecast Horizon (bars to show visually)", 1, 20, 5)
 
     st.sidebar.markdown("### 📊 Technical Indicators")
@@ -288,7 +286,7 @@ def get_forex_data(symbol):
             df['high'] = df['high'].astype(float)
             df['low'] = df['low'].astype(float)
             df['close'] = df['close'].astype(float)
-            # true FX volume is not available here, so set NaN not fake number
+            # true FX volume is not available
             df['volume'] = np.nan
             df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
             df = df.sort_values('timestamp').reset_index(drop=True)
@@ -299,15 +297,14 @@ def get_forex_data(symbol):
 
 def fetch_data(symbol, asset_type, timeframe_cfg):
     if asset_type == "💰 Cryptocurrency" or asset_type == "🔍 Custom Search":
-        # Try OKX
         df, source = get_okx_data(symbol, timeframe_cfg['okx'], timeframe_cfg['limit'])
         if df is not None:
             return df, source
-        # Try Binance
+
         df, source = get_binance_data(symbol, timeframe_cfg['binance'], timeframe_cfg['limit'])
         if df is not None:
             return df, source
-        # Try CryptoCompare (hourly fallback only)
+
         df, source = get_cryptocompare_data(symbol, timeframe_cfg['limit'])
         if df is not None:
             return df, source
@@ -379,7 +376,6 @@ def calculate_technical_indicators(df):
         return df
 
 def detect_regime(row):
-    # simple regime classification
     if pd.isna(row['ema_20']) or pd.isna(row['ema_50']) or pd.isna(row['ema20_slope']):
         return "unknown"
     if row['ema_20'] > row['ema_50'] and row['ema20_slope'] > 0:
@@ -391,11 +387,8 @@ def detect_regime(row):
 def build_feature_matrix(df):
     """
     Build features at time t to predict close at t+1.
-    We shift features down by 1 bar to avoid leakage.
-    We also drop rows with NaN after shift.
-    We exclude volume if it's all NaN (forex case).
+    Shift features by 1 bar to avoid leakage.
     """
-    # candidate features
     base_cols = [
         'close','price_change','volatility',
         'sma_20','sma_50','ema_20','ema_50',
@@ -406,35 +399,30 @@ def build_feature_matrix(df):
         'ema20_slope','hl_spread'
     ]
 
-    # add volume if not all NaN
+    # include volume only if not all NaN
     if not df['volume'].isna().all():
         base_cols.append('volume')
 
-    # shift all feature cols by 1 so we use info known at bar t
     shifted = df[base_cols].shift(1)
-
-    # target is close price at time t (the "next" bar relative to shifted features)
     target = df['close']
 
-    # join
     valid = pd.concat([shifted, target], axis=1).dropna()
     X = valid[base_cols].values
-    y = valid['close'].values
+    y = valid['close'].values  # should be 1d already
 
-    # regime based on previous bar (shifted again)
     df['regime'] = df.apply(detect_regime, axis=1)
     regime_shifted = df['regime'].shift(1).reindex(valid.index)
+
     return X, y, regime_shifted.values, base_cols, valid.index
 
 def train_models_by_regime(X, y, regimes, model_choice):
     """
     Train 3 models: up, down, chop.
-    Only bars with that regime are used.
-    Returns dict of fitted models.
+    Return dict of models with fit_score for each regime.
     """
     models = {}
     for label in ["up","down","chop"]:
-        mask = regimes == label
+        mask = (regimes == label)
         X_sub = X[mask]
         y_sub = y[mask]
 
@@ -442,28 +430,61 @@ def train_models_by_regime(X, y, regimes, model_choice):
             models[label] = None
             continue
 
-        # simple walk-forward style split: last 20% = validation
         split_idx = int(len(X_sub)*0.8)
         X_train, X_test = X_sub[:split_idx], X_sub[split_idx:]
         y_train, y_test = y_sub[:split_idx], y_sub[split_idx:]
 
+        # ensure 1d target for sklearn
+        y_train_flat = np.ravel(y_train)
+        y_test_flat = np.ravel(y_test)
+
         if model_choice == "Random Forest":
             model = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10)
+            model.fit(X_train, y_train_flat)
+
+            if len(X_test) > 0:
+                test_pred = model.predict(X_test)
+                mape = np.mean(np.abs((y_test_flat - test_pred) / y_test_flat)) * 100
+                fit_score = max(0, 100 - mape)
+            else:
+                fit_score = 50.0
+
+            models[label] = {
+                "type": "single",
+                "model": model,
+                "fit_score": fit_score
+            }
+
         elif model_choice == "Gradient Boosting":
             model = GradientBoostingRegressor(n_estimators=100, random_state=42, max_depth=6)
+            model.fit(X_train, y_train_flat)
+
+            if len(X_test) > 0:
+                test_pred = model.predict(X_test)
+                mape = np.mean(np.abs((y_test_flat - test_pred) / y_test_flat)) * 100
+                fit_score = max(0, 100 - mape)
+            else:
+                fit_score = 50.0
+
+            models[label] = {
+                "type": "single",
+                "model": model,
+                "fit_score": fit_score
+            }
+
         else:
-            # Ensemble: store both
+            # ensemble
             rf = RandomForestRegressor(n_estimators=50, random_state=42, max_depth=8)
             gb = GradientBoostingRegressor(n_estimators=50, random_state=42, max_depth=5)
-            rf.fit(X_train, y_train)
-            gb.fit(X_train, y_train)
 
-            # compute fit score (MAPE-based) for reporting
+            rf.fit(X_train, y_train_flat)
+            gb.fit(X_train, y_train_flat)
+
             if len(X_test) > 0:
                 rf_pred = rf.predict(X_test)
                 gb_pred = gb.predict(X_test)
-                rf_mape = np.mean(np.abs((y_test - rf_pred) / y_test)) * 100
-                gb_mape = np.mean(np.abs((y_test - gb_pred) / y_test)) * 100
+                rf_mape = np.mean(np.abs((y_test_flat - rf_pred) / y_test_flat)) * 100
+                gb_mape = np.mean(np.abs((y_test_flat - gb_pred) / y_test_flat)) * 100
                 fit_score = max(0, 100 - ((rf_mape + gb_mape)/2))
             else:
                 fit_score = 50.0
@@ -474,32 +495,14 @@ def train_models_by_regime(X, y, regimes, model_choice):
                 "gb": gb,
                 "fit_score": fit_score
             }
-            continue
 
-        # single model path
-        model.fit(X_train, y_train)
-
-        if len(X_test) > 0:
-            test_pred = model.predict(X_test)
-            mape = np.mean(np.abs((y_test - test_pred) / y_test)) * 100
-            fit_score = max(0, 100 - mape)
-        else:
-            fit_score = 50.0
-
-        models[label] = {
-            "type": "single",
-            "model": model,
-            "fit_score": fit_score
-        }
     return models
 
 def predict_next_close(models, last_features, current_regime):
     """
-    Use only the model that matches the current regime.
-    Returns predicted_next_close, fit_score_used.
-    If no model for that regime fallback to any available model.
+    Pick model for current regime.
+    Fall back if missing.
     """
-    # preferred regime
     order = [current_regime, "up", "down", "chop"]
     for reg in order:
         m = models.get(reg)
@@ -595,7 +598,6 @@ else:
     if df is not None and len(df) > 0:
         df = calculate_technical_indicators(df)
 
-        # compute regime for last bar
         df['regime'] = df.apply(detect_regime, axis=1)
 
         current_price = df['close'].iloc[-1]
@@ -625,9 +627,7 @@ else:
 
         st.markdown("### 🤖 AI Predictions & Analysis")
 
-        # =====================================================
-        # Build aligned feature set and train regime models
-        # =====================================================
+        # build features and train per-regime models
         X, y, regimes, feature_names, valid_index = build_feature_matrix(df)
 
         future_prices = None
@@ -637,32 +637,26 @@ else:
         if len(X) >= 60:
             models = train_models_by_regime(X, y, regimes, ai_model_choice)
 
-            # get last known regime (most recent bar)
             current_regime = df['regime'].iloc[-1] if len(df['regime']) > 0 else "unknown"
 
-            # last_features must use last available row in X
             last_features = X[-1:].copy()
             predicted_next_close, fit_score_used = predict_next_close(models, last_features, current_regime)
 
-            # we will generate a simple future path just for plotting
-            # 1-step prediction is statistically grounded
-            # beyond that we recursively update a temp df for visualization only
             if predicted_next_close is not None:
-                tmp_df = df.copy()
                 tmp_next = predicted_next_close
 
                 vis_prices = [tmp_next]
-                vis_timestamps = []
-                if len(tmp_df['timestamp']) >= 2:
-                    last_ts = tmp_df['timestamp'].iloc[-1]
-                    dt = tmp_df['timestamp'].iloc[-1] - tmp_df['timestamp'].iloc[-2]
+
+                if len(df['timestamp']) >= 2:
+                    last_ts = df['timestamp'].iloc[-1]
+                    dt = df['timestamp'].iloc[-1] - df['timestamp'].iloc[-2]
                 else:
                     last_ts = pd.Timestamp.utcnow()
                     dt = pd.Timedelta(minutes=60)
 
+                vis_timestamps = []
                 for i in range(1, prediction_periods):
                     vis_timestamps.append(last_ts + dt * i)
-                    # naive hold forecast after first step
                     vis_prices.append(tmp_next)
 
                 future_prices = {
@@ -670,12 +664,8 @@ else:
                     "prices": vis_prices
                 }
 
-        # =====================================================
-        # Display model output
-        # =====================================================
         col1, col2, col3 = st.columns(3)
 
-        # predicted_next_close is our actionable 1-step forecast
         if predicted_next_close is not None:
             predicted_change = predicted_next_close - current_price
             predicted_change_pct = (predicted_change / current_price) * 100 if current_price != 0 else 0
@@ -710,9 +700,6 @@ else:
 
         st.markdown("---")
 
-        # =====================================================
-        # Chart
-        # =====================================================
         st.markdown("### 📈 Technical Analysis Chart")
 
         if use_rsi and use_macd:
@@ -752,7 +739,6 @@ else:
             row=1, col=1
         )
 
-        # overlay indicators
         if use_sma:
             fig.add_trace(go.Scatter(x=df['timestamp'], y=df['sma_20'], name='SMA 20', line=dict(color='orange')), row=1, col=1)
             fig.add_trace(go.Scatter(x=df['timestamp'], y=df['sma_50'], name='SMA 50', line=dict(color='blue')), row=1, col=1)
@@ -765,7 +751,6 @@ else:
             fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_upper'], name='BB Upper', line=dict(color='gray', dash='dash')), row=1, col=1)
             fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dash')), row=1, col=1)
 
-        # future prediction path overlay (visual only)
         if future_prices and len(future_prices["timestamps"]) > 0:
             fig.add_trace(
                 go.Scatter(
@@ -778,7 +763,6 @@ else:
                 row=1, col=1
             )
 
-        # volume bars (skip if all NaN)
         if not df['volume'].isna().all():
             colors = ['red' if df['close'].iloc[i] < df['open'].iloc[i] else 'green' for i in range(len(df))]
             fig.add_trace(go.Bar(x=df['timestamp'], y=df['volume'], marker_color=colors, showlegend=False), row=2, col=1)
@@ -800,11 +784,6 @@ else:
         fig.update_layout(height=1000, showlegend=True, xaxis_rangeslider_visible=False, hovermode='x unified')
         st.plotly_chart(fig, use_container_width=True)
 
-        # =====================================================
-        # Trade scenario block
-        # Now gated by |signal_strength| >= 2
-        # Stop and TP scaled by volatility
-        # =====================================================
         st.markdown("### 💰 Trade Scenario (Not advice)")
 
         def format_price(p):
@@ -816,10 +795,8 @@ else:
 
         recent_vol = df['volatility'].iloc[-1] if 'volatility' in df.columns else np.nan
         if np.isnan(recent_vol) or recent_vol == 0:
-            recent_vol = 0.01  # fallback 1%
+            recent_vol = 0.01  # fallback
 
-        # position sizing logic
-        # stop distance = k * volatility% * price
         k = 1.5
         stop_dist_abs = current_price * recent_vol * k
         tp_mults = [2.0, 3.0]
@@ -867,7 +844,6 @@ else:
                 Volatility (recent): {recent_vol:.4f}
                 Bias Strength Score: {signal_strength}
                 """)
-
         else:
             st.warning("No high-conviction scenario. Market viewed as neutral or noisy (|Bias Strength Score| < 2).")
 
@@ -895,10 +871,7 @@ else:
         - Educational purposes only. Not financial advice.
         """)
 
-        # =====================================================
-        # Logging block
-        # We log prediction for later evaluation
-        # =====================================================
+        # logging prediction
         if predicted_next_close is not None:
             log_row = {
                 "timestamp": datetime.utcnow().isoformat(),
