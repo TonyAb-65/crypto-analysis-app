@@ -286,8 +286,7 @@ def get_forex_data(symbol):
             df['high'] = df['high'].astype(float)
             df['low'] = df['low'].astype(float)
             df['close'] = df['close'].astype(float)
-            # true FX volume is not available
-            df['volume'] = np.nan
+            df['volume'] = np.nan  # no true volume
             df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
             df = df.sort_values('timestamp').reset_index(drop=True)
             return df, "Twelve Data"
@@ -418,20 +417,22 @@ def build_feature_matrix(df):
 def train_models_by_regime(X, y, regimes, model_choice):
     """
     Train models for up / down / chop regimes.
-    Handles small sample edge cases safely.
+    With strict guards so we never feed inconsistent shapes to sklearn.
     """
     models = {}
+    MIN_SAMPLES = 50  # require enough data for that regime
+
     for label in ["up","down","chop"]:
         mask = (regimes == label)
         X_sub = X[mask]
         y_sub = y[mask]
 
-        # Need enough samples to even try
-        if len(X_sub) < 30:
+        # must have enough samples
+        if len(X_sub) < MIN_SAMPLES:
             models[label] = None
             continue
 
-        # split
+        # train/test split
         split_idx = int(len(X_sub)*0.8)
         if split_idx < 1:
             split_idx = 1
@@ -441,15 +442,24 @@ def train_models_by_regime(X, y, regimes, model_choice):
         X_train, X_test = X_sub[:split_idx], X_sub[split_idx:]
         y_train, y_test = y_sub[:split_idx], y_sub[split_idx:]
 
-        # guard against empty after split
+        # sanity check lengths
         if len(X_train) == 0 or len(y_train) == 0:
+            models[label] = None
+            continue
+        if len(X_train) != len(y_train):
             models[label] = None
             continue
 
         y_train_flat = np.ravel(y_train)
+
+        if len(X_test) != len(y_test):
+            # discard test if mismatch
+            X_test = np.array([])
+            y_test = np.array([])
+
         y_test_flat = np.ravel(y_test) if len(y_test) > 0 else np.array([])
 
-        # choose model
+        # pick model type
         if model_choice == "Random Forest":
             model = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10)
             model.fit(X_train, y_train_flat)
@@ -511,9 +521,6 @@ def train_models_by_regime(X, y, regimes, model_choice):
     return models
 
 def predict_next_close(models, last_features, current_regime):
-    """
-    Pick model for current regime or fallback.
-    """
     order = [current_regime, "up", "down", "chop"]
     for reg in order:
         m = models.get(reg)
