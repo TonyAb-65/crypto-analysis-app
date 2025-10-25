@@ -87,13 +87,27 @@ else:
 
 # Timeframe selection
 TIMEFRAMES = {
+    "5 Minutes": {"limit": 100, "binance": "5m", "okx": "5m"},
+    "10 Minutes": {"limit": 100, "binance": "10m", "okx": "10m"},
+    "15 Minutes": {"limit": 100, "binance": "15m", "okx": "15m"},
+    "30 Minutes": {"limit": 100, "binance": "30m", "okx": "30m"},
     "1 Hour": {"limit": 100, "binance": "1h", "okx": "1H"},
     "4 Hours": {"limit": 100, "binance": "4h", "okx": "4H"},
     "1 Day": {"limit": 100, "binance": "1d", "okx": "1D"}
 }
 
-timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=0)
+timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=3)  # Default to 1 Hour
 timeframe_config = TIMEFRAMES[timeframe_name]
+
+# Auto-refresh
+auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False, 
+                                   help="Automatically refresh data every 60 seconds")
+
+# Implement auto-refresh
+if auto_refresh:
+    st.sidebar.info("⏱️ Auto-refreshing every 60 seconds...")
+    time.sleep(60)
+    st.rerun()
 
 # AI Configuration
 st.sidebar.markdown("### 🤖 AI Configuration")
@@ -779,27 +793,36 @@ if df is not None and len(df) > 0:
     if is_buy:
         st.success("### 🟢 BUY SETUP")
         entry = current_price
-        tp = entry * 1.03
-        sl = entry * 0.98
+        tp1 = entry * 1.015  # +1.5%
+        tp2 = entry * 1.025  # +2.5%
+        tp3 = entry * 1.035  # +3.5%
+        sl = entry * 0.98    # -2%
         
-        st.info(f"""
-        **Entry:** ${entry:,.2f}
-        **Take Profit:** ${tp:,.2f} (+3%)
-        **Stop Loss:** ${sl:,.2f} (-2%)
-        **Risk/Reward:** 1:1.5
-        """)
+        # Create table data
+        trade_data = {
+            'Level': ['Entry', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
+            'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
+            'Change': ['0%', '+1.5%', '+2.5%', '+3.5%', '-2%'],
+            'Risk/Reward': ['-', '1:0.75', '1:1.25', '1:1.75', '-']
+        }
+        st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+        
     else:
         st.error("### 🔴 SELL SETUP")
         entry = current_price
-        tp = entry * 0.97
-        sl = entry * 1.02
+        tp1 = entry * 0.985  # -1.5%
+        tp2 = entry * 0.975  # -2.5%
+        tp3 = entry * 0.965  # -3.5%
+        sl = entry * 1.02    # +2%
         
-        st.info(f"""
-        **Entry:** ${entry:,.2f}
-        **Take Profit:** ${tp:,.2f} (-3%)
-        **Stop Loss:** ${sl:,.2f} (+2%)
-        **Risk/Reward:** 1:1.5
-        """)
+        # Create table data
+        trade_data = {
+            'Level': ['Entry', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
+            'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
+            'Change': ['0%', '-1.5%', '-2.5%', '-3.5%', '+2%'],
+            'Risk/Reward': ['-', '1:0.75', '1:1.25', '1:1.75', '-']
+        }
+        st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
     
     st.warning("⚠️ **Risk Warning:** Use stop-losses. Never risk more than 1-2% per trade. Not financial advice.")
 
