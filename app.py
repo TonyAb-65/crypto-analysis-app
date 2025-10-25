@@ -309,22 +309,20 @@ timeframe_config = TIMEFRAMES[timeframe_name]
 auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False, 
                                    help="Automatically refresh data every 60 seconds")
 
-# Initialize last refresh time in session state
-if 'last_refresh_time' not in st.session_state:
-    st.session_state.last_refresh_time = time.time()
-
-# Check if it's time to refresh
+# Implement auto-refresh with countdown
 if auto_refresh:
-    current_time = time.time()
-    time_since_refresh = current_time - st.session_state.last_refresh_time
+    if 'last_refresh_time' not in st.session_state:
+        st.session_state.last_refresh_time = time.time()
     
-    if time_since_refresh >= 60:
-        st.session_state.last_refresh_time = current_time
+    elapsed = time.time() - st.session_state.last_refresh_time
+    
+    if elapsed >= 60:
+        st.session_state.last_refresh_time = time.time()
         st.rerun()
     else:
-        remaining = 60 - int(time_since_refresh)
-        st.sidebar.info(f"⏱️ Next refresh in {remaining}s...")
-        time.sleep(1)  # Check every second
+        remaining = int(60 - elapsed)
+        st.sidebar.info(f"⏱️ Next refresh in {remaining}s")
+        time.sleep(1)
         st.rerun()
 
 # AI Configuration
@@ -1082,13 +1080,13 @@ if df is not None and len(df) > 0:
             st.markdown("### 📝 Log Your Trade Results")
             st.info("💡 Log your actual entry and exit prices to help the AI learn and improve predictions!")
             
-            # Get pending predictions (fresh data)
+            # Get pending predictions
             pending_preds = get_pending_predictions()
             
             if len(pending_preds) > 0:
                 st.success(f"✅ You have **{len(pending_preds)}** pending predictions to track")
                 
-                # Display pending predictions table
+                # Display pending predictions
                 st.markdown("#### Recent Predictions (Pending)")
                 display_pending = pending_preds[['id', 'timestamp', 'asset_type', 'pair', 
                                                  'current_price', 'predicted_price', 'confidence']].copy()
@@ -1102,25 +1100,20 @@ if df is not None and len(df) > 0:
                 # Form to log trade
                 st.markdown("#### 📥 Enter Trade Result")
                 
-                # Create a simple mapping for the selectbox
-                pred_options = {}
-                for _, row in pending_preds.iterrows():
-                    pred_options[row['id']] = f"ID {row['id']} - {row['pair']} ({row['asset_type']})"
-                
-                # Selectbox for prediction selection (outside form)
-                selected_pred_id = st.selectbox(
+                # Dropdown selector (OUTSIDE form so it updates)
+                pred_id = st.selectbox(
                     "Select Prediction ID", 
-                    options=list(pred_options.keys()),
-                    format_func=lambda x: pred_options[x],
-                    key="prediction_selector"
+                    options=pending_preds['id'].tolist(),
+                    format_func=lambda x: f"ID {x} - {pending_preds[pending_preds['id']==x]['pair'].values[0]}",
+                    key="pred_selector"
                 )
                 
-                # Get the selected prediction details (this will update when selectbox changes)
-                selected_pred = pending_preds[pending_preds['id'] == selected_pred_id].iloc[0]
+                # Get selected prediction details
+                selected_pred = pending_preds[pending_preds['id'] == pred_id].iloc[0]
                 
-                # Display prediction details in a colored box
+                # Display prediction details (updates when selection changes)
                 st.info(f"""
-                **📊 Selected Prediction Details:**
+                **📊 Prediction Details:**
                 - **Pair:** {selected_pred['pair']}
                 - **Asset Type:** {selected_pred['asset_type']}
                 - **Timeframe:** {selected_pred['timeframe']}
@@ -1131,8 +1124,8 @@ if df is not None and len(df) > 0:
                 - **Time:** {pd.to_datetime(selected_pred['timestamp']).strftime('%Y-%m-%d %H:%M')}
                 """)
                 
-                # Form for entering trade data
-                with st.form("log_trade_form", clear_on_submit=True):
+                # Now the form for entering trade data
+                with st.form("log_trade_form"):
                     st.markdown(f"##### Logging trade for: **{selected_pred['pair']}**")
                     
                     col3, col4 = st.columns(2)
@@ -1142,26 +1135,23 @@ if df is not None and len(df) > 0:
                                                     min_value=0.0, 
                                                     value=float(selected_pred['current_price']),
                                                     step=0.01,
-                                                    format="%.2f",
-                                                    key=f"entry_{selected_pred_id}")
+                                                    format="%.2f")
                     
                     with col4:
                         exit_price = st.number_input("Your Exit Price ($)", 
                                                    min_value=0.0, 
                                                    value=float(selected_pred['predicted_price']),
                                                    step=0.01,
-                                                   format="%.2f",
-                                                   key=f"exit_{selected_pred_id}")
+                                                   format="%.2f")
                     
                     notes = st.text_area("Notes (Optional)", 
-                                       placeholder="Add any observations about the trade...",
-                                       key=f"notes_{selected_pred_id}")
+                                       placeholder="Add any observations about the trade...")
                     
                     submit_button = st.form_submit_button("✅ Submit Trade Result", use_container_width=True)
                     
                     if submit_button:
                         if entry_price > 0 and exit_price > 0:
-                            success = save_trade_result(selected_pred_id, entry_price, exit_price, notes)
+                            success = save_trade_result(pred_id, entry_price, exit_price, notes)
                             if success:
                                 profit_loss = exit_price - entry_price
                                 profit_pct = ((exit_price - entry_price) / entry_price) * 100
@@ -1178,7 +1168,6 @@ if df is not None and len(df) > 0:
                                     - Profit/Loss: ${profit_loss:,.2f} ({profit_pct:+.2f}%)
                                     - The AI will learn from this result!
                                     """)
-                                time.sleep(2)
                                 st.rerun()
                             else:
                                 st.error("❌ Error saving trade result. Please try again.")
