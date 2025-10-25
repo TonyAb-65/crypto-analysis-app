@@ -19,6 +19,14 @@ st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="�
 st.title("🤖 AI Trading Analysis Platform - IMPROVED")
 st.markdown("*Crypto, Forex, Metals + Enhanced AI Predictions*")
 
+# Check if Binance is blocked in user's region
+if 'binance_blocked' not in st.session_state:
+    st.session_state.binance_blocked = False
+
+# Info banner
+if st.session_state.binance_blocked:
+    st.info("ℹ️ **Note:** Binance API is blocked in your region. Using OKX and backup APIs instead.")
+
 # Display current time
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 st.markdown(f"**🕐 Last Updated:** {current_time}")
@@ -452,15 +460,30 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
     - Monitors last N hours
     - Learns from historical patterns
     - Better accuracy
+    - FIXED: Better NaN handling
     """
     try:
         if len(df) < 60:
+            st.warning("⚠️ Need at least 60 data points")
             return None, None, 0, None
         
+        # CRITICAL FIX: Remove all NaN values before creating features
+        df_clean = df.fillna(method='ffill').fillna(method='bfill').fillna(0)
+        
         # Create sequences with context
-        X, y = create_pattern_features(df, lookback=lookback)
+        X, y = create_pattern_features(df_clean, lookback=lookback)
         
         if len(X) < 30:
+            st.warning("⚠️ Not enough data after cleaning")
+            return None, None, 0, None
+        
+        # CRITICAL FIX: Replace any remaining NaN/inf values
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        # Check for valid data
+        if np.any(np.isnan(X)) or np.any(np.isnan(y)):
+            st.error("❌ Data contains NaN values after cleaning")
             return None, None, 0, None
         
         # Scale features
@@ -496,27 +519,31 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         
         # Make predictions
         current_sequence = []
-        lookback_start = len(df) - lookback
+        lookback_start = len(df_clean) - lookback
         
-        for i in range(lookback_start, len(df)):
+        for i in range(lookback_start, len(df_clean)):
             hour_features = [
-                df['close'].iloc[i],
-                df['volume'].iloc[i],
-                df['rsi'].iloc[i] if 'rsi' in df.columns else 50,
-                df['macd'].iloc[i] if 'macd' in df.columns else 0,
-                df['sma_20'].iloc[i] if 'sma_20' in df.columns else df['close'].iloc[i],
-                df['volatility'].iloc[i] if 'volatility' in df.columns else 0
+                df_clean['close'].iloc[i],
+                df_clean['volume'].iloc[i],
+                df_clean['rsi'].iloc[i] if 'rsi' in df_clean.columns else 50,
+                df_clean['macd'].iloc[i] if 'macd' in df_clean.columns else 0,
+                df_clean['sma_20'].iloc[i] if 'sma_20' in df_clean.columns else df_clean['close'].iloc[i],
+                df_clean['volatility'].iloc[i] if 'volatility' in df_clean.columns else 0
             ]
             
             if i > lookback_start:
-                prev_close = df['close'].iloc[i-1]
-                hour_features.append((df['close'].iloc[i] - prev_close) / (prev_close + 1e-10))
+                prev_close = df_clean['close'].iloc[i-1]
+                hour_features.append((df_clean['close'].iloc[i] - prev_close) / (prev_close + 1e-10))
             else:
                 hour_features.append(0)
             
             current_sequence.extend(hour_features)
         
         current_sequence = np.array(current_sequence).reshape(1, -1)
+        
+        # CRITICAL FIX: Clean current sequence
+        current_sequence = np.nan_to_num(current_sequence, nan=0.0, posinf=0.0, neginf=0.0)
+        
         current_scaled = scaler.transform(current_sequence)
         
         # Predict future prices
@@ -525,7 +552,7 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
             rf_pred = rf_model.predict(current_scaled)[0]
             gb_pred = gb_model.predict(current_scaled)[0]
             pred_price = 0.4 * rf_pred + 0.6 * gb_pred  # GB weighted more
-            predictions.append(pred_price)
+            predictions.append(float(pred_price))  # Ensure it's a normal float
         
         # Calculate confidence
         if len(X_test) > 0:
@@ -539,12 +566,14 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
             confidence = 65
         
         # Get RSI insights
-        rsi_insights = analyze_rsi_bounce_patterns(df)
+        rsi_insights = analyze_rsi_bounce_patterns(df_clean)
         
         return predictions, ['Pattern-based features'], confidence, rsi_insights
         
     except Exception as e:
         st.error(f"Prediction error: {str(e)}")
+        import traceback
+        st.error(f"Details: {traceback.format_exc()}")
         return None, None, 0, None
 
 def calculate_signal_strength(df):
