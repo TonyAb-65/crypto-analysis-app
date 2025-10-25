@@ -34,7 +34,8 @@ def init_database():
             confidence REAL NOT NULL,
             signal_strength INTEGER,
             features TEXT,
-            status TEXT DEFAULT 'pending'
+            status TEXT DEFAULT 'analysis_only',
+            trade_decision TEXT DEFAULT NULL
         )
     ''')
     
@@ -80,8 +81,8 @@ def save_prediction(asset_type, pair, timeframe, current_price, predicted_price,
     cursor.execute('''
         INSERT INTO predictions 
         (timestamp, asset_type, pair, timeframe, current_price, predicted_price, 
-         prediction_horizon, confidence, signal_strength, features, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         prediction_horizon, confidence, signal_strength, features, status, trade_decision)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         datetime.now().isoformat(),
         asset_type,
@@ -93,13 +94,47 @@ def save_prediction(asset_type, pair, timeframe, current_price, predicted_price,
         confidence,
         signal_strength,
         json.dumps(features) if features else None,
-        'pending'
+        'analysis_only',  # Default: just analysis, not traded yet
+        None
     ))
     
     prediction_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return prediction_id
+
+def mark_prediction_for_trading(prediction_id):
+    """Mark a prediction as the one you're actually trading"""
+    conn = sqlite3.connect('trading_ai_learning.db')
+    cursor = conn.cursor()
+    
+    # Mark this prediction as "will_trade"
+    cursor.execute('''
+        UPDATE predictions 
+        SET status = 'will_trade', trade_decision = 'selected_for_trade'
+        WHERE id = ?
+    ''', (prediction_id,))
+    
+    conn.commit()
+    conn.close()
+    return True
+
+def get_all_recent_predictions(limit=20):
+    """Get all recent predictions for comparison"""
+    conn = sqlite3.connect('trading_ai_learning.db')
+    
+    query = '''
+        SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
+               predicted_price, confidence, signal_strength, status, trade_decision
+        FROM predictions 
+        WHERE status != 'completed'
+        ORDER BY timestamp DESC
+        LIMIT ?
+    '''
+    
+    df = pd.read_sql_query(query, conn, params=(limit,))
+    conn.close()
+    return df
 
 def save_trade_result(prediction_id, entry_price, exit_price, notes=""):
     """Save actual trade result"""
@@ -144,14 +179,14 @@ def save_trade_result(prediction_id, entry_price, exit_price, notes=""):
     return False
 
 def get_pending_predictions(asset_type=None):
-    """Get predictions that haven't been matched with trades yet"""
+    """Get predictions that you marked for trading (will_trade status)"""
     conn = sqlite3.connect('trading_ai_learning.db')
     
     query = '''
         SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
                predicted_price, confidence, signal_strength
         FROM predictions 
-        WHERE status = 'pending'
+        WHERE status = 'will_trade'
     '''
     
     if asset_type:
@@ -1077,104 +1112,171 @@ if df is not None and len(df) > 0:
         
         # TAB 1: Log Trade Results
         with tab1:
-            st.markdown("### 📝 Log Your Trade Results")
-            st.info("💡 Log your actual entry and exit prices to help the AI learn and improve predictions!")
+            st.markdown("### 📝 Select & Log Your Trade")
+            st.info("""
+            💡 **Workflow:**
+            1. Review all your predictions below
+            2. Click "📊 I Traded This" on the ONE you actually traded
+            3. Enter your entry and exit prices
+            4. System learns from your actual trade!
+            """)
             
-            # Get pending predictions
-            pending_preds = get_pending_predictions()
+            # Get all recent predictions for comparison
+            all_predictions = get_all_recent_predictions(limit=20)
             
-            if len(pending_preds) > 0:
-                st.success(f"✅ You have **{len(pending_preds)}** pending predictions to track")
+            if len(all_predictions) > 0:
+                st.markdown("#### 🔍 All Your Recent Predictions (Compare & Choose)")
                 
-                # Display pending predictions
-                st.markdown("#### Recent Predictions (Pending)")
-                display_pending = pending_preds[['id', 'timestamp', 'asset_type', 'pair', 
-                                                 'current_price', 'predicted_price', 'confidence']].copy()
-                display_pending['timestamp'] = pd.to_datetime(display_pending['timestamp']).dt.strftime('%Y-%m-%d %H:%M')
-                display_pending['current_price'] = display_pending['current_price'].apply(lambda x: f"${x:,.2f}")
-                display_pending['predicted_price'] = display_pending['predicted_price'].apply(lambda x: f"${x:,.2f}")
-                display_pending['confidence'] = display_pending['confidence'].apply(lambda x: f"{x:.1f}%")
-                display_pending.columns = ['ID', 'Time', 'Asset', 'Pair', 'Entry Price', 'Predicted', 'Confidence']
-                st.dataframe(display_pending, use_container_width=True, hide_index=True)
+                # Display all predictions with action buttons
+                for idx, row in all_predictions.iterrows():
+                    pred_id = int(row['id'])
+                    status = row['status']
+                    
+                    # Color code based on status
+                    if status == 'will_trade':
+                        status_color = "🟢"
+                        status_text = "SELECTED FOR TRADING"
+                    elif status == 'completed':
+                        status_color = "✅"
+                        status_text = "COMPLETED"
+                    else:
+                        status_color = "⚪"
+                        status_text = "ANALYSIS ONLY"
+                    
+                    with st.expander(f"{status_color} **ID {pred_id}** - {row['pair']} | Confidence: {row['confidence']:.1f}% | {status_text}"):
+                        col1, col2, col3 = st.columns([2, 2, 1])
+                        
+                        with col1:
+                            st.write(f"""
+                            **Asset:** {row['asset_type']}  
+                            **Timeframe:** {row['timeframe']}  
+                            **Time:** {pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d %H:%M')}
+                            """)
+                        
+                        with col2:
+                            st.write(f"""
+                            **Current Price:** ${row['current_price']:,.2f}  
+                            **Predicted Price:** ${row['predicted_price']:,.2f}  
+                            **Signal Strength:** {row['signal_strength']}/10
+                            """)
+                        
+                        with col3:
+                            if status == 'analysis_only':
+                                if st.button(f"📊 I Traded This", key=f"trade_btn_{pred_id}"):
+                                    mark_prediction_for_trading(pred_id)
+                                    st.success(f"✅ Marked ID {pred_id} for trading!")
+                                    time.sleep(1)
+                                    st.rerun()
+                            elif status == 'will_trade':
+                                st.success("✅ Selected")
+                            elif status == 'completed':
+                                st.info("✅ Done")
                 
-                # Form to log trade
-                st.markdown("#### 📥 Enter Trade Result")
+                st.markdown("---")
                 
-                # Dropdown selector (OUTSIDE form so it updates)
-                pred_id = st.selectbox(
-                    "Select Prediction ID", 
-                    options=pending_preds['id'].tolist(),
-                    format_func=lambda x: f"ID {x} - {pending_preds[pending_preds['id']==x]['pair'].values[0]}",
-                    key="pred_selector"
-                )
+                # Get predictions marked for trading
+                trading_preds = get_pending_predictions()
                 
-                # Get selected prediction details
-                selected_pred = pending_preds[pending_preds['id'] == pred_id].iloc[0]
-                
-                # Display prediction details (updates when selection changes)
-                st.info(f"""
-                **📊 Prediction Details:**
-                - **Pair:** {selected_pred['pair']}
-                - **Asset Type:** {selected_pred['asset_type']}
-                - **Timeframe:** {selected_pred['timeframe']}
-                - **Predicted Price:** ${selected_pred['predicted_price']:,.2f}
-                - **Current Price at Prediction:** ${selected_pred['current_price']:,.2f}
-                - **Confidence:** {selected_pred['confidence']:.1f}%
-                - **Signal Strength:** {selected_pred['signal_strength']}/10
-                - **Time:** {pd.to_datetime(selected_pred['timestamp']).strftime('%Y-%m-%d %H:%M')}
-                """)
-                
-                # Now the form for entering trade data
-                with st.form("log_trade_form"):
-                    st.markdown(f"##### Logging trade for: **{selected_pred['pair']}**")
+                if len(trading_preds) > 0:
+                    st.markdown("#### 📥 Enter Trade Results")
+                    st.success(f"✅ You have **{len(trading_preds)}** trade(s) selected to log")
                     
-                    col3, col4 = st.columns(2)
+                    # Show which ones are selected
+                    st.write("**Selected for Trading:**")
+                    for idx, row in trading_preds.iterrows():
+                        st.write(f"- **ID {int(row['id'])}** - {row['pair']} (Predicted: ${row['predicted_price']:,.2f})")
                     
-                    with col3:
-                        entry_price = st.number_input("Your Entry Price ($)", 
-                                                    min_value=0.0, 
-                                                    value=float(selected_pred['current_price']),
-                                                    step=0.01,
-                                                    format="%.2f")
+                    st.markdown("---")
                     
-                    with col4:
-                        exit_price = st.number_input("Your Exit Price ($)", 
-                                                   min_value=0.0, 
-                                                   value=float(selected_pred['predicted_price']),
-                                                   step=0.01,
-                                                   format="%.2f")
+                    # Create dropdown options dictionary
+                    dropdown_options = {}
+                    for idx, row in trading_preds.iterrows():
+                        dropdown_options[int(row['id'])] = f"ID {int(row['id'])} - {row['pair']}"
                     
-                    notes = st.text_area("Notes (Optional)", 
-                                       placeholder="Add any observations about the trade...")
+                    # Dropdown selector
+                    st.markdown("##### 🔽 Select which trade to log results for:")
+                    pred_id = st.selectbox(
+                        "Select Prediction ID", 
+                        options=list(dropdown_options.keys()),
+                        format_func=lambda x: dropdown_options[x],
+                        help="Choose the prediction you want to log results for"
+                    )
                     
-                    submit_button = st.form_submit_button("✅ Submit Trade Result", use_container_width=True)
+                    st.markdown("---")
                     
-                    if submit_button:
-                        if entry_price > 0 and exit_price > 0:
-                            success = save_trade_result(pred_id, entry_price, exit_price, notes)
-                            if success:
-                                profit_loss = exit_price - entry_price
-                                profit_pct = ((exit_price - entry_price) / entry_price) * 100
-                                
-                                if profit_loss > 0:
-                                    st.success(f"""
-                                    ✅ **Trade Logged Successfully for {selected_pred['pair']}!**
-                                    - Profit/Loss: ${profit_loss:,.2f} ({profit_pct:+.2f}%)
-                                    - The AI will learn from this result!
-                                    """)
+                    # Get selected prediction details
+                    selected_pred = trading_preds[trading_preds['id'] == pred_id].iloc[0]
+                    
+                    # Display prediction details
+                    st.info(f"""
+                    **📊 Prediction Details:**
+                    - **Pair:** {selected_pred['pair']}
+                    - **Asset Type:** {selected_pred['asset_type']}
+                    - **Timeframe:** {selected_pred['timeframe']}
+                    - **Predicted Price:** ${selected_pred['predicted_price']:,.2f}
+                    - **Current Price at Prediction:** ${selected_pred['current_price']:,.2f}
+                    - **Confidence:** {selected_pred['confidence']:.1f}%
+                    - **Signal Strength:** {selected_pred['signal_strength']}/10
+                    - **Time:** {pd.to_datetime(selected_pred['timestamp']).strftime('%Y-%m-%d %H:%M')}
+                    """)
+                    
+                    # Form for entering trade data
+                    with st.form("log_trade_form"):
+                        st.markdown(f"##### Logging trade for: **{selected_pred['pair']}**")
+                        
+                        col3, col4 = st.columns(2)
+                        
+                        with col3:
+                            entry_price = st.number_input("Your Entry Price ($)", 
+                                                        min_value=0.0, 
+                                                        value=float(selected_pred['current_price']),
+                                                        step=0.01,
+                                                        format="%.2f")
+                        
+                        with col4:
+                            exit_price = st.number_input("Your Exit Price ($)", 
+                                                       min_value=0.0, 
+                                                       value=float(selected_pred['predicted_price']),
+                                                       step=0.01,
+                                                       format="%.2f")
+                        
+                        notes = st.text_area("Notes (Optional)", 
+                                           placeholder="Add any observations about the trade...")
+                        
+                        submit_button = st.form_submit_button("✅ Submit Trade Result", use_container_width=True)
+                        
+                        if submit_button:
+                            if entry_price > 0 and exit_price > 0:
+                                success = save_trade_result(pred_id, entry_price, exit_price, notes)
+                                if success:
+                                    profit_loss = exit_price - entry_price
+                                    profit_pct = ((exit_price - entry_price) / entry_price) * 100
+                                    
+                                    if profit_loss > 0:
+                                        st.success(f"""
+                                        ✅ **Trade Logged Successfully for {selected_pred['pair']}!**
+                                        - Profit/Loss: ${profit_loss:,.2f} ({profit_pct:+.2f}%)
+                                        - The AI will learn from this result!
+                                        """)
+                                    else:
+                                        st.info(f"""
+                                        ✅ **Trade Logged Successfully for {selected_pred['pair']}!**
+                                        - Profit/Loss: ${profit_loss:,.2f} ({profit_pct:+.2f}%)
+                                        - The AI will learn from this result!
+                                        """)
+                                    st.rerun()
                                 else:
-                                    st.info(f"""
-                                    ✅ **Trade Logged Successfully for {selected_pred['pair']}!**
-                                    - Profit/Loss: ${profit_loss:,.2f} ({profit_pct:+.2f}%)
-                                    - The AI will learn from this result!
-                                    """)
-                                st.rerun()
+                                    st.error("❌ Error saving trade result. Please try again.")
                             else:
-                                st.error("❌ Error saving trade result. Please try again.")
-                        else:
-                            st.error("⚠️ Please enter valid prices greater than 0")
+                                st.error("⚠️ Please enter valid prices greater than 0")
+                else:
+                    st.warning("""
+                    ⚠️ **No trades selected yet!**
+                    
+                    Go through your predictions above and click "📊 I Traded This" on the ONE you actually traded.
+                    """)
             else:
-                st.info("ℹ️ No pending predictions yet. Generate some predictions first to start tracking!")
+                st.info("ℹ️ No predictions yet. Generate some predictions first by analyzing different assets!")
         
         # TAB 2: Performance Statistics
         with tab2:
