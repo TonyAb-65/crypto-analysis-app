@@ -1089,23 +1089,29 @@ if df is not None and len(df) > 0:
                 
                 # Form to log trade
                 st.markdown("#### 📥 Enter Trade Result")
+                
+                # First, let user select prediction outside the form so it updates dynamically
+                pred_id = st.selectbox("Select Prediction ID", 
+                                     options=pending_preds['id'].tolist(),
+                                     format_func=lambda x: f"ID {x} - {pending_preds[pending_preds['id']==x]['pair'].iloc[0]}",
+                                     key="pred_selector")
+                
+                # Get selected prediction details
+                selected_pred = pending_preds[pending_preds['id'] == pred_id].iloc[0]
+                
+                # Display prediction details (updates when selection changes)
+                st.info(f"""
+                **📊 Prediction Details:**
+                - **Pair:** {selected_pred['pair']}
+                - **Asset Type:** {selected_pred['asset_type']}
+                - **Predicted Price:** ${selected_pred['predicted_price']:,.2f}
+                - **Current Price at Prediction:** ${selected_pred['current_price']:,.2f}
+                - **Confidence:** {selected_pred['confidence']:.1f}%
+                - **Time:** {pd.to_datetime(selected_pred['timestamp']).strftime('%Y-%m-%d %H:%M')}
+                """)
+                
+                # Now the form for entering trade data
                 with st.form("log_trade_form"):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        pred_id = st.selectbox("Select Prediction ID", 
-                                             options=pending_preds['id'].tolist(),
-                                             format_func=lambda x: f"ID {x} - {pending_preds[pending_preds['id']==x]['pair'].iloc[0]}")
-                    
-                    with col2:
-                        selected_pred = pending_preds[pending_preds['id'] == pred_id].iloc[0]
-                        st.info(f"""
-                        **Prediction Details:**
-                        - Pair: {selected_pred['pair']}
-                        - Predicted: ${selected_pred['predicted_price']:,.2f}
-                        - Time: {pd.to_datetime(selected_pred['timestamp']).strftime('%Y-%m-%d %H:%M')}
-                        """)
-                    
                     col3, col4 = st.columns(2)
                     
                     with col3:
