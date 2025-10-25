@@ -286,7 +286,7 @@ def get_forex_data(symbol):
             df['high'] = df['high'].astype(float)
             df['low'] = df['low'].astype(float)
             df['close'] = df['close'].astype(float)
-            df['volume'] = np.nan  # no true volume
+            df['volume'] = np.nan  # no true FX volume
             df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
             df = df.sort_values('timestamp').reset_index(drop=True)
             return df, "Twelve Data"
@@ -417,10 +417,10 @@ def build_feature_matrix(df):
 def train_models_by_regime(X, y, regimes, model_choice):
     """
     Train models for up / down / chop regimes.
-    With strict guards so we never feed inconsistent shapes to sklearn.
+    Add strict alignment to avoid inconsistent length crashes.
     """
     models = {}
-    MIN_SAMPLES = 50  # require enough data for that regime
+    MIN_SAMPLES = 50  # require enough samples per regime
 
     for label in ["up","down","chop"]:
         mask = (regimes == label)
@@ -433,7 +433,7 @@ def train_models_by_regime(X, y, regimes, model_choice):
             continue
 
         # train/test split
-        split_idx = int(len(X_sub)*0.8)
+        split_idx = int(len(X_sub) * 0.8)
         if split_idx < 1:
             split_idx = 1
         if split_idx >= len(X_sub):
@@ -442,29 +442,30 @@ def train_models_by_regime(X, y, regimes, model_choice):
         X_train, X_test = X_sub[:split_idx], X_sub[split_idx:]
         y_train, y_test = y_sub[:split_idx], y_sub[split_idx:]
 
-        # sanity check lengths
-        if len(X_train) == 0 or len(y_train) == 0:
-            models[label] = None
-            continue
-        if len(X_train) != len(y_train):
+        # final hard alignment to avoid inconsistent length
+        n_train = min(len(X_train), len(y_train))
+        X_train = X_train[:n_train]
+        y_train = y_train[:n_train]
+
+        n_test = min(len(X_test), len(y_test))
+        X_test = X_test[:n_test]
+        y_test = y_test[:n_test]
+
+        # if after truncation we do not have at least 2 samples skip this regime
+        if n_train < 2:
             models[label] = None
             continue
 
+        # flatten y for sklearn
         y_train_flat = np.ravel(y_train)
+        y_test_flat = np.ravel(y_test) if n_test > 0 else np.array([])
 
-        if len(X_test) != len(y_test):
-            # discard test if mismatch
-            X_test = np.array([])
-            y_test = np.array([])
-
-        y_test_flat = np.ravel(y_test) if len(y_test) > 0 else np.array([])
-
-        # pick model type
+        # choose model
         if model_choice == "Random Forest":
             model = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10)
             model.fit(X_train, y_train_flat)
 
-            if len(X_test) > 0:
+            if n_test > 0:
                 test_pred = model.predict(X_test)
                 mape = np.mean(np.abs((y_test_flat - test_pred) / y_test_flat)) * 100
                 fit_score = max(0, 100 - mape)
@@ -481,7 +482,7 @@ def train_models_by_regime(X, y, regimes, model_choice):
             model = GradientBoostingRegressor(n_estimators=100, random_state=42, max_depth=6)
             model.fit(X_train, y_train_flat)
 
-            if len(X_test) > 0:
+            if n_test > 0:
                 test_pred = model.predict(X_test)
                 mape = np.mean(np.abs((y_test_flat - test_pred) / y_test_flat)) * 100
                 fit_score = max(0, 100 - mape)
@@ -502,12 +503,12 @@ def train_models_by_regime(X, y, regimes, model_choice):
             rf.fit(X_train, y_train_flat)
             gb.fit(X_train, y_train_flat)
 
-            if len(X_test) > 0:
+            if n_test > 0:
                 rf_pred = rf.predict(X_test)
                 gb_pred = gb.predict(X_test)
                 rf_mape = np.mean(np.abs((y_test_flat - rf_pred) / y_test_flat)) * 100
                 gb_mape = np.mean(np.abs((y_test_flat - gb_pred) / y_test_flat)) * 100
-                fit_score = max(0, 100 - ((rf_mape + gb_mape)/2))
+                fit_score = max(0, 100 - ((rf_mape + gb_mape) / 2))
             else:
                 fit_score = 50.0
 
@@ -678,7 +679,7 @@ else:
                     vis_prices.append(tmp_next)
 
                 future_prices = {
-                    "timestamps": vis_timestamps if len(vis_timestamps)>0 else [last_ts + dt],
+                    "timestamps": vis_timestamps if len(vis_timestamps) > 0 else [last_ts + dt],
                     "prices": vis_prices
                 }
 
