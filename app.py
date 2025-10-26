@@ -14,40 +14,10 @@ import sqlite3
 import json
 warnings.filterwarnings('ignore')
 
-"""
-==================== PHASE 1 ENHANCEMENTS ====================
-🆕 NEW FEATURES ADDED:
-1. ✅ 5 Advanced Technical Indicators:
-   - OBV (On-Balance Volume) - Tracks volume flow
-   - MFI (Money Flow Index) - Volume-weighted RSI
-   - ADX (Average Directional Index) - Trend strength
-   - Stochastic Oscillator - Momentum indicator
-   - CCI (Commodity Channel Index) - Cyclical trends
-
-2. ✅ Market Movers Dashboard:
-   - Real-time top gainers
-   - Real-time top losers
-   - 24h price changes
-   - Volume tracking
-
-3. ✅ Batch Request Capability:
-   - Function ready for multi-symbol analysis
-   - Can fetch up to 120 symbols in one call
-   - Optimized for API credit savings
-
-📝 USAGE NOTES:
-- All existing logic and workflow remain unchanged
-- New indicators are optional (toggle in sidebar)
-- Market movers can be enabled/disabled
-- Batch requests ready for future implementation
-
-🎯 SURGICAL CHANGES ONLY:
-- No changes to existing prediction logic
-- No changes to AI model training
-- No changes to database structure
-- Only additive features as requested
-=============================================================
-"""
+# ==================== PHASE 1 ENHANCEMENTS ====================
+# Documentation moved to separate files to keep UI clean
+# See: PHASE1_ENHANCEMENTS_SUMMARY.md for full feature list
+# =============================================================
 
 # ==================== PHASE 1: BATCH REQUEST CAPABILITY ====================
 # NOTE: Ready for use when analyzing multiple symbols simultaneously
@@ -499,10 +469,12 @@ show_market_movers = st.sidebar.checkbox("📈 Show Top Movers", value=False,
 # Function to get market movers
 @st.cache_data(ttl=300)
 def get_market_movers():
-    """Get top movers from popular cryptocurrencies"""
+    """Get top movers from popular cryptocurrencies with OKX fallback"""
     popular_symbols = ['BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'MATIC', 'DOT', 'AVAX']
     movers = []
     
+    # Try Binance first
+    binance_failed = False
     for symbol in popular_symbols:
         try:
             # Get 24h data from Binance
@@ -522,8 +494,42 @@ def get_market_movers():
                     'Change %': price_change_pct,
                     'Volume': volume
                 })
+            else:
+                binance_failed = True
+                break
         except:
-            continue
+            binance_failed = True
+            break
+    
+    # If Binance failed, try OKX
+    if binance_failed or len(movers) == 0:
+        movers = []
+        for symbol in popular_symbols:
+            try:
+                # Get 24h data from OKX
+                url = "https://www.okx.com/api/v5/market/ticker"
+                params = {"instId": f"{symbol}-USDT"}
+                response = requests.get(url, params=params, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('code') == '0' and len(data.get('data', [])) > 0:
+                        ticker = data['data'][0]
+                        current_price = float(ticker['last'])
+                        
+                        # Calculate 24h change
+                        open_24h = float(ticker['open24h'])
+                        price_change_pct = ((current_price - open_24h) / open_24h) * 100
+                        volume = float(ticker['vol24h'])
+                        
+                        movers.append({
+                            'Symbol': symbol,
+                            'Price': current_price,
+                            'Change %': price_change_pct,
+                            'Volume': volume
+                        })
+            except:
+                continue
     
     if movers:
         df = pd.DataFrame(movers)
@@ -1434,15 +1440,61 @@ if df is not None and len(df) > 0:
     # Chart
     st.markdown("### 📊 Technical Chart")
     
+    # Determine how many subplot rows we need based on enabled indicators
+    enabled_subplots = []
+    subplot_titles = ['Price']
+    
+    # Always have price chart
+    base_indicators = []
+    if use_rsi:
+        base_indicators.append(('RSI', 'rsi'))
+    if use_macd:
+        base_indicators.append(('MACD', 'macd'))
+    
+    # Phase 1 indicators
+    phase1_indicators = []
+    if use_mfi:
+        phase1_indicators.append(('MFI', 'mfi'))
+    if use_stoch:
+        phase1_indicators.append(('Stochastic', 'stoch_k'))
+    if use_adx:
+        phase1_indicators.append(('ADX', 'adx'))
+    if use_cci:
+        phase1_indicators.append(('CCI', 'cci'))
+    if use_obv:
+        phase1_indicators.append(('OBV', 'obv'))
+    
+    # Combine all indicators
+    all_indicators = base_indicators + phase1_indicators
+    
+    # Calculate total rows (1 for price + indicator rows)
+    total_rows = 1 + len(all_indicators)
+    
+    # Calculate row heights dynamically
+    if total_rows == 1:
+        row_heights = [1.0]
+    elif total_rows == 2:
+        row_heights = [0.7, 0.3]
+    elif total_rows == 3:
+        row_heights = [0.6, 0.2, 0.2]
+    else:
+        # For 4+ rows: price gets 50%, others split remaining 50%
+        indicator_height = 0.5 / len(all_indicators)
+        row_heights = [0.5] + [indicator_height] * len(all_indicators)
+    
+    # Build subplot titles
+    subplot_titles = ['Price'] + [ind[0] for ind in all_indicators]
+    
+    # Create figure with dynamic rows
     fig = make_subplots(
-        rows=3, cols=1,
+        rows=total_rows, cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.03,
-        row_heights=[0.6, 0.2, 0.2],
-        subplot_titles=['Price', 'RSI', 'MACD']
+        vertical_spacing=0.02,
+        row_heights=row_heights,
+        subplot_titles=subplot_titles
     )
     
-    # Candlestick
+    # Candlestick (always row 1)
     fig.add_trace(
         go.Candlestick(
             x=df['timestamp'],
@@ -1474,7 +1526,7 @@ if df is not None and len(df) > 0:
             row=1, col=1
         )
     
-    # Indicators
+    # Add price indicators to row 1
     if use_sma:
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['sma_20'], name='SMA 20', line=dict(color='orange')), row=1, col=1)
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['sma_50'], name='SMA 50', line=dict(color='blue')), row=1, col=1)
@@ -1483,60 +1535,225 @@ if df is not None and len(df) > 0:
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_upper'], name='BB Upper', line=dict(color='gray', dash='dash')), row=1, col=1)
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dash')), row=1, col=1)
     
+    # Add oscillator indicators to their own rows
+    current_row = 2
+    
     # RSI
-    if use_rsi:
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi'], name='RSI', line=dict(color='blue')), row=2, col=1)
-        fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+    if use_rsi and current_row <= total_rows:
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['rsi'], name='RSI', line=dict(color='blue')), row=current_row, col=1)
+        fig.add_hline(y=70, line_dash="dash", line_color="red", row=current_row, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="green", row=current_row, col=1)
+        current_row += 1
     
     # MACD
-    if use_macd:
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd'], name='MACD', line=dict(color='blue')), row=3, col=1)
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd_signal'], name='Signal', line=dict(color='red')), row=3, col=1)
+    if use_macd and current_row <= total_rows:
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd'], name='MACD', line=dict(color='blue')), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['macd_signal'], name='Signal', line=dict(color='red')), row=current_row, col=1)
+        current_row += 1
     
-    fig.update_layout(height=900, showlegend=True, xaxis_rangeslider_visible=False)
+    # ==================== PHASE 1: NEW INDICATOR CHARTS ====================
+    
+    # MFI
+    if use_mfi and 'mfi' in df.columns and current_row <= total_rows:
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['mfi'], name='MFI', line=dict(color='purple')), row=current_row, col=1)
+        fig.add_hline(y=80, line_dash="dash", line_color="red", row=current_row, col=1)
+        fig.add_hline(y=20, line_dash="dash", line_color="green", row=current_row, col=1)
+        current_row += 1
+    
+    # Stochastic
+    if use_stoch and 'stoch_k' in df.columns and current_row <= total_rows:
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['stoch_k'], name='%K', line=dict(color='blue')), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['stoch_d'], name='%D', line=dict(color='red')), row=current_row, col=1)
+        fig.add_hline(y=80, line_dash="dash", line_color="red", row=current_row, col=1)
+        fig.add_hline(y=20, line_dash="dash", line_color="green", row=current_row, col=1)
+        current_row += 1
+    
+    # ADX
+    if use_adx and 'adx' in df.columns and current_row <= total_rows:
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['adx'], name='ADX', line=dict(color='black', width=2)), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['plus_di'], name='+DI', line=dict(color='green')), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['minus_di'], name='-DI', line=dict(color='red')), row=current_row, col=1)
+        fig.add_hline(y=25, line_dash="dash", line_color="gray", row=current_row, col=1, annotation_text="Trend Threshold")
+        current_row += 1
+    
+    # CCI
+    if use_cci and 'cci' in df.columns and current_row <= total_rows:
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['cci'], name='CCI', line=dict(color='orange')), row=current_row, col=1)
+        fig.add_hline(y=100, line_dash="dash", line_color="red", row=current_row, col=1)
+        fig.add_hline(y=-100, line_dash="dash", line_color="green", row=current_row, col=1)
+        fig.add_hline(y=0, line_dash="dot", line_color="gray", row=current_row, col=1)
+        current_row += 1
+    
+    # OBV
+    if use_obv and 'obv' in df.columns and current_row <= total_rows:
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['obv'], name='OBV', line=dict(color='teal'), fill='tozeroy'), row=current_row, col=1)
+        current_row += 1
+    
+    # Calculate appropriate height based on number of rows
+    chart_height = 400 + (len(all_indicators) * 150)
+    
+    fig.update_layout(height=chart_height, showlegend=True, xaxis_rangeslider_visible=False)
     st.plotly_chart(fig, use_container_width=True)
     
     # Trading recommendations
     st.markdown("### 💰 Trading Recommendations")
     
-    is_buy = signal_strength >= 0
+    # FIX: Signal logic - neutral zone between -2 and +2
     recent_low = df['low'].tail(20).min()
     recent_high = df['high'].tail(20).max()
     
-    if is_buy:
-        st.success("### 🟢 BUY SETUP")
-        entry = current_price
-        tp1 = entry * 1.015  # +1.5%
-        tp2 = entry * 1.025  # +2.5%
-        tp3 = entry * 1.035  # +3.5%
-        sl = entry * 0.98    # -2%
+    # Calculate pullback targets based on current indicators
+    stoch_k = df['stoch_k'].iloc[-1] if 'stoch_k' in df.columns else 50
+    mfi = df['mfi'].iloc[-1] if 'mfi' in df.columns else 50
+    is_overbought = stoch_k > 70 or mfi > 70
+    is_oversold = stoch_k < 30 or mfi < 30
+    
+    # Determine market condition
+    if signal_strength > 2:
+        # BULLISH SIGNAL
+        if is_overbought:
+            # Bullish but overbought - recommend waiting for pullback
+            st.warning("### ⚠️ BULLISH BUT OVERBOUGHT - WAIT FOR PULLBACK")
+            
+            # Calculate ideal entry zones
+            pullback_conservative = current_price * 0.97  # 3% pullback
+            pullback_moderate = current_price * 0.985     # 1.5% pullback
+            
+            st.info(f"""
+            **🎯 Market Analysis:**
+            - Signal: {signal_strength}/10 (Bullish)
+            - Stochastic: {stoch_k:.1f} {'(Overbought ⚠️)' if stoch_k > 70 else ''}
+            - MFI: {mfi:.1f} {'(Overbought ⚠️)' if mfi > 70 else ''}
+            
+            **💡 Recommended Strategy:**
+            ❌ **Don't buy now** - Risk/reward unfavorable at current levels
+            
+            ✅ **Wait for pullback to:**
+            - **Conservative Entry:** ${pullback_conservative:.2f} (when Stochastic drops to 20-30)
+            - **Moderate Entry:** ${pullback_moderate:.2f} (when Stochastic drops to 40-50)
+            
+            **📊 Entry Checklist:**
+            1. Price drops to target zone
+            2. Stochastic oversold (20-30) or neutral (40-50)
+            3. Volume still strong (OBV rising)
+            4. Trend intact (ADX > 25)
+            5. Stochastic starts turning up (bounce confirmation)
+            """)
+            
+            # Show what the setup would look like after pullback
+            ideal_entry = pullback_conservative
+            tp1 = ideal_entry * 1.015
+            tp2 = ideal_entry * 1.025
+            tp3 = ideal_entry * 1.035
+            sl = ideal_entry * 0.985
+            
+            st.markdown("#### 📈 Ideal Setup After Pullback:")
+            trade_data = {
+                'Level': ['Ideal Entry', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
+                'Price': [f"${ideal_entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
+                'Change': ['0%', '+1.5%', '+2.5%', '+3.5%', '-1.5%'],
+                'Risk/Reward': ['-', '1:1', '1:1.67', '1:2.33', '-']
+            }
+            st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+        else:
+            # Bullish and not overbought - good to buy
+            st.success("### 🟢 BUY SETUP")
+            entry = current_price
+            tp1 = entry * 1.015  # +1.5%
+            tp2 = entry * 1.025  # +2.5%
+            tp3 = entry * 1.035  # +3.5%
+            sl = entry * 0.98    # -2%
+            
+            # Create table data
+            trade_data = {
+                'Level': ['Entry', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
+                'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
+                'Change': ['0%', '+1.5%', '+2.5%', '+3.5%', '-2%'],
+                'Risk/Reward': ['-', '1:0.75', '1:1.25', '1:1.75', '-']
+            }
+            st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
         
-        # Create table data
-        trade_data = {
-            'Level': ['Entry', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
-            'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
-            'Change': ['0%', '+1.5%', '+2.5%', '+3.5%', '-2%'],
-            'Risk/Reward': ['-', '1:0.75', '1:1.25', '1:1.75', '-']
-        }
-        st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
-        
+    elif signal_strength < -2:
+        # BEARISH SIGNAL
+        if is_oversold:
+            # Bearish but oversold - recommend waiting for bounce
+            st.warning("### ⚠️ BEARISH BUT OVERSOLD - WAIT FOR BOUNCE")
+            
+            # Calculate ideal entry zones
+            bounce_conservative = current_price * 1.03  # 3% bounce
+            bounce_moderate = current_price * 1.015     # 1.5% bounce
+            
+            st.info(f"""
+            **🎯 Market Analysis:**
+            - Signal: {signal_strength}/10 (Bearish)
+            - Stochastic: {stoch_k:.1f} {'(Oversold ⚠️)' if stoch_k < 30 else ''}
+            - MFI: {mfi:.1f} {'(Oversold ⚠️)' if mfi < 30 else ''}
+            
+            **💡 Recommended Strategy:**
+            ❌ **Don't sell/short now** - Risk/reward unfavorable at current levels
+            
+            ✅ **Wait for bounce to:**
+            - **Conservative Entry:** ${bounce_conservative:.2f} (when Stochastic rises to 70-80)
+            - **Moderate Entry:** ${bounce_moderate:.2f} (when Stochastic rises to 50-60)
+            
+            **📊 Entry Checklist:**
+            1. Price bounces to target zone
+            2. Stochastic overbought (70-80) or neutral (50-60)
+            3. Volume declining (OBV falling)
+            4. Trend down (ADX > 25, -DI > +DI)
+            5. Stochastic starts turning down (rejection confirmation)
+            """)
+        else:
+            # Bearish and not oversold - good to sell
+            st.error("### 🔴 SELL SETUP")
+            entry = current_price
+            tp1 = entry * 0.985  # -1.5%
+            tp2 = entry * 0.975  # -2.5%
+            tp3 = entry * 0.965  # -3.5%
+            sl = entry * 1.02    # +2%
+            
+            # Create table data
+            trade_data = {
+                'Level': ['Entry', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
+                'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
+                'Change': ['0%', '-1.5%', '-2.5%', '-3.5%', '+2%'],
+                'Risk/Reward': ['-', '1:0.75', '1:1.25', '1:1.75', '-']
+            }
+            st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+    
     else:
-        st.error("### 🔴 SELL SETUP")
-        entry = current_price
-        tp1 = entry * 0.985  # -1.5%
-        tp2 = entry * 0.975  # -2.5%
-        tp3 = entry * 0.965  # -3.5%
-        sl = entry * 1.02    # +2%
+        # NEUTRAL SIGNAL (-2 to +2)
+        st.info("### ⚪ NEUTRAL - CONFLICTING SIGNALS")
         
-        # Create table data
-        trade_data = {
-            'Level': ['Entry', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
-            'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
-            'Change': ['0%', '-1.5%', '-2.5%', '-3.5%', '+2%'],
-            'Risk/Reward': ['-', '1:0.75', '1:1.25', '1:1.75', '-']
-        }
-        st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+        st.warning(f"""
+        **📊 Current Signal Strength: {signal_strength}/10 (Neutral Zone)**
+        
+        **⚠️ Why You Should Wait:**
+        - Indicators are giving conflicting signals
+        - No clear directional bias
+        - Risk/reward is unfavorable
+        - High chance of false moves
+        
+        **💡 Recommended Action:**
+        🚫 **Do NOT trade** - Stay on the sidelines
+        
+        **⏰ Wait for:**
+        1. Signal strength > 3 (Bullish) or < -3 (Bearish)
+        2. Multiple indicators aligned in same direction
+        3. Clear trend confirmation (ADX > 25)
+        4. Volume confirmation (OBV trending)
+        
+        **📈 Current Market Conditions:**
+        - Stochastic: {stoch_k:.1f}
+        - MFI: {mfi:.1f}
+        - Price: ${current_price:,.2f}
+        - 20-period Range: ${recent_low:,.2f} - ${recent_high:,.2f}
+        
+        **🎯 Possible Scenarios:**
+        - If price breaks above ${recent_high:,.2f} with volume → Bullish setup
+        - If price breaks below ${recent_low:,.2f} with volume → Bearish setup
+        - If ranging continues → Keep waiting for clarity
+        """)
     
     st.warning("⚠️ **Risk Warning:** Use stop-losses. Never risk more than 1-2% per trade. Not financial advice.")
     
