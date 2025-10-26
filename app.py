@@ -2588,8 +2588,6 @@ if df is not None and len(df) > 0:
                 
             else:
                 # NORMAL MODE: Show completed trades only
-            else:
-                # NORMAL MODE: Show completed trades only
                 # Get completed trades
                 if filter_asset == "All":
                     trades = get_completed_trades(limit=100)
