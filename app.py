@@ -304,9 +304,21 @@ PRECIOUS_METALS = {
 }
 
 FOREX_PAIRS = {
-    "EUR/USD": "EUR/USD",
-    "GBP/USD": "GBP/USD",
-    "USD/JPY": "USD/JPY"
+    "EUR/USD": "EURUSD",
+    "GBP/USD": "GBPUSD",
+    "USD/JPY": "USDJPY",
+    "USD/CHF": "USDCHF",
+    "AUD/USD": "AUDUSD",
+    "USD/CAD": "USDCAD",
+    "NZD/USD": "NZDUSD",
+    "EUR/GBP": "EURGBP",
+    "EUR/JPY": "EURJPY",
+    "GBP/JPY": "GBPJPY",
+    "AUD/JPY": "AUDJPY",
+    "EUR/CHF": "EURCHF",
+    "AUD/CAD": "AUDCAD",
+    "AUD/NZD": "AUDNZD",
+    "CAD/JPY": "CADJPY"
 }
 
 # Select symbol
@@ -544,6 +556,124 @@ def get_coingecko_data(symbol, limit=100):
         st.warning(f"⚠️ CoinGecko API failed: {str(e)}")
         return None, None
 
+@st.cache_data(ttl=300)
+def get_forex_metals_data(symbol, interval="60min", limit=100):
+    """Fetch forex and precious metals data using Twelve Data API with API key"""
+    # Map interval to Twelve Data format
+    interval_map = {
+        "5m": "5min",
+        "10m": "15min",  # Twelve Data doesn't have 10min, use 15min
+        "15m": "15min",
+        "30m": "30min",
+        "1h": "1h",
+        "4h": "4h",
+        "1d": "1day"
+    }
+    
+    mapped_interval = interval_map.get(interval, "1h")
+    
+    # Get API key from secrets
+    try:
+        api_key = st.secrets["TWELVE_DATA_API_KEY"]
+    except Exception as e:
+        st.warning(f"⚠️ Twelve Data API key not found in secrets. Using free tier.")
+        api_key = None
+    
+    # Try Twelve Data API
+    url = "https://api.twelvedata.com/time_series"
+    params = {
+        "symbol": symbol,
+        "interval": mapped_interval,
+        "outputsize": min(limit, 100),
+        "format": "JSON"
+    }
+    
+    # Add API key if available
+    if api_key:
+        params["apikey"] = api_key
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'status' in data and data['status'] == 'error':
+            st.warning(f"⚠️ Twelve Data error: {data.get('message', 'Unknown error')}")
+            return None, None
+        
+        if 'values' not in data or not data['values']:
+            st.warning(f"⚠️ No data returned for {symbol}")
+            return None, None
+        
+        # Convert to DataFrame
+        values = data['values']
+        df = pd.DataFrame(values)
+        
+        # Rename columns and convert types
+        df = df.rename(columns={
+            'datetime': 'timestamp',
+            'open': 'open',
+            'high': 'high',
+            'low': 'low',
+            'close': 'close',
+            'volume': 'volume'
+        })
+        
+        # Convert timestamp to datetime
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        
+        # Convert price columns to float
+        for col in ['open', 'high', 'low', 'close']:
+            df[col] = df[col].astype(float)
+        
+        # Handle volume (may be 0 for forex)
+        if 'volume' in df.columns:
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
+        else:
+            df['volume'] = 0
+        
+        # Sort by timestamp
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        
+        api_status = "Twelve Data (API Key)" if api_key else "Twelve Data (Free)"
+        st.success(f"✅ Loaded {len(df)} data points from {api_status}")
+        return df, api_status
+        
+    except Exception as e:
+        st.warning(f"⚠️ Twelve Data API failed: {str(e)}")
+        
+    # Fallback: Generate sample data (for testing/demo purposes)
+    try:
+        st.info("📊 Using sample data for demonstration...")
+        dates = pd.date_range(end=datetime.now(), periods=limit, freq='H')
+        
+        # Generate realistic price movements
+        base_price = 1.0900 if 'EUR' in symbol else 110.50 if 'JPY' in symbol else 1800 if 'XAU' in symbol else 1.2500
+        
+        prices = []
+        current_price = base_price
+        for i in range(limit):
+            change = np.random.normal(0, base_price * 0.002)  # 0.2% volatility
+            current_price += change
+            prices.append(current_price)
+        
+        df = pd.DataFrame({
+            'timestamp': dates,
+            'open': prices,
+            'high': [p * (1 + abs(np.random.normal(0, 0.001))) for p in prices],
+            'low': [p * (1 - abs(np.random.normal(0, 0.001))) for p in prices],
+            'close': [p + np.random.normal(0, p * 0.001) for p in prices],
+            'volume': [np.random.randint(1000, 10000) for _ in range(limit)]
+        })
+        
+        st.warning("⚠️ Using sample data. Real data unavailable.")
+        return df, "Sample Data"
+        
+    except Exception as e:
+        st.error(f"❌ Error generating sample data: {str(e)}")
+        return None, None
+
 def fetch_data(symbol, asset_type):
     """Main function to fetch data with multiple fallbacks"""
     if asset_type == "💰 Cryptocurrency" or asset_type == "🔍 Custom Search":
@@ -595,6 +725,33 @@ def fetch_data(symbol, asset_type):
         - Wait a few minutes and refresh
         - Check your internet connection
         - Make sure symbol is correct (uppercase)
+        """)
+        return None, None
+    
+    elif asset_type == "💱 Forex" or asset_type == "🏆 Precious Metals":
+        # Fetch forex or precious metals data
+        interval_map = timeframe_config
+        
+        st.info(f"🔄 Fetching {symbol} data...")
+        
+        # Map timeframe to forex API format
+        interval = interval_map['binance']  # Use binance format as reference
+        df, source = get_forex_metals_data(symbol, interval, interval_map['limit'])
+        
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.error(f"""
+        ❌ **Could not fetch data for {symbol}**
+        
+        **Possible reasons:**
+        - API rate limit reached
+        - Symbol format incorrect
+        - Data not available for this pair
+        
+        **Try:**
+        - Wait a few minutes and refresh
+        - Select a different pair
         """)
         return None, None
     
