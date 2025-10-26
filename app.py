@@ -367,6 +367,20 @@ if st.session_state.binance_blocked:
 # Display current time
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 st.markdown(f"**🕐 Last Updated:** {current_time}")
+
+# Display database location (for troubleshooting)
+with st.expander("💾 Database Information", expanded=False):
+    st.info(f"""
+    **Database Location:** `{DB_PATH}`
+    
+    **File Exists:** {'✅ Yes' if DB_PATH.exists() else '❌ No'}
+    
+    **Note:** All your trade history and predictions are saved to this database file.
+    If you move or delete this file, your history will be lost.
+    
+    **Tip:** Use the backup feature in the Trade Tracking tab to save your data.
+    """)
+
 st.markdown("---")
 
 # Sidebar configuration
@@ -374,6 +388,53 @@ st.sidebar.header("⚙️ Configuration")
 
 # Debug mode
 debug_mode = st.sidebar.checkbox("🔧 Debug Mode", value=False, help="Show detailed API information")
+
+# Database Status (always visible for troubleshooting)
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 💾 Database Status")
+try:
+    db_exists = DB_PATH.exists()
+    if db_exists:
+        # Count records
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM predictions")
+        pred_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM trade_results")
+        trade_count = cursor.fetchone()[0]
+        
+        # Get most recent entry
+        cursor.execute("SELECT MAX(timestamp) FROM predictions")
+        last_pred = cursor.fetchone()[0]
+        cursor.execute("SELECT MAX(trade_date) FROM trade_results")
+        last_trade = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        st.sidebar.success(f"✅ Connected")
+        st.sidebar.caption(f"📍 `{DB_PATH.name}`")
+        st.sidebar.caption(f"📊 Predictions: {pred_count}")
+        st.sidebar.caption(f"💰 Trades: {trade_count}")
+        if last_pred:
+            st.sidebar.caption(f"🕐 Last prediction: {last_pred[:16]}")
+        if last_trade:
+            st.sidebar.caption(f"🕐 Last trade: {last_trade[:16]}")
+        
+        # Show full path in expander for troubleshooting
+        with st.sidebar.expander("🔍 Full Path", expanded=False):
+            st.code(str(DB_PATH))
+            if st.button("📋 Copy Path"):
+                st.info("Path shown above - copy manually")
+    else:
+        st.sidebar.warning(f"⚠️ Database not found")
+        st.sidebar.caption(f"Creating at: `{DB_PATH}`")
+        # Try to create it
+        init_database()
+except Exception as e:
+    st.sidebar.error(f"❌ Error")
+    with st.sidebar.expander("Details", expanded=False):
+        st.code(str(e))
+st.sidebar.markdown("---")
 
 # Asset Type Selection
 asset_type = st.sidebar.selectbox(
@@ -1640,11 +1701,272 @@ if df is not None and len(df) > 0:
     # Calculate pullback targets based on current indicators
     stoch_k = df['stoch_k'].iloc[-1] if 'stoch_k' in df.columns else 50
     mfi = df['mfi'].iloc[-1] if 'mfi' in df.columns else 50
+    cci = df['cci'].iloc[-1] if 'cci' in df.columns else 0
+    adx = df['adx'].iloc[-1] if 'adx' in df.columns else 20
+    plus_di = df['plus_di'].iloc[-1] if 'plus_di' in df.columns else 25
+    minus_di = df['minus_di'].iloc[-1] if 'minus_di' in df.columns else 25
+    
     is_overbought = stoch_k > 70 or mfi > 70
     is_oversold = stoch_k < 30 or mfi < 30
     
-    # Determine market condition - TIERED SYSTEM (Option B)
-    if signal_strength >= 3:
+    # Context-aware detection for extreme market conditions
+    is_strong_trend = adx > 40
+    is_extreme_overbought = (stoch_k > 85 or cci > 100) and (mfi > 65)
+    is_extreme_oversold = (stoch_k < 15 or cci < -100) and (mfi < 35)
+    is_bullish_trend = plus_di > minus_di
+    is_bearish_trend = minus_di > plus_di
+    
+    # Determine market condition - CONTEXT-AWARE TIERED SYSTEM (Option B+)
+    
+    # SPECIAL CASE 1: Strong Uptrend but Extremely Overbought (even with neutral signal)
+    if -1 <= signal_strength <= 1 and is_strong_trend and is_extreme_overbought and is_bullish_trend:
+        st.warning("### ⚠️ STRONG UPTREND BUT EXTREMELY OVERBOUGHT")
+        
+        # Calculate pullback targets
+        pullback_3pct = current_price * 0.97
+        pullback_5pct = current_price * 0.95
+        
+        st.info(f"""
+        **🎯 Market Analysis:**
+        - Signal: {signal_strength}/10 (Conflicting: Trend signals vs Overbought oscillators)
+        - Trend: **VERY Strong Bullish** (ADX {adx:.1f}, +DI {plus_di:.1f} >> -DI {minus_di:.1f})
+        - Condition: **Extremely Overbought**
+          - Stochastic: {stoch_k:.1f} {'🔴 Extreme' if stoch_k > 85 else '⚠️ High'}
+          - CCI: {cci:.1f} {'🔴 Extreme' if cci > 100 else '⚠️ High'}
+          - MFI: {mfi:.1f} {'🔴 Overbought' if mfi > 70 else '⚠️ High'}
+        
+        **⚠️ Why Signals Conflict:**
+        - Trend indicators say: BUY (+2 to +3 points)
+        - Oscillators say: OVERBOUGHT (-2 to -3 points)
+        - Result: Signal cancelled out to {signal_strength}/10
+        
+        **💡 Trading Strategy:**
+        
+        ❌ **DO NOT BUY NOW** - Price overextended, pullback likely
+        - Risk of -3% to -5% pullback in next 1-12 hours
+        - Historical pattern shows overbought leads to correction
+        
+        ❌ **DO NOT SHORT** - Trend is too strong (ADX {adx:.1f})
+        - Strong trends can stay overbought longer
+        - Risk of continued upward momentum
+        
+        ✅ **RECOMMENDED ACTION: WAIT FOR PULLBACK**
+        
+        **Entry Strategy:**
+        1. **Wait for pullback to:** ${pullback_3pct:,.2f} - ${pullback_5pct:,.2f} (3-5% down)
+        2. **Confirm conditions:**
+           - Stochastic drops to 20-50 range
+           - Volume still strong (OBV rising)
+           - ADX stays above 30 (trend intact)
+           - Stochastic starts turning up (bounce confirmation)
+        3. **Then enter LONG** with the trend
+        
+        **📊 Ideal Setup After Pullback:**
+        """)
+        
+        # Calculate ideal entry after pullback
+        ideal_entry = pullback_3pct
+        tp1 = ideal_entry * 1.02
+        tp2 = ideal_entry * 1.035
+        tp3 = ideal_entry * 1.05
+        sl = ideal_entry * 0.98
+        
+        trade_data = {
+            'Level': ['Entry (after pullback)', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
+            'Price': [f"${ideal_entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
+            'Change from Entry': ['0%', '+2%', '+3.5%', '+5%', '-2%'],
+            'Risk/Reward': ['-', '1:1', '1:1.75', '1:2.5', '-']
+        }
+        st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+        
+        st.caption(f"""
+        ⏰ **Expected Timing:** Pullback typically occurs within 1-12 hours on 1H timeframe
+        
+        🎯 **Current Price:** ${current_price:,.2f} | **Target Entry:** ${pullback_3pct:,.2f} (-3%)
+        
+        ⚠️ **Risk Level:** MEDIUM (wait for better entry improves risk/reward significantly)
+        """)
+    
+    # SPECIAL CASE 2: Strong Downtrend but Extremely Oversold (even with neutral signal)
+    elif -1 <= signal_strength <= 1 and is_strong_trend and is_extreme_oversold and is_bearish_trend:
+        st.warning("### ⚠️ STRONG DOWNTREND BUT EXTREMELY OVERSOLD")
+        
+        # Calculate bounce targets
+        bounce_3pct = current_price * 1.03
+        bounce_5pct = current_price * 1.05
+        
+        st.info(f"""
+        **🎯 Market Analysis:**
+        - Signal: {signal_strength}/10 (Conflicting: Trend signals vs Oversold oscillators)
+        - Trend: **VERY Strong Bearish** (ADX {adx:.1f}, -DI {minus_di:.1f} >> +DI {plus_di:.1f})
+        - Condition: **Extremely Oversold**
+          - Stochastic: {stoch_k:.1f} {'🔴 Extreme' if stoch_k < 15 else '⚠️ Low'}
+          - CCI: {cci:.1f} {'🔴 Extreme' if cci < -100 else '⚠️ Low'}
+          - MFI: {mfi:.1f} {'🔴 Oversold' if mfi < 30 else '⚠️ Low'}
+        
+        **⚠️ Why Signals Conflict:**
+        - Trend indicators say: SELL (-2 to -3 points)
+        - Oscillators say: OVERSOLD (+2 to +3 points)
+        - Result: Signal cancelled out to {signal_strength}/10
+        
+        **💡 Trading Strategy:**
+        
+        ❌ **DO NOT SELL/SHORT NOW** - Price oversold, bounce likely
+        - Risk of +3% to +5% bounce in next 1-12 hours
+        - Historical pattern shows oversold leads to relief rally
+        
+        ❌ **DO NOT BUY** - Trend is too strong down (ADX {adx:.1f})
+        - Strong downtrends can stay oversold longer
+        - Risk of continued downward momentum
+        
+        ✅ **RECOMMENDED ACTION: WAIT FOR BOUNCE**
+        
+        **Entry Strategy (Short):**
+        1. **Wait for bounce to:** ${bounce_3pct:,.2f} - ${bounce_5pct:,.2f} (3-5% up)
+        2. **Confirm conditions:**
+           - Stochastic rises to 50-80 range
+           - Volume declining (OBV falling)
+           - ADX stays above 30 (trend intact)
+           - Stochastic starts turning down (rejection confirmation)
+        3. **Then enter SHORT** with the trend
+        
+        **📊 Ideal Setup After Bounce:**
+        """)
+        
+        # Calculate ideal entry after bounce
+        ideal_entry = bounce_3pct
+        tp1 = ideal_entry * 0.98
+        tp2 = ideal_entry * 0.965
+        tp3 = ideal_entry * 0.95
+        sl = ideal_entry * 1.02
+        
+        trade_data = {
+            'Level': ['Entry (after bounce)', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
+            'Price': [f"${ideal_entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
+            'Change from Entry': ['0%', '-2%', '-3.5%', '-5%', '+2%'],
+            'Risk/Reward': ['-', '1:1', '1:1.75', '1:2.5', '-']
+        }
+        st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+        
+        st.caption(f"""
+        ⏰ **Expected Timing:** Bounce typically occurs within 1-12 hours on 1H timeframe
+        
+        🎯 **Current Price:** ${current_price:,.2f} | **Target Entry:** ${bounce_3pct:,.2f} (+3%)
+        
+        ⚠️ **Risk Level:** MEDIUM (wait for better entry improves risk/reward significantly)
+        """)
+    
+    # SPECIAL CASE 3: Strong Trend + Extreme Oscillator + Unclear Direction
+    elif -1 <= signal_strength <= 1 and is_strong_trend:
+        di_difference = abs(plus_di - minus_di)
+        is_direction_unclear = di_difference < 5  # DIs within 5 points = no clear direction
+        
+        if is_direction_unclear and (stoch_k > 85 or stoch_k < 15):
+            st.warning("### ⚠️ HIGH VOLATILITY - EXTREME OSCILLATOR IN STRONG TREND")
+            
+            # Get AI prediction if available
+            ai_direction = "bullish" if df['close'].iloc[-1] > df['close'].iloc[-5] else "bearish"
+            
+            st.info(f"""
+            **🎯 Market Analysis:**
+            - Signal: {signal_strength}/10 (Conflicting indicators)
+            - Trend Strength: **VERY Strong** (ADX {adx:.1f})
+            - Direction: **UNCLEAR** (+DI {plus_di:.1f} ≈ -DI {minus_di:.1f}, diff: {di_difference:.1f})
+            - Stochastic: {stoch_k:.1f} {'🔴 EXTREME Overbought' if stoch_k > 85 else '🔴 EXTREME Oversold'}
+            - MFI: {mfi:.1f} ({'Neutral - no volume confirmation' if 40 < mfi < 60 else 'Confirming'})
+            - CCI: {cci:.1f}
+            
+            **⚠️ Why This is Dangerous:**
+            - Very strong trend (ADX {adx:.1f}) but direction unclear
+            - +DI and -DI nearly equal (within {di_difference:.1f} points)
+            - Extreme oscillator reading suggests overextension
+            - High risk of sudden reversal
+            - Conflicting signals = Low confidence
+            
+            **💡 Trading Strategy:**
+            
+            **Option 1: WAIT (RECOMMENDED - Safest)**
+            ✅ Best choice for most traders
+            - Too much uncertainty despite strong trend
+            - Wait for clear direction:
+              * +DI > -DI by 5+ points (bullish confirmation)
+              * -DI > +DI by 5+ points (bearish confirmation)
+            - Wait for Stochastic to normalize (20-80 range)
+            - Current risk/reward unfavorable
+            
+            **Option 2: Small AI-Based Entry (Aggressive)**
+            ⚠️ Only for experienced traders
+            - Market appears {ai_direction} based on recent price action
+            - Consider VERY SMALL position (10-25% of normal size)
+            - Use VERY tight stop loss (1-2% maximum)
+            - Take profits quickly at first sign of weakness
+            - Monitor constantly - this is NOT set-and-forget
+            
+            **📊 If Taking Aggressive Entry (Option 2):**
+            """)
+            
+            if stoch_k > 85:  # Overbought scenario
+                # Micro position with tight stops
+                entry = current_price
+                tp1 = entry * 1.01   # +1% quick exit
+                tp2 = entry * 1.02   # +2% 
+                sl = entry * 0.985   # -1.5% tight stop
+                
+                trade_data = {
+                    'Level': ['Entry (HIGH RISK)', 'TP1 (Quick)', 'TP2', 'Stop Loss'],
+                    'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${sl:,.2f}"],
+                    'Change': ['0%', '+1%', '+2%', '-1.5%'],
+                    'Risk/Reward': ['-', '1:0.67', '1:1.33', '-']
+                }
+                st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+                
+                st.error("""
+                ⚠️ **CRITICAL WARNING:**
+                - This is a HIGH RISK setup
+                - Position size: MAX 10-25% of normal
+                - Exit immediately if Stochastic starts dropping
+                - Direction unclear means reversal can happen anytime
+                - Consider this "gambling" not "trading"
+                """)
+                
+            else:  # Oversold scenario (stoch < 15)
+                entry = current_price
+                tp1 = entry * 0.99   # -1% quick exit
+                tp2 = entry * 0.98   # -2%
+                sl = entry * 1.015   # +1.5% tight stop
+                
+                trade_data = {
+                    'Level': ['Entry (HIGH RISK)', 'TP1 (Quick)', 'TP2', 'Stop Loss'],
+                    'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${sl:,.2f}"],
+                    'Change': ['0%', '-1%', '-2%', '+1.5%'],
+                    'Risk/Reward': ['-', '1:0.67', '1:1.33', '-']
+                }
+                st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+                
+                st.error("""
+                ⚠️ **CRITICAL WARNING:**
+                - This is a HIGH RISK setup
+                - Position size: MAX 10-25% of normal
+                - Exit immediately if Stochastic starts rising
+                - Direction unclear means reversal can happen anytime
+                - Consider this "gambling" not "trading"
+                """)
+            
+            st.caption(f"""
+            🎯 **Current Price:** ${current_price:,.2f}
+            
+            📊 **Wait for Confirmation:**
+            - Clear DI separation (±5 points difference)
+            - Stochastic normalization (20-80 range)
+            - Volume confirmation (OBV trending)
+            
+            ⚠️ **Risk Level:** VERY HIGH (extreme uncertainty)
+            
+            💡 **Recommendation:** 90% of traders should choose Option 1 (WAIT)
+            """)
+    
+    # NORMAL TIERED SYSTEM: Handle all other cases
+    elif signal_strength >= 3:
         # STRONG BULLISH SIGNAL
         if is_overbought:
             # Strong bullish but overbought - recommend waiting for pullback
@@ -1877,11 +2199,35 @@ if df is not None and len(df) > 0:
             with indicator_cols[col_idx % 3]:
                 obv_current = df['obv'].iloc[-1]
                 obv_prev = df['obv'].iloc[-5] if len(df) > 5 else obv_current
-                obv_trend = "📈 Rising" if obv_current > obv_prev else "📉 Falling"
+                obv_change = obv_current - obv_prev
+                
+                # Determine trend with percentage change
+                if obv_prev != 0:
+                    obv_pct_change = (obv_change / abs(obv_prev)) * 100
+                else:
+                    obv_pct_change = 0
+                
+                # Show trend direction clearly
+                if obv_change > 0:
+                    obv_trend = f"📈 Rising"
+                    trend_color = "normal"
+                elif obv_change < 0:
+                    obv_trend = f"📉 Falling"
+                    trend_color = "inverse"
+                else:
+                    obv_trend = "➡️ Flat"
+                    trend_color = "off"
+                
+                # Add context about negative vs positive
+                if obv_current < 0:
+                    context = f"(Negative territory)"
+                else:
+                    context = f"(Positive territory)"
                 
                 st.metric("OBV (Volume Flow)", 
                          f"{obv_current:,.0f}",
-                         obv_trend)
+                         f"{obv_trend} {context}",
+                         delta_color=trend_color)
                 st.caption("Tracks cumulative buying/selling pressure")
             col_idx += 1
         
@@ -2199,39 +2545,79 @@ if df is not None and len(df) > 0:
             st.markdown("### 📋 Trade History")
             
             # Filter options
-            col1, col2 = st.columns([1, 3])
+            col1, col2 = st.columns([2, 2])
             with col1:
                 filter_asset = st.selectbox("Filter by Asset Type", 
                                           ["All", "Cryptocurrency", "Forex", "Precious Metals"])
+            with col2:
+                show_diagnostics = st.checkbox("🔍 Diagnostic Mode", help="Show all database entries for troubleshooting")
             
-            # Get completed trades
-            if filter_asset == "All":
-                trades = get_completed_trades(limit=100)
+            if show_diagnostics:
+                # DIAGNOSTIC MODE: Show ALL database content
+                st.warning("🔍 **Diagnostic Mode Active:** Showing raw database data")
+                try:
+                    conn = sqlite3.connect(str(DB_PATH))
+                    
+                    # Show predictions table
+                    st.markdown("#### 📊 Predictions Table")
+                    query_preds = "SELECT id, timestamp, asset_type, pair, current_price, predicted_price, status FROM predictions ORDER BY timestamp DESC LIMIT 50"
+                    all_preds = pd.read_sql_query(query_preds, conn)
+                    st.caption(f"Total predictions: {len(all_preds)}")
+                    st.dataframe(all_preds, use_container_width=True, height=200)
+                    
+                    # Show trade_results table
+                    st.markdown("#### 💰 Trade Results Table")
+                    query_trades = "SELECT * FROM trade_results ORDER BY trade_date DESC LIMIT 50"
+                    all_trades = pd.read_sql_query(query_trades, conn)
+                    st.caption(f"Total trade results: {len(all_trades)}")
+                    st.dataframe(all_trades, use_container_width=True, height=200)
+                    
+                    conn.close()
+                    
+                    st.info("""
+                    **How to use this diagnostic:**
+                    - If you see your prediction but not in trade_results → You haven't logged the trade yet
+                    - If you see it in both tables → Check if 'status' is 'completed' in predictions
+                    - If missing from both → Prediction wasn't saved (check database path above)
+                    """)
+                    
+                except Exception as e:
+                    st.error(f"❌ Database error: {str(e)}")
+                    with st.expander("Full Error"):
+                        st.code(str(e))
+                
             else:
-                trades = get_completed_trades(asset_type=filter_asset, limit=100)
-            
-            if len(trades) > 0:
-                st.success(f"📊 Showing {len(trades)} completed trades")
-                
-                # Format for display
-                trades_display = trades.copy()
-                trades_display['trade_date'] = pd.to_datetime(trades_display['trade_date']).dt.strftime('%Y-%m-%d %H:%M')
-                trades_display['predicted_price'] = trades_display['predicted_price'].apply(lambda x: f"${x:,.2f}")
-                trades_display['entry_price'] = trades_display['entry_price'].apply(lambda x: f"${x:,.2f}")
-                trades_display['exit_price'] = trades_display['exit_price'].apply(lambda x: f"${x:,.2f}")
-                trades_display['profit_loss'] = trades_display['profit_loss'].apply(lambda x: f"${x:,.2f}")
-                trades_display['profit_loss_pct'] = trades_display['profit_loss_pct'].apply(lambda x: f"{x:+.2f}%")
-                trades_display['prediction_error'] = trades_display['prediction_error'].apply(lambda x: f"{x:.2f}%")
-                
-                trades_display = trades_display[['trade_date', 'asset_type', 'pair', 'predicted_price', 
-                                               'entry_price', 'exit_price', 'profit_loss', 
-                                               'profit_loss_pct', 'prediction_error']]
-                trades_display.columns = ['Date', 'Asset', 'Pair', 'Predicted', 'Entry', 'Exit', 
-                                        'P/L', 'P/L %', 'Error %']
-                
-                st.dataframe(trades_display, use_container_width=True, hide_index=True)
+                # NORMAL MODE: Show completed trades only
             else:
-                st.info("📊 No trade history yet. Complete and log some trades to see history!")
+                # NORMAL MODE: Show completed trades only
+                # Get completed trades
+                if filter_asset == "All":
+                    trades = get_completed_trades(limit=100)
+                else:
+                    trades = get_completed_trades(asset_type=filter_asset, limit=100)
+                
+                if len(trades) > 0:
+                    st.success(f"📊 Showing {len(trades)} completed trades")
+                    
+                    # Format for display
+                    trades_display = trades.copy()
+                    trades_display['trade_date'] = pd.to_datetime(trades_display['trade_date']).dt.strftime('%Y-%m-%d %H:%M')
+                    trades_display['predicted_price'] = trades_display['predicted_price'].apply(lambda x: f"${x:,.2f}")
+                    trades_display['entry_price'] = trades_display['entry_price'].apply(lambda x: f"${x:,.2f}")
+                    trades_display['exit_price'] = trades_display['exit_price'].apply(lambda x: f"${x:,.2f}")
+                    trades_display['profit_loss'] = trades_display['profit_loss'].apply(lambda x: f"${x:,.2f}")
+                    trades_display['profit_loss_pct'] = trades_display['profit_loss_pct'].apply(lambda x: f"{x:+.2f}%")
+                    trades_display['prediction_error'] = trades_display['prediction_error'].apply(lambda x: f"{x:.2f}%")
+                    
+                    trades_display = trades_display[['trade_date', 'asset_type', 'pair', 'predicted_price', 
+                                                   'entry_price', 'exit_price', 'profit_loss', 
+                                                   'profit_loss_pct', 'prediction_error']]
+                    trades_display.columns = ['Date', 'Asset', 'Pair', 'Predicted', 'Entry', 'Exit', 
+                                            'P/L', 'P/L %', 'Error %']
+                    
+                    st.dataframe(trades_display, use_container_width=True, hide_index=True)
+                else:
+                    st.info("📊 No trade history yet. Complete and log some trades to see history!")
         
         # TAB 4: Retrain Model
         with tab4:
