@@ -12,7 +12,15 @@ import warnings
 import time
 import sqlite3
 import json
+from pathlib import Path
+import shutil
 warnings.filterwarnings('ignore')
+
+# ==================== DATABASE PERSISTENCE FIX ====================
+HOME = Path.home()
+DB_PATH = HOME / 'trading_ai_learning.db'
+print(f"💾 Database location: {DB_PATH}")
+# ==================================================================
 
 # ==================== PHASE 1 ENHANCEMENTS ====================
 # Documentation moved to separate files to keep UI clean
@@ -80,7 +88,7 @@ def get_batch_data_binance(symbols_list, interval="1h", limit=100):
 # ==================== DATABASE FUNCTIONS ====================
 def init_database():
     """Initialize SQLite database for trade tracking"""
-    conn = sqlite3.connect('trading_ai_learning.db')
+    conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
     # Predictions table
@@ -137,7 +145,7 @@ def init_database():
 def save_prediction(asset_type, pair, timeframe, current_price, predicted_price, 
                    prediction_horizon, confidence, signal_strength, features):
     """Save a prediction to database"""
-    conn = sqlite3.connect('trading_ai_learning.db')
+    conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
     cursor.execute('''
@@ -166,7 +174,7 @@ def save_prediction(asset_type, pair, timeframe, current_price, predicted_price,
 
 def mark_prediction_for_trading(prediction_id):
     """Mark a prediction as the one you're actually trading"""
-    conn = sqlite3.connect('trading_ai_learning.db')
+    conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
     # Mark this prediction as "will_trade"
@@ -182,7 +190,7 @@ def mark_prediction_for_trading(prediction_id):
 
 def get_all_recent_predictions(limit=20):
     """Get all recent predictions for comparison"""
-    conn = sqlite3.connect('trading_ai_learning.db')
+    conn = sqlite3.connect(str(DB_PATH))
     
     query = '''
         SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
@@ -199,7 +207,7 @@ def get_all_recent_predictions(limit=20):
 
 def save_trade_result(prediction_id, entry_price, exit_price, notes=""):
     """Save actual trade result"""
-    conn = sqlite3.connect('trading_ai_learning.db')
+    conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
     # Get prediction details
@@ -241,7 +249,7 @@ def save_trade_result(prediction_id, entry_price, exit_price, notes=""):
 
 def get_pending_predictions(asset_type=None):
     """Get predictions that you marked for trading (will_trade status)"""
-    conn = sqlite3.connect('trading_ai_learning.db')
+    conn = sqlite3.connect(str(DB_PATH))
     
     query = '''
         SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
@@ -261,7 +269,7 @@ def get_pending_predictions(asset_type=None):
 
 def get_completed_trades(asset_type=None, limit=100):
     """Get completed trades with results"""
-    conn = sqlite3.connect('trading_ai_learning.db')
+    conn = sqlite3.connect(str(DB_PATH))
     
     query = '''
         SELECT 
@@ -286,7 +294,7 @@ def get_completed_trades(asset_type=None, limit=100):
 
 def get_performance_stats(asset_type=None):
     """Get performance statistics"""
-    conn = sqlite3.connect('trading_ai_learning.db')
+    conn = sqlite3.connect(str(DB_PATH))
     
     query = '''
         SELECT 
@@ -309,6 +317,33 @@ def get_performance_stats(asset_type=None):
     
     conn.close()
     return df
+
+def backup_database():
+    """Backup database to downloads folder"""
+    if DB_PATH.exists():
+        try:
+            backup_dir = Path.home() / 'Downloads'
+            backup_dir.mkdir(exist_ok=True)
+            backup_path = backup_dir / f'trading_db_backup_{datetime.now():%Y%m%d_%H%M%S}.db'
+            shutil.copy(DB_PATH, backup_path)
+            return backup_path
+        except Exception as e:
+            return None
+    return None
+
+def export_trades_to_csv():
+    """Export all trades to CSV"""
+    try:
+        trades = get_completed_trades(limit=1000)
+        if len(trades) > 0:
+            csv_dir = Path.home() / 'Downloads'
+            csv_dir.mkdir(exist_ok=True)
+            csv_path = csv_dir / f'trades_export_{datetime.now():%Y%m%d_%H%M%S}.csv'
+            trades.to_csv(csv_path, index=False)
+            return csv_path
+        return None
+    except Exception as e:
+        return None
 
 # Initialize database on startup
 init_database()
