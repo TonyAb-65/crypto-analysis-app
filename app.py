@@ -304,21 +304,21 @@ PRECIOUS_METALS = {
 }
 
 FOREX_PAIRS = {
-    "EUR/USD": "EURUSD",
-    "GBP/USD": "GBPUSD",
-    "USD/JPY": "USDJPY",
-    "USD/CHF": "USDCHF",
-    "AUD/USD": "AUDUSD",
-    "USD/CAD": "USDCAD",
-    "NZD/USD": "NZDUSD",
-    "EUR/GBP": "EURGBP",
-    "EUR/JPY": "EURJPY",
-    "GBP/JPY": "GBPJPY",
-    "AUD/JPY": "AUDJPY",
-    "EUR/CHF": "EURCHF",
-    "AUD/CAD": "AUDCAD",
-    "AUD/NZD": "AUDNZD",
-    "CAD/JPY": "CADJPY"
+    "EUR/USD": "EUR/USD",
+    "GBP/USD": "GBP/USD",
+    "USD/JPY": "USD/JPY",
+    "USD/CHF": "USD/CHF",
+    "AUD/USD": "AUD/USD",
+    "USD/CAD": "USD/CAD",
+    "NZD/USD": "NZD/USD",
+    "EUR/GBP": "EUR/GBP",
+    "EUR/JPY": "EUR/JPY",
+    "GBP/JPY": "GBP/JPY",
+    "AUD/JPY": "AUD/JPY",
+    "EUR/CHF": "EUR/CHF",
+    "AUD/CAD": "AUD/CAD",
+    "AUD/NZD": "AUD/NZD",
+    "CAD/JPY": "CAD/JPY"
 }
 
 # Select symbol
