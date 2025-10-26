@@ -1643,12 +1643,12 @@ if df is not None and len(df) > 0:
     is_overbought = stoch_k > 70 or mfi > 70
     is_oversold = stoch_k < 30 or mfi < 30
     
-    # Determine market condition
-    if signal_strength > 2:
-        # BULLISH SIGNAL
+    # Determine market condition - TIERED SYSTEM (Option B)
+    if signal_strength >= 3:
+        # STRONG BULLISH SIGNAL
         if is_overbought:
-            # Bullish but overbought - recommend waiting for pullback
-            st.warning("### ⚠️ BULLISH BUT OVERBOUGHT - WAIT FOR PULLBACK")
+            # Strong bullish but overbought - recommend waiting for pullback
+            st.warning("### ⚠️ STRONG BULLISH BUT OVERBOUGHT - WAIT FOR PULLBACK")
             
             # Calculate ideal entry zones
             pullback_conservative = current_price * 0.97  # 3% pullback
@@ -1656,7 +1656,8 @@ if df is not None and len(df) > 0:
             
             st.info(f"""
             **🎯 Market Analysis:**
-            - Signal: {signal_strength}/10 (Bullish)
+            - Signal: {signal_strength}/10 (🟢 Strong Bullish)
+            - Confidence: High (80-100%)
             - Stochastic: {stoch_k:.1f} {'(Overbought ⚠️)' if stoch_k > 70 else ''}
             - MFI: {mfi:.1f} {'(Overbought ⚠️)' if mfi > 70 else ''}
             
@@ -1691,8 +1692,9 @@ if df is not None and len(df) > 0:
             }
             st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
         else:
-            # Bullish and not overbought - good to buy
-            st.success("### 🟢 BUY SETUP")
+            # Strong bullish and not overbought - STRONG BUY
+            st.success("### 🟢 STRONG BUY SETUP")
+            st.info(f"**Signal Strength:** {signal_strength}/10 | **Confidence:** High (80-100%)")
             entry = current_price
             tp1 = entry * 1.015  # +1.5%
             tp2 = entry * 1.025  # +2.5%
@@ -1707,12 +1709,45 @@ if df is not None and len(df) > 0:
                 'Risk/Reward': ['-', '1:0.75', '1:1.25', '1:1.75', '-']
             }
             st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+    
+    elif signal_strength >= 1:
+        # WEAK BULLISH SIGNAL (1 to 2.99)
+        st.warning("### 🟡 WEAK BUY SIGNAL")
+        st.info(f"""
+        **📊 Signal Strength:** {signal_strength}/10 (🟡 Weak Bullish)
+        **⚠️ Confidence:** Moderate (50-79%)
         
-    elif signal_strength < -2:
-        # BEARISH SIGNAL
+        **💡 Recommended Strategy:**
+        - Consider SMALLER position size (50% of normal)
+        - Wait for confirmation if patient
+        - Watch for strengthening to 3+ for full position
+        
+        **✅ If Taking Trade:**
+        - Use tighter stop loss
+        - Take profits earlier (TP1-TP2)
+        - Monitor closely for signal weakening
+        """)
+        
+        entry = current_price
+        tp1 = entry * 1.01   # +1% (conservative)
+        tp2 = entry * 1.02   # +2%
+        tp3 = entry * 1.03   # +3%
+        sl = entry * 0.985   # -1.5% (tighter)
+        
+        trade_data = {
+            'Level': ['Entry', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
+            'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
+            'Change': ['0%', '+1%', '+2%', '+3%', '-1.5%'],
+            'Risk/Reward': ['-', '1:0.67', '1:1.33', '1:2', '-']
+        }
+        st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+        st.caption("⚠️ Weak signal - Consider reduced position size or wait for stronger confirmation")
+        
+    elif signal_strength <= -3:
+        # STRONG BEARISH SIGNAL
         if is_oversold:
-            # Bearish but oversold - recommend waiting for bounce
-            st.warning("### ⚠️ BEARISH BUT OVERSOLD - WAIT FOR BOUNCE")
+            # Strong bearish but oversold - recommend waiting for bounce
+            st.warning("### ⚠️ STRONG BEARISH BUT OVERSOLD - WAIT FOR BOUNCE")
             
             # Calculate ideal entry zones
             bounce_conservative = current_price * 1.03  # 3% bounce
@@ -1720,7 +1755,8 @@ if df is not None and len(df) > 0:
             
             st.info(f"""
             **🎯 Market Analysis:**
-            - Signal: {signal_strength}/10 (Bearish)
+            - Signal: {signal_strength}/10 (🔴 Strong Bearish)
+            - Confidence: High (80-100%)
             - Stochastic: {stoch_k:.1f} {'(Oversold ⚠️)' if stoch_k < 30 else ''}
             - MFI: {mfi:.1f} {'(Oversold ⚠️)' if mfi < 30 else ''}
             
@@ -1739,8 +1775,9 @@ if df is not None and len(df) > 0:
             5. Stochastic starts turning down (rejection confirmation)
             """)
         else:
-            # Bearish and not oversold - good to sell
-            st.error("### 🔴 SELL SETUP")
+            # Strong bearish and not oversold - STRONG SELL
+            st.error("### 🔴 STRONG SELL SETUP")
+            st.info(f"**Signal Strength:** {signal_strength}/10 | **Confidence:** High (80-100%)")
             entry = current_price
             tp1 = entry * 0.985  # -1.5%
             tp2 = entry * 0.975  # -2.5%
@@ -1756,14 +1793,48 @@ if df is not None and len(df) > 0:
             }
             st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
     
+    elif signal_strength <= -1:
+        # WEAK BEARISH SIGNAL (-1 to -2.99)
+        st.warning("### 🟡 WEAK SELL SIGNAL")
+        st.info(f"""
+        **📊 Signal Strength:** {signal_strength}/10 (🟡 Weak Bearish)
+        **⚠️ Confidence:** Moderate (50-79%)
+        
+        **💡 Recommended Strategy:**
+        - Consider SMALLER position size (50% of normal)
+        - Wait for confirmation if patient
+        - Watch for weakening to -3 or below for full position
+        
+        **✅ If Taking Trade:**
+        - Use tighter stop loss
+        - Take profits earlier (TP1-TP2)
+        - Monitor closely for signal strengthening
+        """)
+        
+        entry = current_price
+        tp1 = entry * 0.99   # -1% (conservative)
+        tp2 = entry * 0.98   # -2%
+        tp3 = entry * 0.97   # -3%
+        sl = entry * 1.015   # +1.5% (tighter)
+        
+        trade_data = {
+            'Level': ['Entry', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
+            'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
+            'Change': ['0%', '-1%', '-2%', '-3%', '+1.5%'],
+            'Risk/Reward': ['-', '1:0.67', '1:1.33', '1:2', '-']
+        }
+        st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+        st.caption("⚠️ Weak signal - Consider reduced position size or wait for stronger confirmation")
+    
     else:
-        # NEUTRAL SIGNAL (-2 to +2)
-        st.info("### ⚪ NEUTRAL - CONFLICTING SIGNALS")
+        # NEUTRAL SIGNAL (-0.99 to +0.99)
+        st.info("### ⚪ NEUTRAL - NO CLEAR DIRECTION")
         
         st.warning(f"""
-        **📊 Current Signal Strength: {signal_strength}/10 (Neutral Zone)**
+        **📊 Current Signal Strength: {signal_strength}/10 (Neutral)**
+        **⚠️ Confidence:** Low (<50%)
         
-        **⚠️ Why You Should Wait:**
+        **Why You Should Wait:**
         - Indicators are giving conflicting signals
         - No clear directional bias
         - Risk/reward is unfavorable
@@ -1773,10 +1844,11 @@ if df is not None and len(df) > 0:
         🚫 **Do NOT trade** - Stay on the sidelines
         
         **⏰ Wait for:**
-        1. Signal strength > 3 (Bullish) or < -3 (Bearish)
-        2. Multiple indicators aligned in same direction
-        3. Clear trend confirmation (ADX > 25)
-        4. Volume confirmation (OBV trending)
+        1. Signal strength ≥ 3 (Strong Bullish) or ≤ -3 (Strong Bearish)
+        2. Or signal ≥ 1 or ≤ -1 (Weak but tradeable with caution)
+        3. Multiple indicators aligned in same direction
+        4. Clear trend confirmation (ADX > 25)
+        5. Volume confirmation (OBV trending)
         
         **📈 Current Market Conditions:**
         - Stochastic: {stoch_k:.1f}
@@ -1785,8 +1857,8 @@ if df is not None and len(df) > 0:
         - 20-period Range: ${recent_low:,.2f} - ${recent_high:,.2f}
         
         **🎯 Possible Scenarios:**
-        - If price breaks above ${recent_high:,.2f} with volume → Bullish setup
-        - If price breaks below ${recent_low:,.2f} with volume → Bearish setup
+        - If price breaks above ${recent_high:,.2f} with volume → Watch for bullish signal
+        - If price breaks below ${recent_low:,.2f} with volume → Watch for bearish signal
         - If ranging continues → Keep waiting for clarity
         """)
     
