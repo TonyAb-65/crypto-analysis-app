@@ -2201,32 +2201,51 @@ if df is not None and len(df) > 0:
                 obv_prev = df['obv'].iloc[-5] if len(df) > 5 else obv_current
                 obv_change = obv_current - obv_prev
                 
-                # Determine trend with percentage change
-                if obv_prev != 0:
-                    obv_pct_change = (obv_change / abs(obv_prev)) * 100
+                # Determine pressure type based on sign
+                if obv_current < 0:
+                    pressure_type = "Selling"
+                    base_color = "inverse"
                 else:
-                    obv_pct_change = 0
+                    pressure_type = "Buying"
+                    base_color = "normal"
                 
-                # Show trend direction clearly
+                # Determine momentum based on change
                 if obv_change > 0:
-                    obv_trend = f"📈 Rising"
-                    trend_color = "normal"
+                    # Value is increasing (going up)
+                    if obv_current < 0:
+                        # Negative becoming less negative = Selling pressure DECREASING
+                        momentum = "Decreasing"
+                        momentum_emoji = "📊"  # Neutral/improving
+                        trend_color = "normal"  # Green (good - selling easing)
+                    else:
+                        # Positive increasing = Buying pressure INCREASING
+                        momentum = "Increasing"
+                        momentum_emoji = "📈"
+                        trend_color = "normal"  # Green (good)
                 elif obv_change < 0:
-                    obv_trend = f"📉 Falling"
-                    trend_color = "inverse"
+                    # Value is decreasing (going down)
+                    if obv_current < 0:
+                        # Negative becoming more negative = Selling pressure INCREASING
+                        momentum = "Increasing"
+                        momentum_emoji = "📉"
+                        trend_color = "inverse"  # Red (bad - more selling)
+                    else:
+                        # Positive decreasing = Buying pressure DECREASING
+                        momentum = "Decreasing"
+                        momentum_emoji = "📊"  # Neutral/warning
+                        trend_color = "inverse"  # Red (bad)
                 else:
-                    obv_trend = "➡️ Flat"
+                    # No change
+                    momentum = "Flat"
+                    momentum_emoji = "➡️"
                     trend_color = "off"
                 
-                # Add context about negative vs positive
-                if obv_current < 0:
-                    context = f"(Negative territory)"
-                else:
-                    context = f"(Positive territory)"
+                # Construct clear status message
+                obv_status = f"{momentum_emoji} {pressure_type} - {momentum}"
                 
                 st.metric("OBV (Volume Flow)", 
                          f"{obv_current:,.0f}",
-                         f"{obv_trend} {context}",
+                         obv_status,
                          delta_color=trend_color)
                 st.caption("Tracks cumulative buying/selling pressure")
             col_idx += 1
