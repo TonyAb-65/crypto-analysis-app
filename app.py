@@ -139,6 +139,19 @@ def init_database():
         )
     ''')
     
+    # ==================== ONE-TIME FIX: Update empty/NULL status values ====================
+    # Fix existing predictions that have empty or NULL status
+    cursor.execute('''
+        UPDATE predictions 
+        SET status = 'analysis_only' 
+        WHERE status IS NULL OR status = '' OR LENGTH(TRIM(status)) = 0
+    ''')
+    
+    fixed_count = cursor.rowcount
+    if fixed_count > 0:
+        print(f"✅ Database fix: Updated {fixed_count} predictions with empty status to 'analysis_only'")
+    # ======================================================================================
+    
     conn.commit()
     conn.close()
 
