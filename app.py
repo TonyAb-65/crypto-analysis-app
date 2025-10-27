@@ -1704,10 +1704,10 @@ if df is not None and len(df) > 0:
             st.metric("AI Prediction", f"${predictions[-1]:,.2f}", f"{pred_change:+.2f}%")
         
         with col2:
-            confidence_pct = confidence * 100
-            confidence_color = "🟢" if confidence > 0.8 else "🟡" if confidence > 0.6 else "🔴"
-            st.metric("Confidence", f"{confidence_color} {confidence_pct:.1f}%", 
-                     "High" if confidence > 0.8 else "Medium" if confidence > 0.6 else "Low")
+            # Confidence is already 0-100 range from model, no need to multiply
+            confidence_color = "🟢" if confidence > 80 else "🟡" if confidence > 60 else "🔴"
+            st.metric("Confidence", f"{confidence_color} {confidence:.1f}%", 
+                     "High" if confidence > 80 else "Medium" if confidence > 60 else "Low")
         
         with col3:
             signal_emoji = "🟢" if signal_strength > 0 else "🔴" if signal_strength < 0 else "⚪"
