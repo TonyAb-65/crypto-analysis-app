@@ -174,69 +174,41 @@ def save_prediction(asset_type, pair, timeframe, current_price, predicted_price,
 
 def mark_prediction_for_trading(prediction_id):
     """Mark a prediction as the one you're actually trading"""
-    conn = sqlite3.connect(str(DB_PATH), isolation_level=None)  # Autocommit mode
+    conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
-    try:
-        # Mark this prediction as "will_trade"
-        cursor.execute('''
-            UPDATE predictions 
-            SET status = 'will_trade'
-            WHERE id = ?
-        ''', (prediction_id,))
-        
-        # Force immediate commit
-        conn.commit()
-        
-        # Verify the update succeeded by reading it back
-        cursor.execute("SELECT id, status, pair FROM predictions WHERE id = ?", (prediction_id,))
-        result = cursor.fetchone()
-        
-        if result:
-            pred_id, status, pair = result
-            success = (status == 'will_trade')
-            conn.close()
-            
-            if success:
-                return {'success': True, 'id': pred_id, 'pair': pair, 'status': status}
-            else:
-                return {'success': False, 'error': f'Status is {status}, expected will_trade'}
-        else:
-            conn.close()
-            return {'success': False, 'error': 'Prediction not found'}
-            
-    except Exception as e:
-        conn.close()
-        return {'success': False, 'error': str(e)}
+    # Mark this prediction as "will_trade"
+    cursor.execute('''
+        UPDATE predictions 
+        SET status = 'will_trade'
+        WHERE id = ?
+    ''', (prediction_id,))
+    
+    conn.commit()
+    conn.close()
+    return True
 
 def get_all_recent_predictions(limit=20):
     """Get all recent predictions marked for trading (tracked trades only)"""
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        
-        query = '''
-            SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
-                   predicted_price, confidence, signal_strength, status
-            FROM predictions 
-            WHERE status IN ('will_trade', 'completed')
-            ORDER BY 
-                CASE status 
-                    WHEN 'will_trade' THEN 1 
-                    WHEN 'completed' THEN 2 
-                END,
-                timestamp DESC
-            LIMIT ?
-        '''
-        
-        df = pd.read_sql_query(query, conn, params=(limit,))
-        conn.close()
-        
-        print(f"✅ get_all_recent_predictions: Found {len(df)} tracked trades")
-        return df
-        
-    except Exception as e:
-        print(f"❌ Error in get_all_recent_predictions: {e}")
-        return pd.DataFrame()  # Return empty DataFrame on error
+    conn = sqlite3.connect(str(DB_PATH))
+    
+    query = '''
+        SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
+               predicted_price, confidence, signal_strength, status
+        FROM predictions 
+        WHERE status IN ('will_trade', 'completed')
+        ORDER BY 
+            CASE status 
+                WHEN 'will_trade' THEN 1 
+                WHEN 'completed' THEN 2 
+            END,
+            timestamp DESC
+        LIMIT ?
+    '''
+    
+    df = pd.read_sql_query(query, conn, params=(limit,))
+    conn.close()
+    return df
 
 def save_trade_result(prediction_id, entry_price, exit_price, notes=""):
     """Save actual trade result"""
@@ -1760,73 +1732,10 @@ if df is not None and len(df) > 0:
             col_btn1, col_btn2 = st.columns([1, 3])
             with col_btn1:
                 if st.button("📊 Track This Trade", key=f"track_{prediction_id}", type="primary", use_container_width=True):
-                    
-                    # DIAGNOSTIC: Show what we're about to update
-                    st.warning(f"🔍 **DEBUG:** Attempting to track Prediction ID: {prediction_id}")
-                    
-                    # Check current status BEFORE update
-                    conn_before = sqlite3.connect(str(DB_PATH))
-                    cursor_before = conn_before.cursor()
-                    cursor_before.execute("SELECT id, status, pair FROM predictions WHERE id = ?", (prediction_id,))
-                    before_result = cursor_before.fetchone()
-                    conn_before.close()
-                    
-                    if before_result:
-                        st.info(f"**BEFORE UPDATE:**\n- ID: {before_result[0]}\n- Status: '{before_result[1]}'\n- Pair: {before_result[2]}")
-                    else:
-                        st.error(f"❌ **PROBLEM:** Prediction ID {prediction_id} NOT FOUND in database!")
-                        st.stop()
-                    
-                    # Try to update
-                    result = mark_prediction_for_trading(prediction_id)
-                    
-                    # Check status AFTER update  
-                    conn_after = sqlite3.connect(str(DB_PATH))
-                    cursor_after = conn_after.cursor()
-                    cursor_after.execute("SELECT id, status, pair FROM predictions WHERE id = ?", (prediction_id,))
-                    after_result = cursor_after.fetchone()
-                    conn_after.close()
-                    
-                    if after_result:
-                        st.info(f"**AFTER UPDATE:**\n- ID: {after_result[0]}\n- Status: '{after_result[1]}'\n- Pair: {after_result[2]}")
-                    
-                    # Compare before and after
-                    if before_result and after_result:
-                        if before_result[1] != after_result[1]:
-                            st.success(f"✅ **Status Changed!** '{before_result[1]}' → '{after_result[1]}'")
-                        else:
-                            st.error(f"❌ **Status NOT Changed!** Still '{after_result[1]}'")
-                    
-                    if result['success']:
-                        # Show immediate confirmation with full details
-                        st.success(f"""✅ **Trade Successfully Tracked!**
-                        
-📋 **Prediction ID:** {result['id']}  
-💱 **Pair:** {result['pair']}  
-✅ **New Status:** {result['status']}  
-📍 **Database:** {DB_PATH}
-
-**Verification:**
-- Before: {before_result[1] if before_result else 'NOT FOUND'}
-- After: {after_result[1] if after_result else 'NOT FOUND'}
-
-**Next Steps:**
-1. Go to **AI Learning** tab
-2. Open **📝 Log Trade**
-3. Check the diagnostic to verify
-                        """)
-                        time.sleep(3.0)  # Give user time to read confirmation
-                        st.rerun()
-                    else:
-                        st.error(f"""❌ **Failed to Track Trade**
-                        
-**Prediction ID:** {prediction_id}  
-**Error:** {result.get('error', 'Unknown error')}
-**Before Status:** {before_result[1] if before_result else 'NOT FOUND'}
-**After Status:** {after_result[1] if after_result else 'NOT FOUND'}
-
-**This means the UPDATE query is not working!**
-                        """)
+                    mark_prediction_for_trading(prediction_id)
+                    st.success("✅ Trade tracked! This prediction will now appear in AI Learning section.")
+                    st.rerun()
+            
             with col_btn2:
                 st.caption("""
                 Only tracked trades appear in AI Learning section.
@@ -2875,180 +2784,6 @@ if df is not None and len(df) > 0:
             
             ✅ This keeps your AI learning focused on trades you actually take.
             """)
-            
-            # ==================== DIAGNOSTIC MODE ====================
-            with st.expander("🔍 Database Diagnostic (Click to Debug)"):
-                st.warning("**Debug Info - Shows what's actually in the database**")
-                
-                try:
-                    conn_diag = sqlite3.connect(str(DB_PATH))
-                    cursor_diag = conn_diag.cursor()
-                    
-                    # CHECK 1: Does status column exist?
-                    st.markdown("### 🔍 SCHEMA CHECK")
-                    cursor_diag.execute("PRAGMA table_info(predictions)")
-                    columns = cursor_diag.fetchall()
-                    st.write("**Columns in predictions table:**")
-                    column_df = pd.DataFrame(columns, columns=['cid', 'name', 'type', 'notnull', 'dflt_value', 'pk'])
-                    st.dataframe(column_df)
-                    
-                    # Check if status column exists
-                    has_status = any(col[1] == 'status' for col in columns)
-                    if has_status:
-                        st.success("✅ 'status' column EXISTS")
-                    else:
-                        st.error("❌ 'status' column MISSING!")
-                    
-                    st.markdown("---")
-                    
-                    # CHECK 2: Get all predictions count
-                    st.markdown("### 📊 DATA CHECK")
-                    total_preds = pd.read_sql_query("SELECT COUNT(*) as count FROM predictions", conn_diag)
-                    st.write(f"📊 **Total Predictions in Database:** {total_preds['count'].iloc[0]}")
-                    
-                    # CHECK 3: Show status values including NULL
-                    if has_status:
-                        status_with_null = pd.read_sql_query("""
-                            SELECT 
-                                CASE 
-                                    WHEN status IS NULL THEN '❌ NULL'
-                                    WHEN status = '' THEN '❌ EMPTY STRING'
-                                    WHEN LENGTH(status) = 0 THEN '❌ ZERO LENGTH'
-                                    ELSE status 
-                                END as status,
-                                COUNT(*) as count 
-                            FROM predictions 
-                            GROUP BY status
-                        """, conn_diag)
-                        st.write("**Predictions by Status (including NULL):**")
-                        st.dataframe(status_with_null)
-                        
-                        # EXTRA DEBUG: Show raw status values from first 5 predictions
-                        st.markdown("### 🔬 RAW DATA INSPECTION")
-                        raw_status = pd.read_sql_query("""
-                            SELECT id, pair, status, 
-                                   LENGTH(status) as status_length,
-                                   CASE 
-                                       WHEN status IS NULL THEN 'NULL'
-                                       WHEN status = '' THEN 'EMPTY_STRING'
-                                       ELSE 'HAS_VALUE: ' || status
-                                   END as status_debug
-                            FROM predictions 
-                            ORDER BY timestamp DESC 
-                            LIMIT 5
-                        """, conn_diag)
-                        st.write("**Raw Status Values from Last 5 Predictions:**")
-                        st.dataframe(raw_status)
-                    else:
-                        st.error("Cannot check status - column doesn't exist!")
-                    
-                    # CHECK 4: Get last 5 predictions with ALL details
-                    if has_status:
-                        recent = pd.read_sql_query("""
-                            SELECT id, timestamp, pair, 
-                                   CASE WHEN status IS NULL THEN '❌ NULL' ELSE status END as status,
-                                   confidence, signal_strength
-                            FROM predictions 
-                            ORDER BY timestamp DESC 
-                            LIMIT 5
-                        """, conn_diag)
-                    else:
-                        recent = pd.read_sql_query("""
-                            SELECT id, timestamp, pair, confidence, signal_strength
-                            FROM predictions 
-                            ORDER BY timestamp DESC 
-                            LIMIT 5
-                        """, conn_diag)
-                    st.write("**Last 5 Predictions (Most Recent):**")
-                    st.dataframe(recent)
-                    
-                    # CHECK 5: Get tracked trades specifically
-                    if has_status:
-                        tracked = pd.read_sql_query("""
-                            SELECT id, timestamp, pair, status, confidence
-                            FROM predictions 
-                            WHERE status = 'will_trade'
-                            ORDER BY timestamp DESC
-                        """, conn_diag)
-                        st.write(f"**Tracked Trades (status='will_trade'):** {len(tracked)}")
-                        if len(tracked) > 0:
-                            st.dataframe(tracked)
-                        else:
-                            st.warning("No predictions found with status='will_trade'")
-                    
-                    st.success(f"✅ Database Path: `{DB_PATH}`")
-                    
-                    # FIX BUTTON: Add status column or fix NULL values
-                    st.markdown("---")
-                    st.markdown("### 🔧 DATABASE FIX")
-                    
-                    if not has_status:
-                        st.error("**PROBLEM FOUND:** status column is missing!")
-                        if st.button("🔧 Fix Database - Add Status Column", type="primary"):
-                            try:
-                                conn_fix = sqlite3.connect(str(DB_PATH))
-                                cursor_fix = conn_fix.cursor()
-                                cursor_fix.execute("ALTER TABLE predictions ADD COLUMN status TEXT DEFAULT 'analysis_only'")
-                                cursor_fix.execute("UPDATE predictions SET status = 'analysis_only' WHERE status IS NULL")
-                                conn_fix.commit()
-                                conn_fix.close()
-                                st.success("✅ Status column added! Please refresh the diagnostic.")
-                                time.sleep(1)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Fix failed: {e}")
-                    else:
-                        # Check if all are NULL or empty
-                        null_count = pd.read_sql_query("SELECT COUNT(*) as count FROM predictions WHERE status IS NULL", conn_diag)
-                        empty_count = pd.read_sql_query("SELECT COUNT(*) as count FROM predictions WHERE status = '' OR LENGTH(status) = 0", conn_diag)
-                        
-                        total_bad = null_count['count'].iloc[0] + empty_count['count'].iloc[0]
-                        
-                        if total_bad > 0:
-                            st.warning(f"""**PROBLEM FOUND:** 
-- {null_count['count'].iloc[0]} predictions have NULL status
-- {empty_count['count'].iloc[0]} predictions have EMPTY status
-- **Total to fix: {total_bad}**
-                            """)
-                            if st.button("🔧 Fix Database - Set All to 'analysis_only'", type="primary"):
-                                try:
-                                    conn_fix = sqlite3.connect(str(DB_PATH))
-                                    cursor_fix = conn_fix.cursor()
-                                    
-                                    # Fix NULL values
-                                    cursor_fix.execute("UPDATE predictions SET status = 'analysis_only' WHERE status IS NULL")
-                                    null_fixed = cursor_fix.rowcount
-                                    
-                                    # Fix empty strings
-                                    cursor_fix.execute("UPDATE predictions SET status = 'analysis_only' WHERE status = '' OR LENGTH(status) = 0")
-                                    empty_fixed = cursor_fix.rowcount
-                                    
-                                    conn_fix.commit()
-                                    conn_fix.close()
-                                    
-                                    st.success(f"""✅ Database Fixed! 
-- Fixed {null_fixed} NULL values
-- Fixed {empty_fixed} empty values
-- Total fixed: {null_fixed + empty_fixed}
-
-Please refresh the diagnostic to verify!""")
-                                    time.sleep(2)
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Fix failed: {e}")
-                        else:
-                            st.success("✅ Database schema looks good! All predictions have valid status values.")
-                    
-                    # Close connection at the very end
-                    conn_diag.close()
-                    
-                except Exception as e:
-                    st.error(f"❌ Database Error: {e}")
-                    import traceback
-                    st.code(traceback.format_exc())
-            # ==================== END DIAGNOSTIC ====================
-            
-            st.markdown("---")
             
             # Get all recent predictions for comparison
             all_predictions = get_all_recent_predictions(limit=20)
