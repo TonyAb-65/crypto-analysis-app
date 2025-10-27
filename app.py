@@ -174,46 +174,69 @@ def save_prediction(asset_type, pair, timeframe, current_price, predicted_price,
 
 def mark_prediction_for_trading(prediction_id):
     """Mark a prediction as the one you're actually trading"""
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), isolation_level=None)  # Autocommit mode
     cursor = conn.cursor()
     
-    # Mark this prediction as "will_trade"
-    cursor.execute('''
-        UPDATE predictions 
-        SET status = 'will_trade'
-        WHERE id = ?
-    ''', (prediction_id,))
-    
-    conn.commit()
-    
-    # Verify the update succeeded
-    cursor.execute("SELECT status FROM predictions WHERE id = ?", (prediction_id,))
-    result = cursor.fetchone()
-    conn.close()
-    
-    return result and result[0] == 'will_trade'
+    try:
+        # Mark this prediction as "will_trade"
+        cursor.execute('''
+            UPDATE predictions 
+            SET status = 'will_trade'
+            WHERE id = ?
+        ''', (prediction_id,))
+        
+        # Force immediate commit
+        conn.commit()
+        
+        # Verify the update succeeded by reading it back
+        cursor.execute("SELECT id, status, pair FROM predictions WHERE id = ?", (prediction_id,))
+        result = cursor.fetchone()
+        
+        if result:
+            pred_id, status, pair = result
+            success = (status == 'will_trade')
+            conn.close()
+            
+            if success:
+                return {'success': True, 'id': pred_id, 'pair': pair, 'status': status}
+            else:
+                return {'success': False, 'error': f'Status is {status}, expected will_trade'}
+        else:
+            conn.close()
+            return {'success': False, 'error': 'Prediction not found'}
+            
+    except Exception as e:
+        conn.close()
+        return {'success': False, 'error': str(e)}
 
 def get_all_recent_predictions(limit=20):
     """Get all recent predictions marked for trading (tracked trades only)"""
-    conn = sqlite3.connect(str(DB_PATH))
-    
-    query = '''
-        SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
-               predicted_price, confidence, signal_strength, status
-        FROM predictions 
-        WHERE status IN ('will_trade', 'completed')
-        ORDER BY 
-            CASE status 
-                WHEN 'will_trade' THEN 1 
-                WHEN 'completed' THEN 2 
-            END,
-            timestamp DESC
-        LIMIT ?
-    '''
-    
-    df = pd.read_sql_query(query, conn, params=(limit,))
-    conn.close()
-    return df
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        
+        query = '''
+            SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
+                   predicted_price, confidence, signal_strength, status
+            FROM predictions 
+            WHERE status IN ('will_trade', 'completed')
+            ORDER BY 
+                CASE status 
+                    WHEN 'will_trade' THEN 1 
+                    WHEN 'completed' THEN 2 
+                END,
+                timestamp DESC
+            LIMIT ?
+        '''
+        
+        df = pd.read_sql_query(query, conn, params=(limit,))
+        conn.close()
+        
+        print(f"✅ get_all_recent_predictions: Found {len(df)} tracked trades")
+        return df
+        
+    except Exception as e:
+        print(f"❌ Error in get_all_recent_predictions: {e}")
+        return pd.DataFrame()  # Return empty DataFrame on error
 
 def save_trade_result(prediction_id, entry_price, exit_price, notes=""):
     """Save actual trade result"""
@@ -1737,20 +1760,34 @@ if df is not None and len(df) > 0:
             col_btn1, col_btn2 = st.columns([1, 3])
             with col_btn1:
                 if st.button("📊 Track This Trade", key=f"track_{prediction_id}", type="primary", use_container_width=True):
-                    success = mark_prediction_for_trading(prediction_id)
-                    if success:
-                        # Show immediate confirmation with details
-                        st.success(f"""✅ Trade tracked! 
+                    result = mark_prediction_for_trading(prediction_id)
+                    
+                    if result['success']:
+                        # Show immediate confirmation with full details
+                        st.success(f"""✅ **Trade Successfully Tracked!**
                         
-**Prediction ID: {prediction_id}**
-**Status: will_trade**
+📋 **Prediction ID:** {result['id']}  
+💱 **Pair:** {result['pair']}  
+✅ **Status:** {result['status']}  
+📍 **Database:** {DB_PATH}
 
-Go to AI Learning → 📝 Log Trade tab to see it!""")
-                        time.sleep(1.0)  # Give user time to see the message
+**Next Steps:**
+1. Go to **AI Learning** tab
+2. Open **📝 Log Trade**
+3. Your trade will appear under "Your Tracked Trades"
+                        """)
+                        time.sleep(2.0)  # Give user time to read confirmation
                         st.rerun()
                     else:
-                        st.error(f"❌ Failed to track trade (ID: {prediction_id}). Please check database diagnostic in AI Learning tab.")
-            
+                        st.error(f"""❌ **Failed to Track Trade**
+                        
+**Prediction ID:** {prediction_id}  
+**Error:** {result.get('error', 'Unknown error')}
+
+**Troubleshooting:**
+1. Check the 🔍 Database Diagnostic in AI Learning tab
+2. Verify database path: `{DB_PATH}`
+                        """)
             with col_btn2:
                 st.caption("""
                 Only tracked trades appear in AI Learning section.
