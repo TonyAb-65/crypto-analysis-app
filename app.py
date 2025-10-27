@@ -2957,8 +2957,6 @@ if df is not None and len(df) > 0:
                         else:
                             st.warning("No predictions found with status='will_trade'")
                     
-                    conn_diag.close()
-                    
                     st.success(f"✅ Database Path: `{DB_PATH}`")
                     
                     # FIX BUTTON: Add status column or fix NULL values
@@ -3000,6 +2998,9 @@ if df is not None and len(df) > 0:
                                     st.error(f"Fix failed: {e}")
                         else:
                             st.success("✅ Database schema looks good! All predictions have status values.")
+                    
+                    # Close connection at the very end
+                    conn_diag.close()
                     
                 except Exception as e:
                     st.error(f"❌ Database Error: {e}")
