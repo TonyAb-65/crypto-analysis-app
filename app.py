@@ -185,8 +185,13 @@ def mark_prediction_for_trading(prediction_id):
     ''', (prediction_id,))
     
     conn.commit()
+    
+    # Verify the update succeeded
+    cursor.execute("SELECT status FROM predictions WHERE id = ?", (prediction_id,))
+    result = cursor.fetchone()
     conn.close()
-    return True
+    
+    return result and result[0] == 'will_trade'
 
 def get_all_recent_predictions(limit=20):
     """Get all recent predictions marked for trading (tracked trades only)"""
@@ -1732,9 +1737,13 @@ if df is not None and len(df) > 0:
             col_btn1, col_btn2 = st.columns([1, 3])
             with col_btn1:
                 if st.button("📊 Track This Trade", key=f"track_{prediction_id}", type="primary", use_container_width=True):
-                    mark_prediction_for_trading(prediction_id)
-                    st.success("✅ Trade tracked! This prediction will now appear in AI Learning section.")
-                    st.rerun()
+                    success = mark_prediction_for_trading(prediction_id)
+                    if success:
+                        st.success("✅ Trade tracked! This prediction will now appear in AI Learning section.")
+                        time.sleep(0.5)  # Brief pause to ensure database write completes
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to track trade. Please try again.")
             
             with col_btn2:
                 st.caption("""
@@ -1746,16 +1755,6 @@ if df is not None and len(df) > 0:
         
         st.markdown("---")
         # ==================== END TRACK BUTTON ====================
-        
-        with col2:
-            conf_color = "🟢" if confidence >= 60 else "🟡" if confidence >= 45 else "🔴"
-            conf_level = "High" if confidence >= 60 else "Medium" if confidence >= 45 else "Low"
-            st.metric("Confidence", f"{conf_color} {confidence:.1f}%", conf_level)
-        
-        with col3:
-            signal_emoji = "🟢" if signal_strength > 0 else "🔴" if signal_strength < 0 else "⚪"
-            st.metric("Signal", f"{signal_emoji} {abs(signal_strength)}/10",
-                     "Bullish" if signal_strength > 0 else "Bearish" if signal_strength < 0 else "Neutral")
         
         # RSI Insights
         if rsi_insights:
