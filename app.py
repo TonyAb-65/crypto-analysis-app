@@ -189,15 +189,20 @@ def mark_prediction_for_trading(prediction_id):
     return True
 
 def get_all_recent_predictions(limit=20):
-    """Get all recent predictions for comparison"""
+    """Get all recent predictions marked for trading (tracked trades only)"""
     conn = sqlite3.connect(str(DB_PATH))
     
     query = '''
         SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
                predicted_price, confidence, signal_strength, status
         FROM predictions 
-        WHERE status != 'completed'
-        ORDER BY timestamp DESC
+        WHERE status IN ('will_trade', 'completed')
+        ORDER BY 
+            CASE status 
+                WHEN 'will_trade' THEN 1 
+                WHEN 'completed' THEN 2 
+            END,
+            timestamp DESC
         LIMIT ?
     '''
     
@@ -1423,6 +1428,206 @@ def calculate_signal_strength(df):
     
     return sum(signals) if signals else 0
 
+# ==================== NEW: 3-PART WARNING SYSTEM ====================
+
+def analyze_price_action(df, for_bullish=True):
+    """
+    Analyze candlestick patterns for warnings
+    Returns: (has_warning, warning_details)
+    """
+    if len(df) < 3:
+        return False, "Insufficient data"
+    
+    last_candle = df.iloc[-1]
+    prev_candle = df.iloc[-2]
+    
+    open_price = last_candle['open']
+    close_price = last_candle['close']
+    high_price = last_candle['high']
+    low_price = last_candle['low']
+    
+    body_size = abs(close_price - open_price)
+    total_range = high_price - low_price
+    
+    if total_range == 0:
+        return False, "No range"
+    
+    upper_wick = high_price - max(open_price, close_price)
+    lower_wick = min(open_price, close_price) - low_price
+    
+    warnings = []
+    
+    if for_bullish:
+        # Check for bearish reversal signals (exit warnings for longs)
+        
+        # Long upper wick = rejection at highs
+        if upper_wick > body_size * 2 and body_size > 0:
+            warnings.append(f"Long upper wick (${high_price:.2f} rejected)")
+        
+        # Shooting star pattern
+        if upper_wick > body_size * 2.5 and lower_wick < body_size * 0.3:
+            warnings.append("Shooting star pattern")
+        
+        # Doji at highs = indecision
+        if body_size < total_range * 0.15 and close_price > df['close'].rolling(10).mean().iloc[-1]:
+            warnings.append("Doji at elevated levels")
+        
+        # Check for weakening green candles
+        if len(df) >= 3:
+            last_3_bodies = []
+            for i in range(-3, 0):
+                candle = df.iloc[i]
+                if candle['close'] > candle['open']:  # Green candle
+                    last_3_bodies.append(abs(candle['close'] - candle['open']))
+            
+            if len(last_3_bodies) >= 2:
+                if last_3_bodies[-1] < last_3_bodies[-2] * 0.7:
+                    warnings.append("Bullish momentum weakening")
+    
+    else:
+        # Check for bullish reversal signals (entry signals for longs)
+        
+        # Long lower wick = support/rejection of lows
+        if lower_wick > body_size * 2 and body_size > 0:
+            warnings.append(f"Hammer/support at ${low_price:.2f}")
+        
+        # Hammer pattern
+        if lower_wick > body_size * 2.5 and upper_wick < body_size * 0.3:
+            warnings.append("Hammer reversal pattern")
+        
+        # Bullish engulfing check
+        if close_price > open_price and prev_candle['close'] < prev_candle['open']:
+            if open_price < prev_candle['close'] and close_price > prev_candle['open']:
+                warnings.append("Bullish engulfing pattern")
+    
+    has_warning = len(warnings) > 0
+    warning_details = " | ".join(warnings) if warnings else "Clean price action"
+    
+    return has_warning, warning_details
+
+def get_obv_warning(df, for_bullish=True):
+    """
+    Analyze OBV for volume warnings
+    Returns: (has_warning, warning_details, obv_status)
+    """
+    if 'obv' not in df.columns or len(df) < 5:
+        return False, "OBV not available", "Unknown"
+    
+    obv_current = df['obv'].iloc[-1]
+    obv_prev = df['obv'].iloc[-5] if len(df) > 5 else obv_current
+    obv_change = obv_current - obv_prev
+    
+    # Determine pressure type and momentum (from our earlier fix)
+    if obv_current < 0:
+        pressure_type = "Selling"
+    else:
+        pressure_type = "Buying"
+    
+    if obv_change > 0:
+        if obv_current < 0:
+            momentum = "Decreasing"
+        else:
+            momentum = "Increasing"
+    elif obv_change < 0:
+        if obv_current < 0:
+            momentum = "Increasing"
+        else:
+            momentum = "Decreasing"
+    else:
+        momentum = "Flat"
+    
+    obv_status = f"{pressure_type} - {momentum}"
+    
+    if for_bullish:
+        # For bullish signals, check for divergence
+        if "Buying - Decreasing" in obv_status:
+            return True, "Volume declining (Divergence warning!)", obv_status
+        elif "Selling - Increasing" in obv_status:
+            return True, "Selling pressure increasing", obv_status
+        elif "Buying - Flat" in obv_status:
+            return True, "Volume stalling", obv_status
+        else:
+            return False, "Volume confirming", obv_status
+    else:
+        # For bearish signals, check for exhaustion
+        if "Selling - Decreasing" in obv_status:
+            return True, "Selling pressure easing (Reversal signal)", obv_status
+        elif "Buying - Increasing" in obv_status:
+            return True, "Buying pressure returning", obv_status
+        else:
+            return False, "Selling continues", obv_status
+    
+    return False, obv_status, obv_status
+
+def analyze_di_balance(df, for_bullish=True):
+    """
+    Analyze +DI vs -DI balance for momentum warnings
+    Returns: (has_warning, warning_details, di_gap)
+    """
+    if 'plus_di' not in df.columns or 'minus_di' not in df.columns:
+        return False, "DI not available", 0
+    
+    plus_di = df['plus_di'].iloc[-1]
+    minus_di = df['minus_di'].iloc[-1]
+    di_gap = abs(plus_di - minus_di)
+    
+    if for_bullish:
+        # For bullish signals, check if sellers catching up
+        if plus_di > minus_di:
+            if di_gap < 5:
+                return True, f"Buyers barely ahead (gap: {di_gap:.1f})", di_gap
+            elif di_gap < 10:
+                return True, f"Sellers catching up (gap: {di_gap:.1f})", di_gap
+            else:
+                return False, f"Buyers dominating (gap: {di_gap:.1f})", di_gap
+        else:
+            return True, "Sellers now in control", di_gap
+    else:
+        # For bearish signals, check if buyers catching up
+        if minus_di > plus_di:
+            if di_gap < 5:
+                return True, f"Sellers barely ahead (gap: {di_gap:.1f})", di_gap
+            elif di_gap < 10:
+                return True, f"Buyers catching up (gap: {di_gap:.1f})", di_gap
+            else:
+                return False, f"Sellers dominating (gap: {di_gap:.1f})", di_gap
+        else:
+            return True, "Buyers now in control", di_gap
+    
+    return False, "Balanced", di_gap
+
+def calculate_warning_signs(df, signal_strength):
+    """
+    Calculate 3-part warning system
+    Returns: (warning_count, details_dict)
+    """
+    is_bullish = signal_strength > 0
+    
+    # Part 1: Price Action
+    price_warning, price_details = analyze_price_action(df, for_bullish=is_bullish)
+    
+    # Part 2: Volume
+    volume_warning, volume_details, obv_status = get_obv_warning(df, for_bullish=is_bullish)
+    
+    # Part 3: Momentum
+    momentum_warning, momentum_details, di_gap = analyze_di_balance(df, for_bullish=is_bullish)
+    
+    warning_count = sum([price_warning, volume_warning, momentum_warning])
+    
+    details = {
+        'price_warning': price_warning,
+        'price_details': price_details,
+        'volume_warning': volume_warning,
+        'volume_details': volume_details,
+        'obv_status': obv_status,
+        'momentum_warning': momentum_warning,
+        'momentum_details': momentum_details,
+        'di_gap': di_gap,
+        'warning_count': warning_count
+    }
+    
+    return warning_count, details
+
 # Main Application
 with st.spinner(f"🔄 Fetching {pair_display} data..."):
     df, data_source = fetch_data(symbol, asset_type)
@@ -1497,6 +1702,50 @@ if df is not None and len(df) > 0:
         
         with col1:
             st.metric("AI Prediction", f"${predictions[-1]:,.2f}", f"{pred_change:+.2f}%")
+        
+        with col2:
+            confidence_pct = confidence * 100
+            confidence_color = "🟢" if confidence > 0.8 else "🟡" if confidence > 0.6 else "🔴"
+            st.metric("Confidence", f"{confidence_color} {confidence_pct:.1f}%", 
+                     "High" if confidence > 0.8 else "Medium" if confidence > 0.6 else "Low")
+        
+        with col3:
+            signal_emoji = "🟢" if signal_strength > 0 else "🔴" if signal_strength < 0 else "⚪"
+            st.metric("Signal", f"{signal_emoji} {abs(signal_strength)}/10",
+                     "Bullish" if signal_strength > 0 else "Bearish" if signal_strength < 0 else "Neutral")
+        
+        # ==================== NEW: TRACK THIS TRADE BUTTON ====================
+        st.markdown("---")
+        
+        # Check if already tracked
+        conn_check = sqlite3.connect(str(DB_PATH))
+        cursor_check = conn_check.cursor()
+        cursor_check.execute("SELECT status FROM predictions WHERE id = ?", (prediction_id,))
+        result = cursor_check.fetchone()
+        conn_check.close()
+        
+        is_tracked = result and result[0] == 'will_trade'
+        
+        if not is_tracked:
+            st.info("💡 **Want to track this trade for AI learning?** Click below to save this prediction for performance analysis.")
+            
+            col_btn1, col_btn2 = st.columns([1, 3])
+            with col_btn1:
+                if st.button("📊 Track This Trade", key=f"track_{prediction_id}", type="primary", use_container_width=True):
+                    mark_prediction_for_trading(prediction_id)
+                    st.success("✅ Trade tracked! This prediction will now appear in AI Learning section.")
+                    st.rerun()
+            
+            with col_btn2:
+                st.caption("""
+                Only tracked trades appear in AI Learning section.
+                This helps keep your trade history focused on actual decisions.
+                """)
+        else:
+            st.success("✅ **This trade is being tracked** - Will appear in AI Learning section for performance analysis")
+        
+        st.markdown("---")
+        # ==================== END TRACK BUTTON ====================
         
         with col2:
             conf_color = "🟢" if confidence >= 60 else "🟡" if confidence >= 45 else "🔴"
@@ -1968,62 +2217,68 @@ if df is not None and len(df) > 0:
     # NORMAL TIERED SYSTEM: Handle all other cases
     elif signal_strength >= 3:
         # STRONG BULLISH SIGNAL
-        if is_overbought:
-            # Strong bullish but overbought - recommend waiting for pullback
-            st.warning("### ⚠️ STRONG BULLISH BUT OVERBOUGHT - WAIT FOR PULLBACK")
-            
-            # Calculate ideal entry zones
-            pullback_conservative = current_price * 0.97  # 3% pullback
-            pullback_moderate = current_price * 0.985     # 1.5% pullback
-            
+        
+        # ==================== NEW: 3-PART WARNING SYSTEM ====================
+        warning_count, warning_details = calculate_warning_signs(df, signal_strength)
+        
+        # Display warning analysis
+        st.markdown("### 🎯 3-Part Behavioral Analysis")
+        
+        col_price, col_volume, col_momentum = st.columns(3)
+        
+        with col_price:
+            if warning_details['price_warning']:
+                st.metric("📊 Price Action", "⚠️ Warning", 
+                         warning_details['price_details'],
+                         delta_color="inverse")
+            else:
+                st.metric("📊 Price Action", "✅ Strong",
+                         warning_details['price_details'],
+                         delta_color="normal")
+        
+        with col_volume:
+            if warning_details['volume_warning']:
+                st.metric("💰 Volume Flow", "⚠️ Warning",
+                         warning_details['volume_details'],
+                         delta_color="inverse")
+            else:
+                st.metric("💰 Volume Flow", "✅ Confirming",
+                         warning_details['volume_details'],
+                         delta_color="normal")
+        
+        with col_momentum:
+            if warning_details['momentum_warning']:
+                st.metric("⚡ Momentum", "⚠️ Warning",
+                         warning_details['momentum_details'],
+                         delta_color="inverse")
+            else:
+                st.metric("⚡ Momentum", "✅ Strong",
+                         warning_details['momentum_details'],
+                         delta_color="normal")
+        
+        # Decision based on warning count
+        if warning_count == 0:
+            # PERFECT SETUP - All systems go
+            st.success("### 🟢 STRONG BUY - ALL SYSTEMS CONFIRM")
             st.info(f"""
-            **🎯 Market Analysis:**
-            - Signal: {signal_strength}/10 (🟢 Strong Bullish)
-            - Confidence: High (80-100%)
-            - Stochastic: {stoch_k:.1f} {'(Overbought ⚠️)' if stoch_k > 70 else ''}
-            - MFI: {mfi:.1f} {'(Overbought ⚠️)' if mfi > 70 else ''}
+            **🎯 Signal Analysis:**
+            - Signal Strength: {signal_strength}/10 (Strong Bullish)
+            - Warning Signs: **0/3** ✅ All Clear
+            - Price Action: Clean uptrend, no resistance
+            - Volume: {warning_details['obv_status']}
+            - Momentum: Buyers dominating (+DI/-DI gap: {warning_details['di_gap']:.1f})
             
-            **💡 Recommended Strategy:**
-            ❌ **Don't buy now** - Risk/reward unfavorable at current levels
-            
-            ✅ **Wait for pullback to:**
-            - **Conservative Entry:** ${pullback_conservative:.2f} (when Stochastic drops to 20-30)
-            - **Moderate Entry:** ${pullback_moderate:.2f} (when Stochastic drops to 40-50)
-            
-            **📊 Entry Checklist:**
-            1. Price drops to target zone
-            2. Stochastic oversold (20-30) or neutral (40-50)
-            3. Volume still strong (OBV rising)
-            4. Trend intact (ADX > 25)
-            5. Stochastic starts turning up (bounce confirmation)
+            **💡 Recommendation: ENTER OR HOLD**
+            All three behavioral indicators confirm the bullish signal.
+            This is a high-probability setup.
             """)
             
-            # Show what the setup would look like after pullback
-            ideal_entry = pullback_conservative
-            tp1 = ideal_entry * 1.015
-            tp2 = ideal_entry * 1.025
-            tp3 = ideal_entry * 1.035
-            sl = ideal_entry * 0.985
-            
-            st.markdown("#### 📈 Ideal Setup After Pullback:")
-            trade_data = {
-                'Level': ['Ideal Entry', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
-                'Price': [f"${ideal_entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
-                'Change': ['0%', '+1.5%', '+2.5%', '+3.5%', '-1.5%'],
-                'Risk/Reward': ['-', '1:1', '1:1.67', '1:2.33', '-']
-            }
-            st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
-        else:
-            # Strong bullish and not overbought - STRONG BUY
-            st.success("### 🟢 STRONG BUY SETUP")
-            st.info(f"**Signal Strength:** {signal_strength}/10 | **Confidence:** High (80-100%)")
             entry = current_price
-            tp1 = entry * 1.015  # +1.5%
-            tp2 = entry * 1.025  # +2.5%
-            tp3 = entry * 1.035  # +3.5%
-            sl = entry * 0.98    # -2%
+            tp1 = entry * 1.015
+            tp2 = entry * 1.025
+            tp3 = entry * 1.035
+            sl = entry * 0.98
             
-            # Create table data
             trade_data = {
                 'Level': ['Entry', 'TP1', 'TP2', 'TP3', 'Stop Loss'],
                 'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${tp3:,.2f}", f"${sl:,.2f}"],
@@ -2031,6 +2286,194 @@ if df is not None and len(df) > 0:
                 'Risk/Reward': ['-', '1:0.75', '1:1.25', '1:1.75', '-']
             }
             st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+            
+            st.caption(f"""
+            ✅ **Position Size:** 75-100% of normal
+            📈 **Trend Context:** ADX {adx:.1f} ({('Strong' if adx > 40 else 'Moderate') if adx > 25 else 'Weak'})
+            🎯 **Risk Level:** LOW-MEDIUM (all confirmations present)
+            """)
+        
+        elif warning_count == 1:
+            # CAUTION - One warning present
+            st.warning("### 🟡 STRONG BULLISH - CAUTION (1 Warning)")
+            st.info(f"""
+            **🎯 Signal Analysis:**
+            - Signal Strength: {signal_strength}/10 (Strong Bullish)
+            - Warning Signs: **1/3** ⚠️ Early Warning
+            
+            **Warnings Detected:**
+            {'🔴 Price: ' + warning_details['price_details'] if warning_details['price_warning'] else ''}
+            {'🔴 Volume: ' + warning_details['volume_details'] if warning_details['volume_warning'] else ''}
+            {'🔴 Momentum: ' + warning_details['momentum_details'] if warning_details['momentum_warning'] else ''}
+            
+            **Still Confirming:**
+            {'✅ Price: ' + warning_details['price_details'] if not warning_details['price_warning'] else ''}
+            {'✅ Volume: ' + warning_details['obv_status'] if not warning_details['volume_warning'] else ''}
+            {'✅ Momentum: ' + warning_details['momentum_details'] if not warning_details['momentum_warning'] else ''}
+            
+            **💡 Recommendation: PROCEED WITH CAUTION**
+            Signal is still bullish but watch the warning closely.
+            Consider smaller position or tighter stops.
+            """)
+            
+            entry = current_price
+            tp1 = entry * 1.015
+            tp2 = entry * 1.025
+            sl = entry * 0.985
+            
+            trade_data = {
+                'Level': ['Entry', 'TP1', 'TP2', 'Stop Loss'],
+                'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${tp2:,.2f}", f"${sl:,.2f}"],
+                'Change': ['0%', '+1.5%', '+2.5%', '-1.5%'],
+                'Risk/Reward': ['-', '1:1', '1:1.67', '-']
+            }
+            st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+            
+            st.caption(f"""
+            ⚠️ **Position Size:** 50-75% of normal (reduce due to warning)
+            📊 **Action:** Tighten stop loss, watch next candles closely
+            🎯 **Risk Level:** MEDIUM
+            """)
+        
+        elif warning_count == 2:
+            # WARNING - Two warnings present
+            st.warning("### 🟠 STRONG BULLISH BUT WARNINGS PRESENT (2/3)")
+            
+            resistance_level = None
+            if warning_details['price_warning'] and 'rejected' in warning_details['price_details'].lower():
+                try:
+                    resistance_level = df['high'].iloc[-3:].max()
+                except:
+                    pass
+            
+            st.info(f"""
+            **🎯 Signal Analysis:**
+            - Signal Strength: {signal_strength}/10 (Strong Bullish)
+            - Warning Signs: **2/3** 🟠 Multiple Warnings
+            
+            **⚠️ Warnings Detected:**
+            {'🔴 Price: ' + warning_details['price_details'] if warning_details['price_warning'] else ''}
+            {'🔴 Volume: ' + warning_details['volume_details'] if warning_details['volume_warning'] else ''}
+            {'🔴 Momentum: ' + warning_details['momentum_details'] if warning_details['momentum_warning'] else ''}
+            
+            **Still Confirming:**
+            {'✅ Price: ' + warning_details['price_details'] if not warning_details['price_warning'] else ''}
+            {'✅ Volume: ' + warning_details['obv_status'] if not warning_details['volume_warning'] else ''}
+            {'✅ Momentum: ' + warning_details['momentum_details'] if not warning_details['momentum_warning'] else ''}
+            
+            {f'**Resistance Detected:** ${resistance_level:,.2f}' if resistance_level else ''}
+            
+            **💡 Recommendation:**
+            - **If NOT in position:** Wait or very small position (25%)
+            - **If IN position:** Take 50% profit, tighten stops on remainder
+            
+            Two warnings suggest resistance forming or momentum weakening.
+            """)
+            
+            # Show both scenarios
+            st.markdown("#### For New Entry (if taking risk):")
+            entry = current_price
+            tp1 = entry * 1.01
+            sl = entry * 0.985
+            
+            trade_data = {
+                'Level': ['Entry', 'TP1', 'Stop Loss'],
+                'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${sl:,.2f}"],
+                'Change': ['0%', '+1%', '-1.5%'],
+                'Risk/Reward': ['-', '1:0.67', '-']
+            }
+            st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+            
+            st.markdown("#### For Existing Position:")
+            st.info("""
+            - Take 50% profit at current price
+            - Move stop on remaining 50% to break-even or -1%
+            - Exit fully if 3rd warning appears
+            """)
+            
+            st.caption(f"""
+            ⚠️ **Position Size:** 25% max (high risk)
+            🚨 **Alert:** Watch for 3rd warning - full exit signal
+            🎯 **Risk Level:** HIGH
+            """)
+        
+        else:  # warning_count == 3
+            # DANGER - All three warnings present
+            st.error("### 🔴 RESISTANCE CONFIRMED - EXIT SIGNAL (3/3 Warnings)")
+            
+            resistance_level = df['high'].iloc[-5:].max()
+            
+            st.info(f"""
+            **🎯 Signal Analysis:**
+            - Signal Strength: {signal_strength}/10 (Bullish but...)
+            - Warning Signs: **3/3** 🔴🔴🔴 ALL WARNING
+            
+            **🚨 All Three Systems Warning:**
+            🔴 **Price:** {warning_details['price_details']}
+            🔴 **Volume:** {warning_details['volume_details']}
+            🔴 **Momentum:** {warning_details['momentum_details']}
+            
+            **Resistance Level:** ${resistance_level:,.2f}
+            **Current Price:** ${current_price:,.2f}
+            
+            **💡 Strong Recommendation:**
+            - **If NOT in position:** ❌ DO NOT ENTER
+            - **If IN position:** 🚨 EXIT 75-100% NOW
+            
+            **Why Exit:**
+            All three behavioral indicators show:
+            - Price is being rejected at resistance
+            - Volume not supporting continuation (real money leaving)
+            - Sellers catching up to buyers (momentum shifting)
+            
+            This is a classic top formation pattern.
+            Better to exit early and miss 5% than ride down 15-20%.
+            """)
+            
+            st.markdown("#### Exit Strategy:")
+            current = current_price
+            support1 = current * 0.97
+            support2 = current * 0.95
+            
+            exit_data = {
+                'Action': ['Exit Now', 'If held, stop at:', 'Likely support:'],
+                'Price': [f"${current:,.2f}", f"${current * 0.99:,.2f}", f"${support1:,.2f} - ${support2:,.2f}"],
+                'Reason': ['Avoid larger loss', 'Protect capital', 'Re-entry zone if reverses']
+            }
+            st.dataframe(pd.DataFrame(exit_data), use_container_width=True, hide_index=True)
+            
+            st.caption(f"""
+            🚨 **Action Required:** Exit position
+            📉 **Expected:** Pullback to ${support1:,.2f} - ${support2:,.2f} (3-5%)
+            🔄 **Re-entry:** Wait for reversal signals (0/3 warnings) at support
+            🎯 **Risk Level:** EXTREME (holding is gambling)
+            """)
+            
+        # Show ADX context
+        st.markdown("---")
+        st.markdown("#### 📊 Trend Context:")
+        if adx > 40:
+            st.info(f"""
+            **Strong Trend (ADX: {adx:.1f}):**
+            - Strong trends can override oscillator warnings
+            - But volume and price action MUST confirm
+            - Current warnings: {warning_count}/3
+            - Even in strong trends, respect 3/3 warnings
+            """)
+        elif adx > 25:
+            st.info(f"""
+            **Moderate Trend (ADX: {adx:.1f}):**
+            - Pay attention to all warning signs
+            - 2+ warnings = significant caution needed
+            """)
+        else:
+            st.warning(f"""
+            **Weak Trend (ADX: {adx:.1f}):**
+            - Ranging market - mean reversion likely
+            - Warning signs more reliable in weak trends
+            - Consider waiting for stronger trend
+            """)
+        # ==================== END NEW WARNING SYSTEM ====================
     
     elif signal_strength >= 1:
         # WEAK BULLISH SIGNAL (1 to 2.99)
@@ -2341,20 +2784,23 @@ if df is not None and len(df) > 0:
         
         # TAB 1: Log Trade Results
         with tab1:
-            st.markdown("### 📝 Select & Log Your Trade")
+            st.markdown("### 📝 Log Your Tracked Trades")
             st.info("""
             💡 **Workflow:**
-            1. Review all your predictions below
-            2. Click "📊 I Traded This" on the ONE you actually traded
-            3. Enter your entry and exit prices
-            4. System learns from your actual trade!
+            1. On any pair page, click **"📊 Track This Trade"** button if you decide to trade
+            2. Only tracked trades will appear below
+            3. Enter your entry and exit prices when trade is completed
+            4. System learns from your actual results!
+            
+            ✅ This keeps your AI learning focused on trades you actually take.
             """)
             
             # Get all recent predictions for comparison
             all_predictions = get_all_recent_predictions(limit=20)
             
             if len(all_predictions) > 0:
-                st.markdown("#### 🔍 All Your Recent Predictions (Compare & Choose)")
+                st.markdown("#### 📊 Your Tracked Trades")
+                st.success(f"Showing {len(all_predictions)} tracked trade(s) - Only predictions you marked with 'Track This Trade' button")
                 
                 # Display all predictions with action buttons
                 for idx, row in all_predictions.iterrows():
@@ -2364,42 +2810,32 @@ if df is not None and len(df) > 0:
                     # Color code based on status
                     if status == 'will_trade':
                         status_color = "🟢"
-                        status_text = "SELECTED FOR TRADING"
+                        status_text = "READY TO LOG"
                     elif status == 'completed':
                         status_color = "✅"
                         status_text = "COMPLETED"
                     else:
                         status_color = "⚪"
-                        status_text = "ANALYSIS ONLY"
+                        status_text = "TRACKED"
                     
-                    with st.expander(f"{status_color} **ID {pred_id}** - {row['pair']} | Confidence: {row['confidence']:.1f}% | {status_text}"):
-                        col1, col2, col3 = st.columns([2, 2, 1])
+                    with st.expander(f"{status_color} **{row['pair']}** | Confidence: {row['confidence']:.1f}% | {status_text}"):
+                        col1, col2 = st.columns([3, 2])
                         
                         with col1:
                             st.write(f"""
                             **Asset:** {row['asset_type']}  
                             **Timeframe:** {row['timeframe']}  
-                            **Time:** {pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d %H:%M')}
+                            **Time:** {pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d %H:%M')}  
+                            **Current Price:** ${row['current_price']:,.2f}  
+                            **Predicted Price:** ${row['predicted_price']:,.2f}  
+                            **Signal:** {row['signal_strength']}/10
                             """)
                         
                         with col2:
-                            st.write(f"""
-                            **Current Price:** ${row['current_price']:,.2f}  
-                            **Predicted Price:** ${row['predicted_price']:,.2f}  
-                            **Signal Strength:** {row['signal_strength']}/10
-                            """)
-                        
-                        with col3:
-                            if status == 'analysis_only':
-                                if st.button(f"📊 I Traded This", key=f"trade_btn_{pred_id}"):
-                                    mark_prediction_for_trading(pred_id)
-                                    st.success(f"✅ Marked ID {pred_id} for trading!")
-                                    time.sleep(1)
-                                    st.rerun()
-                            elif status == 'will_trade':
-                                st.success("✅ Selected")
+                            if status == 'will_trade':
+                                st.info(f"📋 **Prediction ID:** {pred_id}\n\nReady to log results below ⬇️")
                             elif status == 'completed':
-                                st.info("✅ Done")
+                                st.success("✅ Trade completed and logged")
                 
                 st.markdown("---")
                 
@@ -2500,12 +2936,25 @@ if df is not None and len(df) > 0:
                                 st.error("⚠️ Please enter valid prices greater than 0")
                 else:
                     st.warning("""
-                    ⚠️ **No trades selected yet!**
+                    ⚠️ **No tracked trades ready to log yet!**
                     
-                    Go through your predictions above and click "📊 I Traded This" on the ONE you actually traded.
+                    To track a trade:
+                    1. Go to any pair page (e.g., BTC, ETH, SOL)
+                    2. Review the prediction
+                    3. Click **"📊 Track This Trade"** button
+                    4. Come back here to log your results after trade completes
                     """)
             else:
-                st.info("ℹ️ No predictions yet. Generate some predictions first by analyzing different assets!")
+                st.info("""
+                ℹ️ **No tracked trades yet**
+                
+                **How to start tracking:**
+                1. Analyze any asset on the main page
+                2. When you see a prediction you want to trade, click **"📊 Track This Trade"**
+                3. Only tracked trades will appear here for logging
+                
+                This keeps your AI learning focused on actual trading decisions!
+                """)
         
         # TAB 2: Performance Statistics
         with tab2:
