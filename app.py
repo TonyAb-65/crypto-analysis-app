@@ -2882,49 +2882,129 @@ if df is not None and len(df) > 0:
                 
                 try:
                     conn_diag = sqlite3.connect(str(DB_PATH))
+                    cursor_diag = conn_diag.cursor()
                     
-                    # Get all predictions count
+                    # CHECK 1: Does status column exist?
+                    st.markdown("### 🔍 SCHEMA CHECK")
+                    cursor_diag.execute("PRAGMA table_info(predictions)")
+                    columns = cursor_diag.fetchall()
+                    st.write("**Columns in predictions table:**")
+                    column_df = pd.DataFrame(columns, columns=['cid', 'name', 'type', 'notnull', 'dflt_value', 'pk'])
+                    st.dataframe(column_df)
+                    
+                    # Check if status column exists
+                    has_status = any(col[1] == 'status' for col in columns)
+                    if has_status:
+                        st.success("✅ 'status' column EXISTS")
+                    else:
+                        st.error("❌ 'status' column MISSING!")
+                    
+                    st.markdown("---")
+                    
+                    # CHECK 2: Get all predictions count
+                    st.markdown("### 📊 DATA CHECK")
                     total_preds = pd.read_sql_query("SELECT COUNT(*) as count FROM predictions", conn_diag)
                     st.write(f"📊 **Total Predictions in Database:** {total_preds['count'].iloc[0]}")
                     
-                    # Get predictions by status
-                    status_counts = pd.read_sql_query("""
-                        SELECT status, COUNT(*) as count 
-                        FROM predictions 
-                        GROUP BY status
-                    """, conn_diag)
-                    st.write("**Predictions by Status:**")
-                    st.dataframe(status_counts)
+                    # CHECK 3: Show status values including NULL
+                    if has_status:
+                        status_with_null = pd.read_sql_query("""
+                            SELECT 
+                                CASE 
+                                    WHEN status IS NULL THEN '❌ NULL'
+                                    ELSE status 
+                                END as status,
+                                COUNT(*) as count 
+                            FROM predictions 
+                            GROUP BY status
+                        """, conn_diag)
+                        st.write("**Predictions by Status (including NULL):**")
+                        st.dataframe(status_with_null)
+                    else:
+                        st.error("Cannot check status - column doesn't exist!")
                     
-                    # Get last 5 predictions with full details
-                    recent = pd.read_sql_query("""
-                        SELECT id, timestamp, pair, status, confidence, signal_strength
-                        FROM predictions 
-                        ORDER BY timestamp DESC 
-                        LIMIT 5
-                    """, conn_diag)
+                    # CHECK 4: Get last 5 predictions with ALL details
+                    if has_status:
+                        recent = pd.read_sql_query("""
+                            SELECT id, timestamp, pair, 
+                                   CASE WHEN status IS NULL THEN '❌ NULL' ELSE status END as status,
+                                   confidence, signal_strength
+                            FROM predictions 
+                            ORDER BY timestamp DESC 
+                            LIMIT 5
+                        """, conn_diag)
+                    else:
+                        recent = pd.read_sql_query("""
+                            SELECT id, timestamp, pair, confidence, signal_strength
+                            FROM predictions 
+                            ORDER BY timestamp DESC 
+                            LIMIT 5
+                        """, conn_diag)
                     st.write("**Last 5 Predictions (Most Recent):**")
                     st.dataframe(recent)
                     
-                    # Get tracked trades specifically
-                    tracked = pd.read_sql_query("""
-                        SELECT id, timestamp, pair, status, confidence
-                        FROM predictions 
-                        WHERE status = 'will_trade'
-                        ORDER BY timestamp DESC
-                    """, conn_diag)
-                    st.write(f"**Tracked Trades (status='will_trade'):** {len(tracked)}")
-                    if len(tracked) > 0:
-                        st.dataframe(tracked)
-                    else:
-                        st.warning("No predictions found with status='will_trade'")
+                    # CHECK 5: Get tracked trades specifically
+                    if has_status:
+                        tracked = pd.read_sql_query("""
+                            SELECT id, timestamp, pair, status, confidence
+                            FROM predictions 
+                            WHERE status = 'will_trade'
+                            ORDER BY timestamp DESC
+                        """, conn_diag)
+                        st.write(f"**Tracked Trades (status='will_trade'):** {len(tracked)}")
+                        if len(tracked) > 0:
+                            st.dataframe(tracked)
+                        else:
+                            st.warning("No predictions found with status='will_trade'")
                     
                     conn_diag.close()
                     
                     st.success(f"✅ Database Path: `{DB_PATH}`")
                     
+                    # FIX BUTTON: Add status column or fix NULL values
+                    st.markdown("---")
+                    st.markdown("### 🔧 DATABASE FIX")
+                    
+                    if not has_status:
+                        st.error("**PROBLEM FOUND:** status column is missing!")
+                        if st.button("🔧 Fix Database - Add Status Column", type="primary"):
+                            try:
+                                conn_fix = sqlite3.connect(str(DB_PATH))
+                                cursor_fix = conn_fix.cursor()
+                                cursor_fix.execute("ALTER TABLE predictions ADD COLUMN status TEXT DEFAULT 'analysis_only'")
+                                cursor_fix.execute("UPDATE predictions SET status = 'analysis_only' WHERE status IS NULL")
+                                conn_fix.commit()
+                                conn_fix.close()
+                                st.success("✅ Status column added! Please refresh the diagnostic.")
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Fix failed: {e}")
+                    else:
+                        # Check if all are NULL
+                        null_count = pd.read_sql_query("SELECT COUNT(*) as count FROM predictions WHERE status IS NULL", conn_diag)
+                        if null_count['count'].iloc[0] > 0:
+                            st.warning(f"**PROBLEM FOUND:** {null_count['count'].iloc[0]} predictions have NULL status!")
+                            if st.button("🔧 Fix Database - Set NULL to 'analysis_only'", type="primary"):
+                                try:
+                                    conn_fix = sqlite3.connect(str(DB_PATH))
+                                    cursor_fix = conn_fix.cursor()
+                                    cursor_fix.execute("UPDATE predictions SET status = 'analysis_only' WHERE status IS NULL")
+                                    conn_fix.commit()
+                                    affected = cursor_fix.rowcount
+                                    conn_fix.close()
+                                    st.success(f"✅ Fixed {affected} predictions! Please refresh the diagnostic.")
+                                    time.sleep(1)
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Fix failed: {e}")
+                        else:
+                            st.success("✅ Database schema looks good! All predictions have status values.")
+                    
                 except Exception as e:
                     st.error(f"❌ Database Error: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
             # ==================== END DIAGNOSTIC ====================
             
             st.markdown("---")
