@@ -1739,11 +1739,17 @@ if df is not None and len(df) > 0:
                 if st.button("📊 Track This Trade", key=f"track_{prediction_id}", type="primary", use_container_width=True):
                     success = mark_prediction_for_trading(prediction_id)
                     if success:
-                        st.success("✅ Trade tracked! This prediction will now appear in AI Learning section.")
-                        time.sleep(0.5)  # Brief pause to ensure database write completes
+                        # Show immediate confirmation with details
+                        st.success(f"""✅ Trade tracked! 
+                        
+**Prediction ID: {prediction_id}**
+**Status: will_trade**
+
+Go to AI Learning → 📝 Log Trade tab to see it!""")
+                        time.sleep(1.0)  # Give user time to see the message
                         st.rerun()
                     else:
-                        st.error("❌ Failed to track trade. Please try again.")
+                        st.error(f"❌ Failed to track trade (ID: {prediction_id}). Please check database diagnostic in AI Learning tab.")
             
             with col_btn2:
                 st.caption("""
@@ -2793,6 +2799,59 @@ if df is not None and len(df) > 0:
             
             ✅ This keeps your AI learning focused on trades you actually take.
             """)
+            
+            # ==================== DIAGNOSTIC MODE ====================
+            with st.expander("🔍 Database Diagnostic (Click to Debug)"):
+                st.warning("**Debug Info - Shows what's actually in the database**")
+                
+                try:
+                    conn_diag = sqlite3.connect(str(DB_PATH))
+                    
+                    # Get all predictions count
+                    total_preds = pd.read_sql_query("SELECT COUNT(*) as count FROM predictions", conn_diag)
+                    st.write(f"📊 **Total Predictions in Database:** {total_preds['count'].iloc[0]}")
+                    
+                    # Get predictions by status
+                    status_counts = pd.read_sql_query("""
+                        SELECT status, COUNT(*) as count 
+                        FROM predictions 
+                        GROUP BY status
+                    """, conn_diag)
+                    st.write("**Predictions by Status:**")
+                    st.dataframe(status_counts)
+                    
+                    # Get last 5 predictions with full details
+                    recent = pd.read_sql_query("""
+                        SELECT id, timestamp, pair, status, confidence, signal_strength
+                        FROM predictions 
+                        ORDER BY timestamp DESC 
+                        LIMIT 5
+                    """, conn_diag)
+                    st.write("**Last 5 Predictions (Most Recent):**")
+                    st.dataframe(recent)
+                    
+                    # Get tracked trades specifically
+                    tracked = pd.read_sql_query("""
+                        SELECT id, timestamp, pair, status, confidence
+                        FROM predictions 
+                        WHERE status = 'will_trade'
+                        ORDER BY timestamp DESC
+                    """, conn_diag)
+                    st.write(f"**Tracked Trades (status='will_trade'):** {len(tracked)}")
+                    if len(tracked) > 0:
+                        st.dataframe(tracked)
+                    else:
+                        st.warning("No predictions found with status='will_trade'")
+                    
+                    conn_diag.close()
+                    
+                    st.success(f"✅ Database Path: `{DB_PATH}`")
+                    
+                except Exception as e:
+                    st.error(f"❌ Database Error: {e}")
+            # ==================== END DIAGNOSTIC ====================
+            
+            st.markdown("---")
             
             # Get all recent predictions for comparison
             all_predictions = get_all_recent_predictions(limit=20)
