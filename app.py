@@ -1760,7 +1760,42 @@ if df is not None and len(df) > 0:
             col_btn1, col_btn2 = st.columns([1, 3])
             with col_btn1:
                 if st.button("📊 Track This Trade", key=f"track_{prediction_id}", type="primary", use_container_width=True):
+                    
+                    # DIAGNOSTIC: Show what we're about to update
+                    st.warning(f"🔍 **DEBUG:** Attempting to track Prediction ID: {prediction_id}")
+                    
+                    # Check current status BEFORE update
+                    conn_before = sqlite3.connect(str(DB_PATH))
+                    cursor_before = conn_before.cursor()
+                    cursor_before.execute("SELECT id, status, pair FROM predictions WHERE id = ?", (prediction_id,))
+                    before_result = cursor_before.fetchone()
+                    conn_before.close()
+                    
+                    if before_result:
+                        st.info(f"**BEFORE UPDATE:**\n- ID: {before_result[0]}\n- Status: '{before_result[1]}'\n- Pair: {before_result[2]}")
+                    else:
+                        st.error(f"❌ **PROBLEM:** Prediction ID {prediction_id} NOT FOUND in database!")
+                        st.stop()
+                    
+                    # Try to update
                     result = mark_prediction_for_trading(prediction_id)
+                    
+                    # Check status AFTER update  
+                    conn_after = sqlite3.connect(str(DB_PATH))
+                    cursor_after = conn_after.cursor()
+                    cursor_after.execute("SELECT id, status, pair FROM predictions WHERE id = ?", (prediction_id,))
+                    after_result = cursor_after.fetchone()
+                    conn_after.close()
+                    
+                    if after_result:
+                        st.info(f"**AFTER UPDATE:**\n- ID: {after_result[0]}\n- Status: '{after_result[1]}'\n- Pair: {after_result[2]}")
+                    
+                    # Compare before and after
+                    if before_result and after_result:
+                        if before_result[1] != after_result[1]:
+                            st.success(f"✅ **Status Changed!** '{before_result[1]}' → '{after_result[1]}'")
+                        else:
+                            st.error(f"❌ **Status NOT Changed!** Still '{after_result[1]}'")
                     
                     if result['success']:
                         # Show immediate confirmation with full details
@@ -1768,25 +1803,29 @@ if df is not None and len(df) > 0:
                         
 📋 **Prediction ID:** {result['id']}  
 💱 **Pair:** {result['pair']}  
-✅ **Status:** {result['status']}  
+✅ **New Status:** {result['status']}  
 📍 **Database:** {DB_PATH}
+
+**Verification:**
+- Before: {before_result[1] if before_result else 'NOT FOUND'}
+- After: {after_result[1] if after_result else 'NOT FOUND'}
 
 **Next Steps:**
 1. Go to **AI Learning** tab
 2. Open **📝 Log Trade**
-3. Your trade will appear under "Your Tracked Trades"
+3. Check the diagnostic to verify
                         """)
-                        time.sleep(2.0)  # Give user time to read confirmation
+                        time.sleep(3.0)  # Give user time to read confirmation
                         st.rerun()
                     else:
                         st.error(f"""❌ **Failed to Track Trade**
                         
 **Prediction ID:** {prediction_id}  
 **Error:** {result.get('error', 'Unknown error')}
+**Before Status:** {before_result[1] if before_result else 'NOT FOUND'}
+**After Status:** {after_result[1] if after_result else 'NOT FOUND'}
 
-**Troubleshooting:**
-1. Check the 🔍 Database Diagnostic in AI Learning tab
-2. Verify database path: `{DB_PATH}`
+**This means the UPDATE query is not working!**
                         """)
             with col_btn2:
                 st.caption("""
