@@ -2912,6 +2912,8 @@ if df is not None and len(df) > 0:
                             SELECT 
                                 CASE 
                                     WHEN status IS NULL THEN '❌ NULL'
+                                    WHEN status = '' THEN '❌ EMPTY STRING'
+                                    WHEN LENGTH(status) = 0 THEN '❌ ZERO LENGTH'
                                     ELSE status 
                                 END as status,
                                 COUNT(*) as count 
@@ -2920,6 +2922,23 @@ if df is not None and len(df) > 0:
                         """, conn_diag)
                         st.write("**Predictions by Status (including NULL):**")
                         st.dataframe(status_with_null)
+                        
+                        # EXTRA DEBUG: Show raw status values from first 5 predictions
+                        st.markdown("### 🔬 RAW DATA INSPECTION")
+                        raw_status = pd.read_sql_query("""
+                            SELECT id, pair, status, 
+                                   LENGTH(status) as status_length,
+                                   CASE 
+                                       WHEN status IS NULL THEN 'NULL'
+                                       WHEN status = '' THEN 'EMPTY_STRING'
+                                       ELSE 'HAS_VALUE: ' || status
+                                   END as status_debug
+                            FROM predictions 
+                            ORDER BY timestamp DESC 
+                            LIMIT 5
+                        """, conn_diag)
+                        st.write("**Raw Status Values from Last 5 Predictions:**")
+                        st.dataframe(raw_status)
                     else:
                         st.error("Cannot check status - column doesn't exist!")
                     
@@ -2979,25 +2998,46 @@ if df is not None and len(df) > 0:
                             except Exception as e:
                                 st.error(f"Fix failed: {e}")
                     else:
-                        # Check if all are NULL
+                        # Check if all are NULL or empty
                         null_count = pd.read_sql_query("SELECT COUNT(*) as count FROM predictions WHERE status IS NULL", conn_diag)
-                        if null_count['count'].iloc[0] > 0:
-                            st.warning(f"**PROBLEM FOUND:** {null_count['count'].iloc[0]} predictions have NULL status!")
-                            if st.button("🔧 Fix Database - Set NULL to 'analysis_only'", type="primary"):
+                        empty_count = pd.read_sql_query("SELECT COUNT(*) as count FROM predictions WHERE status = '' OR LENGTH(status) = 0", conn_diag)
+                        
+                        total_bad = null_count['count'].iloc[0] + empty_count['count'].iloc[0]
+                        
+                        if total_bad > 0:
+                            st.warning(f"""**PROBLEM FOUND:** 
+- {null_count['count'].iloc[0]} predictions have NULL status
+- {empty_count['count'].iloc[0]} predictions have EMPTY status
+- **Total to fix: {total_bad}**
+                            """)
+                            if st.button("🔧 Fix Database - Set All to 'analysis_only'", type="primary"):
                                 try:
                                     conn_fix = sqlite3.connect(str(DB_PATH))
                                     cursor_fix = conn_fix.cursor()
+                                    
+                                    # Fix NULL values
                                     cursor_fix.execute("UPDATE predictions SET status = 'analysis_only' WHERE status IS NULL")
+                                    null_fixed = cursor_fix.rowcount
+                                    
+                                    # Fix empty strings
+                                    cursor_fix.execute("UPDATE predictions SET status = 'analysis_only' WHERE status = '' OR LENGTH(status) = 0")
+                                    empty_fixed = cursor_fix.rowcount
+                                    
                                     conn_fix.commit()
-                                    affected = cursor_fix.rowcount
                                     conn_fix.close()
-                                    st.success(f"✅ Fixed {affected} predictions! Please refresh the diagnostic.")
-                                    time.sleep(1)
+                                    
+                                    st.success(f"""✅ Database Fixed! 
+- Fixed {null_fixed} NULL values
+- Fixed {empty_fixed} empty values
+- Total fixed: {null_fixed + empty_fixed}
+
+Please refresh the diagnostic to verify!""")
+                                    time.sleep(2)
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"Fix failed: {e}")
                         else:
-                            st.success("✅ Database schema looks good! All predictions have status values.")
+                            st.success("✅ Database schema looks good! All predictions have valid status values.")
                     
                     # Close connection at the very end
                     conn_diag.close()
