@@ -105,9 +105,22 @@ def init_database():
             confidence REAL NOT NULL,
             signal_strength INTEGER,
             features TEXT,
-            status TEXT DEFAULT 'analysis_only'
+            status TEXT DEFAULT 'analysis_only',
+            actual_entry_price REAL,
+            entry_timestamp TEXT
         )
     ''')
+    
+    # Add columns if they don't exist (for existing databases)
+    try:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN actual_entry_price REAL")
+    except:
+        pass  # Column already exists
+    
+    try:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN entry_timestamp TEXT")
+    except:
+        pass  # Column already exists
     
     # Trade results table
     cursor.execute('''
@@ -185,17 +198,19 @@ def save_prediction(asset_type, pair, timeframe, current_price, predicted_price,
     conn.close()
     return prediction_id
 
-def mark_prediction_for_trading(prediction_id):
-    """Mark a prediction as the one you're actually trading"""
+def mark_prediction_for_trading(prediction_id, actual_entry_price):
+    """Mark a prediction as the one you're actually trading and save entry price"""
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
-    # Mark this prediction as "will_trade"
+    # Mark this prediction as "will_trade" and save actual entry price
     cursor.execute('''
         UPDATE predictions 
-        SET status = 'will_trade'
+        SET status = 'will_trade',
+            actual_entry_price = ?,
+            entry_timestamp = ?
         WHERE id = ?
-    ''', (prediction_id,))
+    ''', (actual_entry_price, datetime.now().isoformat(), prediction_id))
     
     conn.commit()
     conn.close()
@@ -207,7 +222,8 @@ def get_all_recent_predictions(limit=20):
     
     query = '''
         SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
-               predicted_price, confidence, signal_strength, status
+               predicted_price, confidence, signal_strength, status,
+               actual_entry_price, entry_timestamp
         FROM predictions 
         WHERE status IN ('will_trade', 'completed')
         ORDER BY 
@@ -271,7 +287,7 @@ def get_pending_predictions(asset_type=None):
     
     query = '''
         SELECT id, timestamp, asset_type, pair, timeframe, current_price, 
-               predicted_price, confidence, signal_strength
+               predicted_price, confidence, signal_strength, actual_entry_price, entry_timestamp
         FROM predictions 
         WHERE status = 'will_trade'
     '''
@@ -1733,29 +1749,49 @@ if df is not None and len(df) > 0:
         # Check if already tracked
         conn_check = sqlite3.connect(str(DB_PATH))
         cursor_check = conn_check.cursor()
-        cursor_check.execute("SELECT status FROM predictions WHERE id = ?", (prediction_id,))
+        cursor_check.execute("SELECT status, actual_entry_price FROM predictions WHERE id = ?", (prediction_id,))
         result = cursor_check.fetchone()
         conn_check.close()
         
         is_tracked = result and result[0] == 'will_trade'
         
         if not is_tracked:
-            st.info("💡 **Want to track this trade for AI learning?** Click below to save this prediction for performance analysis.")
+            st.info("💡 **Want to track this trade for AI learning?** Enter your actual entry price to save immediately (like Excel).")
             
-            col_btn1, col_btn2 = st.columns([1, 3])
-            with col_btn1:
-                if st.button("📊 Track This Trade", key=f"track_{prediction_id}", type="primary", use_container_width=True):
-                    mark_prediction_for_trading(prediction_id)
-                    st.success("✅ Trade tracked! This prediction will now appear in AI Learning section.")
+            # Show entry form when button clicked
+            with st.form(key=f"track_form_{prediction_id}"):
+                st.markdown(f"### 📊 Track Trade: {asset_type}")
+                
+                col_info1, col_info2 = st.columns(2)
+                with col_info1:
+                    st.metric("Predicted Entry", f"${current_price:,.2f}")
+                with col_info2:
+                    st.metric("Predicted Exit", f"${predictions[0]:,.2f}")
+                
+                st.markdown("---")
+                actual_entry = st.number_input(
+                    "💵 What price did YOU actually enter at?",
+                    min_value=0.0,
+                    value=float(current_price),
+                    step=0.01,
+                    format="%.2f",
+                    help="Enter your real entry price from your exchange/broker",
+                    key=f"entry_input_{prediction_id}"
+                )
+                
+                col_btn1, col_btn2 = st.columns([1, 1])
+                with col_btn1:
+                    submit_track = st.form_submit_button("✅ Save Trade Entry", type="primary", use_container_width=True)
+                with col_btn2:
+                    st.caption("Entry saved immediately like Excel ✨")
+                
+                if submit_track and actual_entry > 0:
+                    mark_prediction_for_trading(prediction_id, actual_entry)
+                    st.success(f"✅ Trade tracked! Entry: ${actual_entry:,.2f} saved. Go to AI Learning to close trade later.")
                     st.rerun()
-            
-            with col_btn2:
-                st.caption("""
-                Only tracked trades appear in AI Learning section.
-                This helps keep your trade history focused on actual decisions.
-                """)
         else:
-            st.success("✅ **This trade is being tracked** - Will appear in AI Learning section for performance analysis")
+            actual_entry = result[1] if result and result[1] else current_price
+            st.success(f"✅ **Trade Tracked** - Entry: ${actual_entry:,.2f} | Go to AI Learning to close this trade")
         
         st.markdown("---")
         # ==================== END TRACK BUTTON ====================
@@ -2787,176 +2823,169 @@ if df is not None and len(df) > 0:
         
         # TAB 1: Log Trade Results
         with tab1:
-            st.markdown("### 📝 Log Your Tracked Trades")
+            st.markdown("### 📝 Close Your Open Trades (Excel-Like)")
             st.info("""
-            💡 **Workflow:**
-            1. On any pair page, click **"📊 Track This Trade"** button if you decide to trade
-            2. Only tracked trades will appear below
-            3. Enter your entry and exit prices when trade is completed
-            4. System learns from your actual results!
+            💡 **Simple Workflow (Like Excel):**
+            1. On any pair page, click **"📊 Track This Trade"** and enter your actual entry price
+            2. Entry saved immediately - appears in table below
+            3. When trade closes, just enter exit price here
+            4. Done! AI learns from your actual results.
             
-            ✅ This keeps your AI learning focused on trades you actually take.
+            ✅ One-click save, then just close later!
             """)
             
             # Get all recent predictions for comparison
             all_predictions = get_all_recent_predictions(limit=20)
             
             if len(all_predictions) > 0:
-                st.markdown("#### 📊 Your Tracked Trades")
-                st.success(f"Showing {len(all_predictions)} tracked trade(s) - Only predictions you marked with 'Track This Trade' button")
+                st.markdown("#### 📊 Your Open Trades Table")
+                st.success(f"Showing {len(all_predictions)} tracked trade(s)")
                 
-                # Display all predictions with action buttons
+                # Create Excel-like table display
+                table_data = []
                 for idx, row in all_predictions.iterrows():
-                    pred_id = int(row['id'])
+                    entry_price = row['actual_entry_price'] if pd.notna(row['actual_entry_price']) else row['current_price']
+                    entry_time = pd.to_datetime(row['entry_timestamp']).strftime('%m/%d %H:%M') if pd.notna(row['entry_timestamp']) else pd.to_datetime(row['timestamp']).strftime('%m/%d %H:%M')
+                    
                     status = row['status']
-                    
-                    # Color code based on status
                     if status == 'will_trade':
-                        status_color = "🟢"
-                        status_text = "READY TO LOG"
-                    elif status == 'completed':
-                        status_color = "✅"
-                        status_text = "COMPLETED"
+                        status_emoji = "🟢 OPEN"
                     else:
-                        status_color = "⚪"
-                        status_text = "TRACKED"
+                        status_emoji = "✅ CLOSED"
                     
-                    with st.expander(f"{status_color} **{row['pair']}** | Confidence: {row['confidence']:.1f}% | {status_text}"):
-                        col1, col2 = st.columns([3, 2])
-                        
-                        with col1:
-                            st.write(f"""
-                            **Asset:** {row['asset_type']}  
-                            **Timeframe:** {row['timeframe']}  
-                            **Time:** {pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d %H:%M')}  
-                            **Current Price:** ${row['current_price']:,.2f}  
-                            **Predicted Price:** ${row['predicted_price']:,.2f}  
-                            **Signal:** {row['signal_strength']}/10
-                            """)
-                        
-                        with col2:
-                            if status == 'will_trade':
-                                st.info(f"📋 **Prediction ID:** {pred_id}\n\nReady to log results below ⬇️")
-                            elif status == 'completed':
-                                st.success("✅ Trade completed and logged")
+                    table_data.append({
+                        'ID': int(row['id']),
+                        'Status': status_emoji,
+                        'Date/Time': entry_time,
+                        'Pair': row['pair'],
+                        'Predicted Entry': f"${row['current_price']:,.2f}",
+                        'Your Entry': f"${entry_price:,.2f}",
+                        'Predicted Exit': f"${row['predicted_price']:,.2f}",
+                        'Signal': f"{row['signal_strength']}/10"
+                    })
+                
+                df_display = pd.DataFrame(table_data)
+                st.dataframe(df_display, use_container_width=True, hide_index=True)
                 
                 st.markdown("---")
                 
-                # Get predictions marked for trading
+                # Get predictions marked for trading (open trades)
                 trading_preds = get_pending_predictions()
                 
                 if len(trading_preds) > 0:
-                    st.markdown("#### 📥 Enter Trade Results")
-                    st.success(f"✅ You have **{len(trading_preds)}** trade(s) selected to log")
-                    
-                    # Show which ones are selected
-                    st.write("**Selected for Trading:**")
-                    for idx, row in trading_preds.iterrows():
-                        st.write(f"- **ID {int(row['id'])}** - {row['pair']} (Predicted: ${row['predicted_price']:,.2f})")
-                    
-                    st.markdown("---")
+                    st.markdown("#### 📥 Close a Trade (Enter Exit Price Only)")
+                    st.success(f"✅ You have **{len(trading_preds)}** open trade(s)")
                     
                     # Create dropdown options dictionary
                     dropdown_options = {}
                     for idx, row in trading_preds.iterrows():
-                        dropdown_options[int(row['id'])] = f"ID {int(row['id'])} - {row['pair']}"
+                        entry_price = row['actual_entry_price'] if pd.notna(row['actual_entry_price']) else row['current_price']
+                        dropdown_options[int(row['id'])] = f"ID {int(row['id'])} - {row['pair']} (Entry: ${entry_price:,.2f})"
                     
                     # Dropdown selector
-                    st.markdown("##### 🔽 Select which trade to log results for:")
+                    st.markdown("##### 🔽 Select which trade to close:")
                     pred_id = st.selectbox(
-                        "Select Prediction ID", 
+                        "Select Trade to Close", 
                         options=list(dropdown_options.keys()),
                         format_func=lambda x: dropdown_options[x],
-                        help="Choose the prediction you want to log results for"
+                        help="Choose the trade you want to close"
                     )
                     
                     st.markdown("---")
                     
                     # Get selected prediction details
                     selected_pred = trading_preds[trading_preds['id'] == pred_id].iloc[0]
+                    actual_entry = selected_pred['actual_entry_price'] if pd.notna(selected_pred['actual_entry_price']) else selected_pred['current_price']
                     
-                    # Display prediction details
-                    st.info(f"""
-                    **📊 Prediction Details:**
-                    - **Pair:** {selected_pred['pair']}
-                    - **Asset Type:** {selected_pred['asset_type']}
-                    - **Timeframe:** {selected_pred['timeframe']}
-                    - **Predicted Price:** ${selected_pred['predicted_price']:,.2f}
-                    - **Current Price at Prediction:** ${selected_pred['current_price']:,.2f}
-                    - **Confidence:** {selected_pred['confidence']:.1f}%
-                    - **Signal Strength:** {selected_pred['signal_strength']}/10
-                    - **Time:** {pd.to_datetime(selected_pred['timestamp']).strftime('%Y-%m-%d %H:%M')}
-                    """)
+                    # Display trade summary
+                    col_summary1, col_summary2, col_summary3 = st.columns(3)
+                    with col_summary1:
+                        st.metric("Pair", selected_pred['pair'])
+                        st.metric("Predicted Entry", f"${selected_pred['current_price']:,.2f}")
+                    with col_summary2:
+                        st.metric("Your Entry ✅", f"${actual_entry:,.2f}")
+                        st.metric("Predicted Exit", f"${selected_pred['predicted_price']:,.2f}")
+                    with col_summary3:
+                        st.metric("Confidence", f"{selected_pred['confidence']:.1f}%")
+                        st.metric("Signal", f"{selected_pred['signal_strength']}/10")
                     
-                    # Form for entering trade data
+                    # Form for entering EXIT price only (entry already saved!)
                     with st.form("log_trade_form"):
-                        st.markdown(f"##### Logging trade for: **{selected_pred['pair']}**")
+                        st.markdown(f"##### Close Trade: **{selected_pred['pair']}**")
                         
-                        col3, col4 = st.columns(2)
+                        st.info(f"✅ Entry already saved: ${actual_entry:,.2f} | Just enter your exit price below:")
+                        
+                        col3, col4 = st.columns([2, 1])
                         
                         with col3:
-                            entry_price = st.number_input("Your Entry Price ($)", 
-                                                        min_value=0.0, 
-                                                        value=float(selected_pred['current_price']),
-                                                        step=0.01,
-                                                        format="%.2f")
-                        
-                        with col4:
-                            exit_price = st.number_input("Your Exit Price ($)", 
+                            exit_price = st.number_input("💵 Your Exit Price ($)", 
                                                        min_value=0.0, 
                                                        value=float(selected_pred['predicted_price']),
                                                        step=0.01,
-                                                       format="%.2f")
+                                                       format="%.2f",
+                                                       help="Enter your actual exit price")
+                        
+                        with col4:
+                            # Show predicted P/L
+                            pred_pl = exit_price - actual_entry
+                            pred_pl_pct = (pred_pl / actual_entry) * 100 if actual_entry > 0 else 0
+                            st.metric("Est. P/L", f"${pred_pl:,.2f}", f"{pred_pl_pct:+.2f}%")
                         
                         notes = st.text_area("Notes (Optional)", 
-                                           placeholder="Add any observations about the trade...")
+                                           placeholder="Add any observations...")
                         
-                        submit_button = st.form_submit_button("✅ Submit Trade Result", use_container_width=True)
+                        submit_button = st.form_submit_button("✅ Close Trade", use_container_width=True, type="primary")
                         
                         if submit_button:
-                            if entry_price > 0 and exit_price > 0:
-                                success = save_trade_result(pred_id, entry_price, exit_price, notes)
+                            if exit_price > 0:
+                                success = save_trade_result(pred_id, actual_entry, exit_price, notes)
                                 if success:
-                                    profit_loss = exit_price - entry_price
-                                    profit_pct = ((exit_price - entry_price) / entry_price) * 100
+                                    profit_loss = exit_price - actual_entry
+                                    profit_pct = ((exit_price - actual_entry) / actual_entry) * 100
                                     
                                     if profit_loss > 0:
                                         st.success(f"""
-                                        ✅ **Trade Logged Successfully for {selected_pred['pair']}!**
-                                        - Profit/Loss: ${profit_loss:,.2f} ({profit_pct:+.2f}%)
-                                        - The AI will learn from this result!
+                                        ✅ **Trade Closed for {selected_pred['pair']}!**
+                                        - Entry: ${actual_entry:,.2f}
+                                        - Exit: ${exit_price:,.2f}
+                                        - Profit: ${profit_loss:,.2f} ({profit_pct:+.2f}%)
+                                        - AI learning from result! 🎓
                                         """)
                                     else:
                                         st.info(f"""
-                                        ✅ **Trade Logged Successfully for {selected_pred['pair']}!**
-                                        - Profit/Loss: ${profit_loss:,.2f} ({profit_pct:+.2f}%)
-                                        - The AI will learn from this result!
+                                        ✅ **Trade Closed for {selected_pred['pair']}!**
+                                        - Entry: ${actual_entry:,.2f}
+                                        - Exit: ${exit_price:,.2f}
+                                        - Loss: ${profit_loss:,.2f} ({profit_pct:+.2f}%)
+                                        - AI learning from result! 🎓
                                         """)
                                     st.rerun()
                                 else:
                                     st.error("❌ Error saving trade result. Please try again.")
                             else:
-                                st.error("⚠️ Please enter valid prices greater than 0")
+                                st.error("⚠️ Please enter valid exit price greater than 0")
                 else:
                     st.warning("""
-                    ⚠️ **No tracked trades ready to log yet!**
+                    ⚠️ **No open trades to close!**
                     
-                    To track a trade:
+                    All your tracked trades are already closed. To open a new trade:
                     1. Go to any pair page (e.g., BTC, ETH, SOL)
                     2. Review the prediction
                     3. Click **"📊 Track This Trade"** button
-                    4. Come back here to log your results after trade completes
+                    4. Enter your entry price (saved immediately!)
+                    5. Come back here to close it later
                     """)
             else:
                 st.info("""
                 ℹ️ **No tracked trades yet**
                 
-                **How to start tracking:**
+                **How to start tracking (Excel-like flow):**
                 1. Analyze any asset on the main page
                 2. When you see a prediction you want to trade, click **"📊 Track This Trade"**
-                3. Only tracked trades will appear here for logging
+                3. Enter your actual entry price (saved immediately!)
+                4. Come back here to close the trade (just enter exit price)
                 
-                This keeps your AI learning focused on actual trading decisions!
+                Simple as Excel! ✨
                 """)
         
         # TAB 2: Performance Statistics
