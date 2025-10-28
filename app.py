@@ -209,21 +209,53 @@ def save_prediction(asset_type, pair, timeframe, current_price, predicted_price,
 
 def mark_prediction_for_trading(prediction_id, actual_entry_price):
     """Mark a prediction as the one you're actually trading and save entry price"""
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    
-    # Mark this prediction as "will_trade" and save actual entry price
-    cursor.execute('''
-        UPDATE predictions 
-        SET status = 'will_trade',
-            actual_entry_price = ?,
-            entry_timestamp = ?
-        WHERE id = ?
-    ''', (actual_entry_price, datetime.now().isoformat(), prediction_id))
-    
-    conn.commit()
-    conn.close()
-    return True
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        
+        # First check if prediction exists
+        cursor.execute('SELECT id, status FROM predictions WHERE id = ?', (prediction_id,))
+        existing = cursor.fetchone()
+        
+        if not existing:
+            print(f"❌ ERROR: Prediction ID {prediction_id} not found in database!")
+            conn.close()
+            return False
+        
+        print(f"✅ Found prediction ID {prediction_id}, current status: {existing[1]}")
+        
+        # Mark this prediction as "will_trade" and save actual entry price
+        cursor.execute('''
+            UPDATE predictions 
+            SET status = 'will_trade',
+                actual_entry_price = ?,
+                entry_timestamp = ?
+            WHERE id = ?
+        ''', (actual_entry_price, datetime.now().isoformat(), prediction_id))
+        
+        rows_updated = cursor.rowcount
+        print(f"📝 UPDATE query affected {rows_updated} row(s)")
+        
+        if rows_updated == 0:
+            print(f"⚠️ WARNING: No rows were updated for prediction ID {prediction_id}")
+            conn.close()
+            return False
+        
+        conn.commit()
+        
+        # Verify the update
+        cursor.execute('SELECT status, actual_entry_price, entry_timestamp FROM predictions WHERE id = ?', (prediction_id,))
+        verify = cursor.fetchone()
+        
+        if verify:
+            print(f"✅ Verified: status='{verify[0]}', entry=${verify[1]}, timestamp={verify[2]}")
+        
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"❌ ERROR in mark_prediction_for_trading: {e}")
+        return False
 
 def get_all_recent_predictions(limit=20):
     """Get all recent predictions marked for trading (tracked trades only)"""
@@ -1771,6 +1803,9 @@ if df is not None and len(df) > 0:
             with st.form(key=f"track_form_{prediction_id}"):
                 st.markdown(f"### 📊 Track Trade: {asset_type}")
                 
+                # Show Prediction ID for debugging
+                st.caption(f"🔢 Prediction ID: {prediction_id}")
+                
                 col_info1, col_info2 = st.columns(2)
                 with col_info1:
                     st.metric("Predicted Entry", f"${current_price:,.2f}")
@@ -1796,8 +1831,11 @@ if df is not None and len(df) > 0:
                 
                 if submit_track:
                     if actual_entry > 0:
+                        st.info(f"💾 Attempting to save trade for Prediction ID: {prediction_id}...")
+                        
                         # Save to database
                         success = mark_prediction_for_trading(prediction_id, actual_entry)
+                        
                         if success:
                             st.success(f"""
                             ✅ **Trade Saved Successfully!**
@@ -1819,11 +1857,24 @@ if df is not None and len(df) > 0:
                             
                             if verify_result:
                                 st.info(f"✅ Verified in database: Status='{verify_result[0]}', Entry=${verify_result[1]:,.2f}")
+                            else:
+                                st.error(f"⚠️ Could not verify save for Prediction ID {prediction_id}")
                             
                             time.sleep(2)  # Give user time to see message
                             st.rerun()
                         else:
-                            st.error("❌ Error saving trade. Please try again.")
+                            st.error(f"""
+                            ❌ **Failed to save trade!**
+                            
+                            **Prediction ID:** {prediction_id}
+                            
+                            **Troubleshooting:**
+                            1. Check the console/terminal for error messages
+                            2. Prediction ID might not exist in database
+                            3. Database might be locked
+                            
+                            **Check console output for details!**
+                            """)
                     else:
                         st.error("⚠️ Please enter a valid entry price greater than 0")
         else:
@@ -2884,8 +2935,35 @@ if df is not None and len(df) > 0:
                 st.write(f"**Database Location:** `{DB_PATH}`")
                 st.write(f"**Total Predictions:** {total_predictions}")
                 st.write(f"**Tracked Trades:** {tracked_count}")
+                
                 if tracked_count == 0:
                     st.warning("⚠️ No tracked trades found. Did you click 'Track This Trade' on a prediction?")
+                
+                # Show recent predictions to verify IDs
+                st.markdown("---")
+                st.markdown("**Recent Predictions (Last 10):**")
+                conn_recent = sqlite3.connect(str(DB_PATH))
+                recent_df = pd.read_sql_query('''
+                    SELECT id, timestamp, pair, status, actual_entry_price
+                    FROM predictions
+                    ORDER BY timestamp DESC
+                    LIMIT 10
+                ''', conn_recent)
+                conn_recent.close()
+                
+                st.dataframe(recent_df, use_container_width=True)
+                
+                # Check for status distribution
+                conn_status = sqlite3.connect(str(DB_PATH))
+                status_df = pd.read_sql_query('''
+                    SELECT status, COUNT(*) as count
+                    FROM predictions
+                    GROUP BY status
+                ''', conn_status)
+                conn_status.close()
+                
+                st.markdown("**Status Distribution:**")
+                st.dataframe(status_df, use_container_width=True)
             
             # Get all recent predictions for comparison
             all_predictions = get_all_recent_predictions(limit=20)
