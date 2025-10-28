@@ -3038,10 +3038,53 @@ if df is not None and len(df) > 0:
             all_predictions = get_all_recent_predictions(limit=20)
             
             if len(all_predictions) > 0:
-                st.markdown("#### 📊 Your Open Trades Table")
+                st.markdown("#### 📊 Your Trades Summary")
+                
+                # Calculate summary metrics
+                conn_summary = sqlite3.connect(str(DB_PATH))
+                cursor_summary = conn_summary.cursor()
+                
+                # Get completed trades stats
+                cursor_summary.execute('''
+                    SELECT 
+                        COUNT(*) as total_trades,
+                        SUM(profit_loss) as total_pl,
+                        AVG(profit_loss_pct) as avg_pl_pct,
+                        SUM(CASE WHEN profit_loss > 0 THEN 1 ELSE 0 END) as wins
+                    FROM trade_results
+                ''')
+                stats = cursor_summary.fetchone()
+                conn_summary.close()
+                
+                total_completed = stats[0] if stats[0] else 0
+                total_pl = stats[1] if stats[1] else 0
+                avg_pl_pct = stats[2] if stats[2] else 0
+                wins = stats[3] if stats[3] else 0
+                win_rate = (wins / total_completed * 100) if total_completed > 0 else 0
+                
+                # Show open vs closed
+                open_trades = len([p for _, p in all_predictions.iterrows() if p['status'] == 'will_trade'])
+                closed_trades = len([p for _, p in all_predictions.iterrows() if p['status'] == 'completed'])
+                
+                col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+                
+                with col_m1:
+                    st.metric("🟢 Open Trades", open_trades)
+                with col_m2:
+                    st.metric("✅ Closed Trades", closed_trades)
+                with col_m3:
+                    pl_delta = f"{avg_pl_pct:+.2f}%" if total_completed > 0 else None
+                    st.metric("💰 Total P/L", f"${total_pl:,.2f}", delta=pl_delta)
+                with col_m4:
+                    st.metric("📊 Win Rate", f"{win_rate:.1f}%" if total_completed > 0 else "—")
+                with col_m5:
+                    st.metric("📈 Completed", total_completed)
+                
+                st.markdown("---")
+                st.markdown("#### 📋 Detailed Trades Table (Excel-Like)")
                 st.success(f"Showing {len(all_predictions)} tracked trade(s)")
                 
-                # Create Excel-like table display
+                # Create Excel-like table display with ALL columns
                 table_data = []
                 for idx, row in all_predictions.iterrows():
                     entry_price = row['actual_entry_price'] if pd.notna(row['actual_entry_price']) else row['current_price']
@@ -3050,21 +3093,70 @@ if df is not None and len(df) > 0:
                     status = row['status']
                     if status == 'will_trade':
                         status_emoji = "🟢 OPEN"
+                        # For open trades, show predicted exit but no actual exit yet
+                        exit_display = "—"
+                        pl_display = "—"
+                        pl_pct_display = "—"
                     else:
                         status_emoji = "✅ CLOSED"
+                        # For closed trades, get the actual exit from trade_results
+                        conn_result = sqlite3.connect(str(DB_PATH))
+                        cursor_result = conn_result.cursor()
+                        cursor_result.execute('''
+                            SELECT exit_price, profit_loss, profit_loss_pct 
+                            FROM trade_results 
+                            WHERE prediction_id = ?
+                        ''', (int(row['id']),))
+                        result_data = cursor_result.fetchone()
+                        conn_result.close()
+                        
+                        if result_data:
+                            exit_display = f"${result_data[0]:,.2f}"
+                            pl_display = f"${result_data[1]:,.2f}"
+                            pl_pct_display = f"{result_data[2]:+.2f}%"
+                        else:
+                            exit_display = "—"
+                            pl_display = "—"
+                            pl_pct_display = "—"
                     
                     table_data.append({
                         'ID': int(row['id']),
                         'Status': status_emoji,
                         'Date/Time': entry_time,
                         'Pair': row['pair'],
-                        'Predicted Entry': f"${row['current_price']:,.2f}",
+                        'Pred. Entry': f"${row['current_price']:,.2f}",
                         'Your Entry': f"${entry_price:,.2f}",
-                        'Predicted Exit': f"${row['predicted_price']:,.2f}",
+                        'Pred. Exit': f"${row['predicted_price']:,.2f}",
+                        'Your Exit': exit_display,
+                        'P/L $': pl_display,
+                        'P/L %': pl_pct_display,
                         'Signal': f"{row['signal_strength']}/10"
                     })
                 
                 df_display = pd.DataFrame(table_data)
+                
+                # Style the dataframe to highlight P/L
+                def highlight_pl(val):
+                    if val == "—":
+                        return ''
+                    if isinstance(val, str) and '$' in val:
+                        # Remove $ and , for comparison
+                        num_val = float(val.replace('$', '').replace(',', ''))
+                        if num_val > 0:
+                            return 'color: green; font-weight: bold'
+                        elif num_val < 0:
+                            return 'color: red; font-weight: bold'
+                    if isinstance(val, str) and '%' in val:
+                        num_val = float(val.replace('%', '').replace('+', ''))
+                        if num_val > 0:
+                            return 'color: green; font-weight: bold'
+                        elif num_val < 0:
+                            return 'color: red; font-weight: bold'
+                    return ''
+                
+                # Apply styling
+                styled_df = df_display.style.applymap(highlight_pl, subset=['P/L $', 'P/L %'])
+                
                 st.dataframe(df_display, use_container_width=True, hide_index=True)
                 
                 st.markdown("---")
