@@ -1752,24 +1752,33 @@ if df is not None and len(df) > 0:
         pred_change = ((predictions[-1] - current_price) / current_price) * 100
         signal_strength = calculate_signal_strength(df)
         
-        # Save prediction to database
-        prediction_id = save_prediction(
-            asset_type=asset_type.replace("💰 ", "").replace("🏆 ", "").replace("💱 ", "").replace("🔍 ", ""),
-            pair=symbol,
-            timeframe=timeframe_name,
-            current_price=current_price,
-            predicted_price=predictions[-1],
-            prediction_horizon=prediction_periods,
-            confidence=confidence,
-            signal_strength=signal_strength,
-            features=features if features else {}
-        )
-        
-        # Store in session state for tracking
-        if 'last_prediction_id' not in st.session_state:
+        # ==================== SURGICAL FIX: SESSION STATE PREDICTION TRACKING ====================
+        # CRITICAL FIX: Only save NEW prediction if we don't have one for this page load
+        # Use a unique key based on symbol and current price to avoid duplicate predictions
+        page_key = f"{symbol}_{current_price:.2f}_{timeframe_name}"
+
+        if 'current_page_key' not in st.session_state or st.session_state.current_page_key != page_key:
+            # New page/symbol/price - save new prediction
+            prediction_id = save_prediction(
+                asset_type=asset_type.replace("💰 ", "").replace("🏆 ", "").replace("💱 ", "").replace("🔍 ", ""),
+                pair=symbol,
+                timeframe=timeframe_name,
+                current_price=current_price,
+                predicted_price=predictions[-1],
+                prediction_horizon=prediction_periods,
+                confidence=confidence,
+                signal_strength=signal_strength,
+                features=features if features else {}
+            )
+            
+            # Store in session state
+            st.session_state.current_page_key = page_key
+            st.session_state.current_prediction_id = prediction_id
             st.session_state.last_prediction_id = prediction_id
         else:
-            st.session_state.last_prediction_id = prediction_id
+            # Same page - use existing prediction_id
+            prediction_id = st.session_state.current_prediction_id
+        # ==================== END SURGICAL FIX ====================
         
         col1, col2, col3 = st.columns(3)
         
