@@ -111,16 +111,25 @@ def init_database():
         )
     ''')
     
-    # Add columns if they don't exist (for existing databases)
-    try:
-        cursor.execute("ALTER TABLE predictions ADD COLUMN actual_entry_price REAL")
-    except:
-        pass  # Column already exists
+    # CRITICAL FIX: Add columns if they don't exist (for existing databases)
+    # Check if columns exist first
+    cursor.execute("PRAGMA table_info(predictions)")
+    columns = [column[1] for column in cursor.fetchall()]
     
-    try:
+    if 'actual_entry_price' not in columns:
+        print("🔧 Adding actual_entry_price column...")
+        cursor.execute("ALTER TABLE predictions ADD COLUMN actual_entry_price REAL")
+        print("✅ actual_entry_price column added!")
+    
+    if 'entry_timestamp' not in columns:
+        print("🔧 Adding entry_timestamp column...")
         cursor.execute("ALTER TABLE predictions ADD COLUMN entry_timestamp TEXT")
-    except:
-        pass  # Column already exists
+        print("✅ entry_timestamp column added!")
+    
+    # Debug: Show existing tracked trades
+    cursor.execute("SELECT COUNT(*) FROM predictions WHERE status IN ('will_trade', 'completed')")
+    count = cursor.fetchone()[0]
+    print(f"📊 Database has {count} tracked trades")
     
     # Trade results table
     cursor.execute('''
@@ -1785,10 +1794,38 @@ if df is not None and len(df) > 0:
                 with col_btn2:
                     st.caption("Entry saved immediately like Excel ✨")
                 
-                if submit_track and actual_entry > 0:
-                    mark_prediction_for_trading(prediction_id, actual_entry)
-                    st.success(f"✅ Trade tracked! Entry: ${actual_entry:,.2f} saved. Go to AI Learning to close trade later.")
-                    st.rerun()
+                if submit_track:
+                    if actual_entry > 0:
+                        # Save to database
+                        success = mark_prediction_for_trading(prediction_id, actual_entry)
+                        if success:
+                            st.success(f"""
+                            ✅ **Trade Saved Successfully!**
+                            
+                            **Pair:** {asset_type}  
+                            **Your Entry:** ${actual_entry:,.2f}  
+                            **Predicted Exit:** ${predictions[0]:,.2f}  
+                            **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M')}
+                            
+                            🎯 **Next Step:** Go to AI Learning tab to close this trade when ready!
+                            """)
+                            
+                            # Verify save
+                            conn_verify = sqlite3.connect(str(DB_PATH))
+                            cursor_verify = conn_verify.cursor()
+                            cursor_verify.execute("SELECT status, actual_entry_price FROM predictions WHERE id = ?", (prediction_id,))
+                            verify_result = cursor_verify.fetchone()
+                            conn_verify.close()
+                            
+                            if verify_result:
+                                st.info(f"✅ Verified in database: Status='{verify_result[0]}', Entry=${verify_result[1]:,.2f}")
+                            
+                            time.sleep(2)  # Give user time to see message
+                            st.rerun()
+                        else:
+                            st.error("❌ Error saving trade. Please try again.")
+                    else:
+                        st.error("⚠️ Please enter a valid entry price greater than 0")
         else:
             actual_entry = result[1] if result and result[1] else current_price
             st.success(f"✅ **Trade Tracked** - Entry: ${actual_entry:,.2f} | Go to AI Learning to close this trade")
@@ -2833,6 +2870,22 @@ if df is not None and len(df) > 0:
             
             ✅ One-click save, then just close later!
             """)
+            
+            # DEBUG: Show database status
+            conn_debug = sqlite3.connect(str(DB_PATH))
+            cursor_debug = conn_debug.cursor()
+            cursor_debug.execute("SELECT COUNT(*) FROM predictions")
+            total_predictions = cursor_debug.fetchone()[0]
+            cursor_debug.execute("SELECT COUNT(*) FROM predictions WHERE status IN ('will_trade', 'completed')")
+            tracked_count = cursor_debug.fetchone()[0]
+            conn_debug.close()
+            
+            with st.expander("🔍 Debug Info (Click to expand)"):
+                st.write(f"**Database Location:** `{DB_PATH}`")
+                st.write(f"**Total Predictions:** {total_predictions}")
+                st.write(f"**Tracked Trades:** {tracked_count}")
+                if tracked_count == 0:
+                    st.warning("⚠️ No tracked trades found. Did you click 'Track This Trade' on a prediction?")
             
             # Get all recent predictions for comparison
             all_predictions = get_all_recent_predictions(limit=20)
