@@ -293,7 +293,10 @@ def save_trade_result(prediction_id, entry_price, exit_price, notes=""):
         predicted_price = result[0]
         profit_loss = exit_price - entry_price
         profit_loss_pct = ((exit_price - entry_price) / entry_price) * 100
-        prediction_error = abs(predicted_price - exit_price) / exit_price * 100
+        
+        # AI Error: (Predicted Exit - Actual Exit) / Actual Exit × 100
+        # Negative = AI under-predicted, Positive = AI over-predicted
+        prediction_error = ((predicted_price - exit_price) / exit_price) * 100
         
         cursor.execute('''
             INSERT INTO trade_results 
@@ -3082,21 +3085,43 @@ if df is not None and len(df) > 0:
                 
                 st.markdown("---")
                 st.markdown("#### 📋 Detailed Trades Table (Excel-Like)")
+                
+                # Explanation of columns
+                with st.expander("📖 How to Read This Table"):
+                    st.markdown("""
+                    **Column Definitions:**
+                    - **Prediction Entry:** Price AI predicted you should enter at
+                    - **Prediction Exit:** Price AI predicted you should exit at
+                    - **Actual Entry:** The price YOU actually entered at
+                    - **Actual Exit:** The price YOU actually exited at
+                    - **P/L:** Your profit/loss in dollars (Actual Exit - Actual Entry)
+                    - **P/L %:** Your profit/loss as a percentage
+                    - **AI Error:** How accurate was AI's exit prediction?
+                      - **Negative (-):** AI under-predicted (actual was higher)
+                      - **Positive (+):** AI over-predicted (actual was lower)
+                      - **Example:** -2.33% means AI predicted 4200 but actual was 4300 (AI was too conservative)
+                    
+                    **Color Coding:**
+                    - 🟢 **Green:** Profit trades
+                    - 🔴 **Red:** Loss trades
+                    """)
+                
                 st.success(f"Showing {len(all_predictions)} tracked trade(s)")
                 
-                # Create Excel-like table display with ALL columns
+                # Create Excel-like table display with ALL columns matching user's format
                 table_data = []
                 for idx, row in all_predictions.iterrows():
                     entry_price = row['actual_entry_price'] if pd.notna(row['actual_entry_price']) else row['current_price']
-                    entry_time = pd.to_datetime(row['entry_timestamp']).strftime('%m/%d %H:%M') if pd.notna(row['entry_timestamp']) else pd.to_datetime(row['timestamp']).strftime('%m/%d %H:%M')
+                    entry_time = pd.to_datetime(row['entry_timestamp']).strftime('%Y-%m-%d %H:%M') if pd.notna(row['entry_timestamp']) else pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d %H:%M')
                     
                     status = row['status']
                     if status == 'will_trade':
                         status_emoji = "🟢 OPEN"
                         # For open trades, show predicted exit but no actual exit yet
                         exit_display = "—"
-                        pl_display = "—"
-                        pl_pct_display = "—"
+                        pl_dollar = "—"
+                        pl_percent = "—"
+                        ai_error = "—"
                     else:
                         status_emoji = "✅ CLOSED"
                         # For closed trades, get the actual exit from trade_results
@@ -3111,52 +3136,43 @@ if df is not None and len(df) > 0:
                         conn_result.close()
                         
                         if result_data:
-                            exit_display = f"${result_data[0]:,.2f}"
-                            pl_display = f"${result_data[1]:,.2f}"
-                            pl_pct_display = f"{result_data[2]:+.2f}%"
+                            actual_exit = result_data[0]
+                            profit_loss = result_data[1]
+                            profit_loss_pct = result_data[2]
+                            
+                            # Calculate AI Error (signed): (Predicted - Actual) / Actual × 100
+                            # Negative = AI under-predicted, Positive = AI over-predicted
+                            predicted_exit = row['predicted_price']
+                            ai_error_calc = ((predicted_exit - actual_exit) / actual_exit) * 100
+                            
+                            exit_display = f"{actual_exit:,.2f}"
+                            pl_dollar = f"{profit_loss:,.2f}"
+                            pl_percent = f"{profit_loss_pct:+.2f}%"
+                            ai_error = f"{ai_error_calc:+.2f}%"
                         else:
                             exit_display = "—"
-                            pl_display = "—"
-                            pl_pct_display = "—"
+                            pl_dollar = "—"
+                            pl_percent = "—"
+                            ai_error = "—"
                     
                     table_data.append({
                         'ID': int(row['id']),
                         'Status': status_emoji,
-                        'Date/Time': entry_time,
+                        'Date': entry_time,
                         'Pair': row['pair'],
-                        'Pred. Entry': f"${row['current_price']:,.2f}",
-                        'Your Entry': f"${entry_price:,.2f}",
-                        'Pred. Exit': f"${row['predicted_price']:,.2f}",
-                        'Your Exit': exit_display,
-                        'P/L $': pl_display,
-                        'P/L %': pl_pct_display,
+                        'Prediction Entry': f"{row['current_price']:,.2f}",
+                        'Prediction Exit': f"{row['predicted_price']:,.2f}",
+                        'Actual Entry': f"{entry_price:,.2f}",
+                        'Actual Exit': exit_display,
+                        'P/L': pl_dollar,
+                        'P/L %': pl_percent,
+                        'AI Error': ai_error,
                         'Signal': f"{row['signal_strength']}/10"
                     })
                 
                 df_display = pd.DataFrame(table_data)
                 
-                # Style the dataframe to highlight P/L
-                def highlight_pl(val):
-                    if val == "—":
-                        return ''
-                    if isinstance(val, str) and '$' in val:
-                        # Remove $ and , for comparison
-                        num_val = float(val.replace('$', '').replace(',', ''))
-                        if num_val > 0:
-                            return 'color: green; font-weight: bold'
-                        elif num_val < 0:
-                            return 'color: red; font-weight: bold'
-                    if isinstance(val, str) and '%' in val:
-                        num_val = float(val.replace('%', '').replace('+', ''))
-                        if num_val > 0:
-                            return 'color: green; font-weight: bold'
-                        elif num_val < 0:
-                            return 'color: red; font-weight: bold'
-                    return ''
-                
-                # Apply styling
-                styled_df = df_display.style.applymap(highlight_pl, subset=['P/L $', 'P/L %'])
-                
+                # Display the table
                 st.dataframe(df_display, use_container_width=True, hide_index=True)
                 
                 st.markdown("---")
