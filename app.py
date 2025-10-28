@@ -2939,31 +2939,100 @@ if df is not None and len(df) > 0:
                 if tracked_count == 0:
                     st.warning("⚠️ No tracked trades found. Did you click 'Track This Trade' on a prediction?")
                 
+                # Manual migration button
+                st.markdown("---")
+                st.markdown("### 🔧 Manual Database Migration")
+                if st.button("🔄 Add Missing Columns to Database", type="primary"):
+                    conn_migrate = sqlite3.connect(str(DB_PATH))
+                    cursor_migrate = conn_migrate.cursor()
+                    
+                    # Check existing columns
+                    cursor_migrate.execute("PRAGMA table_info(predictions)")
+                    cols = [col[1] for col in cursor_migrate.fetchall()]
+                    
+                    st.write(f"**Current columns:** {', '.join(cols)}")
+                    
+                    # Add columns if missing
+                    messages = []
+                    if 'actual_entry_price' not in cols:
+                        try:
+                            cursor_migrate.execute("ALTER TABLE predictions ADD COLUMN actual_entry_price REAL")
+                            conn_migrate.commit()
+                            messages.append("✅ Added actual_entry_price column")
+                        except Exception as e:
+                            messages.append(f"❌ Error adding actual_entry_price: {e}")
+                    else:
+                        messages.append("✅ actual_entry_price already exists")
+                    
+                    if 'entry_timestamp' not in cols:
+                        try:
+                            cursor_migrate.execute("ALTER TABLE predictions ADD COLUMN entry_timestamp TEXT")
+                            conn_migrate.commit()
+                            messages.append("✅ Added entry_timestamp column")
+                        except Exception as e:
+                            messages.append(f"❌ Error adding entry_timestamp: {e}")
+                    else:
+                        messages.append("✅ entry_timestamp already exists")
+                    
+                    conn_migrate.close()
+                    
+                    for msg in messages:
+                        st.info(msg)
+                    
+                    st.success("🎉 Migration complete! Refresh the page to see changes.")
+                    st.button("🔄 Refresh Page", on_click=st.rerun)
+                
                 # Show recent predictions to verify IDs
                 st.markdown("---")
                 st.markdown("**Recent Predictions (Last 10):**")
                 conn_recent = sqlite3.connect(str(DB_PATH))
-                recent_df = pd.read_sql_query('''
-                    SELECT id, timestamp, pair, status, actual_entry_price
-                    FROM predictions
-                    ORDER BY timestamp DESC
-                    LIMIT 10
-                ''', conn_recent)
-                conn_recent.close()
                 
-                st.dataframe(recent_df, use_container_width=True)
+                # First check what columns exist
+                cursor_cols = conn_recent.cursor()
+                cursor_cols.execute("PRAGMA table_info(predictions)")
+                existing_cols = [col[1] for col in cursor_cols.fetchall()]
+                
+                st.write(f"**Existing columns:** {', '.join(existing_cols)}")
+                
+                # Query only existing columns
+                try:
+                    if 'actual_entry_price' in existing_cols:
+                        recent_df = pd.read_sql_query('''
+                            SELECT id, timestamp, pair, status, actual_entry_price
+                            FROM predictions
+                            ORDER BY timestamp DESC
+                            LIMIT 10
+                        ''', conn_recent)
+                    else:
+                        st.warning("⚠️ `actual_entry_price` column is MISSING! Click the migration button above to add it.")
+                        recent_df = pd.read_sql_query('''
+                            SELECT id, timestamp, pair, status
+                            FROM predictions
+                            ORDER BY timestamp DESC
+                            LIMIT 10
+                        ''', conn_recent)
+                    
+                    st.dataframe(recent_df, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Query error: {e}")
+                
+                conn_recent.close()
                 
                 # Check for status distribution
                 conn_status = sqlite3.connect(str(DB_PATH))
-                status_df = pd.read_sql_query('''
-                    SELECT status, COUNT(*) as count
-                    FROM predictions
-                    GROUP BY status
-                ''', conn_status)
-                conn_status.close()
+                try:
+                    status_df = pd.read_sql_query('''
+                        SELECT status, COUNT(*) as count
+                        FROM predictions
+                        GROUP BY status
+                    ''', conn_status)
+                    
+                    st.markdown("**Status Distribution:**")
+                    st.dataframe(status_df, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Status query error: {e}")
                 
-                st.markdown("**Status Distribution:**")
-                st.dataframe(status_df, use_container_width=True)
+                conn_status.close()
             
             # Get all recent predictions for comparison
             all_predictions = get_all_recent_predictions(limit=20)
