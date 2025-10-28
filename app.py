@@ -1800,11 +1800,11 @@ if df is not None and len(df) > 0:
         is_tracked = result and result[0] == 'will_trade'
         
         if not is_tracked:
-            st.info("💡 **Want to track this trade for AI learning?** Enter your actual entry price to save immediately (like Excel).")
+            st.info("💡 **Want to track this trade for AI learning?** Enter your actual entry price and click 'Save Trade Entry' (like Excel). Enable 'Show Learning Dashboard' in sidebar to see your trades table below!")
             
             # Show entry form when button clicked
             with st.form(key=f"track_form_{prediction_id}"):
-                st.markdown(f"### 📊 Track Trade: {asset_type}")
+                st.markdown(f"### 📊 Save Trade: {asset_type}")
                 
                 # Show Prediction ID for debugging
                 st.caption(f"🔢 Prediction ID: {prediction_id}")
@@ -1877,7 +1877,7 @@ if df is not None and len(df) > 0:
                                 **Predicted Exit:** ${predictions[0]:,.2f}  
                                 **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M')}
                                 
-                                🎯 **Next Step:** Go to AI Learning tab to close this trade when ready!
+                                🎯 **Next Step:** {"Scroll down to see your trade in the table below!" if show_learning_dashboard else "Check 'Show Learning Dashboard' in sidebar to see your trades table!"}
                                 """)
                                 
                                 # Verify save
@@ -1914,10 +1914,150 @@ if df is not None and len(df) > 0:
                         st.error("⚠️ Please enter a valid entry price greater than 0")
         else:
             actual_entry = result[1] if result and result[1] else current_price
-            st.success(f"✅ **Trade Tracked** - Entry: ${actual_entry:,.2f} | Go to AI Learning to close this trade")
+            st.success(f"✅ **Trade Tracked** - Entry: ${actual_entry:,.2f} | Scroll down to see your trades table")
         
         st.markdown("---")
         # ==================== END TRACK BUTTON ====================
+        
+        # ==================== AI LEARNING TABLE ON PAIR PAGE ====================
+        if show_learning_dashboard:
+            st.markdown("---")
+            st.markdown("## 📊 Your Tracked Trades (AI Learning)")
+            st.info("✅ AI Learning enabled - Your tracked trades appear below")
+            
+            # Get tracked trades
+            all_predictions = get_all_recent_predictions(limit=50)
+            
+            if len(all_predictions) > 0:
+                # Summary metrics
+                open_count = len([p for _, p in all_predictions.iterrows() if p['status'] == 'will_trade'])
+                closed_count = len([p for _, p in all_predictions.iterrows() if p['status'] == 'completed'])
+                
+                col_m1, col_m2 = st.columns(2)
+                col_m1.metric("🟢 Open Trades", open_count)
+                col_m2.metric("✅ Closed Trades", closed_count)
+                
+                st.markdown("---")
+                
+                # Excel-Like Table
+                st.markdown("### 📋 Trades Table")
+                
+                # Build table
+                table_data = []
+                for _, row in all_predictions.iterrows():
+                    entry_price = row['actual_entry_price'] if pd.notna(row['actual_entry_price']) else row['current_price']
+                    entry_time = pd.to_datetime(row['entry_timestamp']).strftime('%Y-%m-%d %H:%M') if pd.notna(row['entry_timestamp']) else pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d %H:%M')
+                    
+                    if row['status'] == 'will_trade':
+                        status_emoji = "🟢 OPEN"
+                        exit_val = "—"
+                        pl_val = "—"
+                        pl_pct_val = "—"
+                        ai_error_val = "—"
+                    else:
+                        status_emoji = "✅ CLOSED"
+                        
+                        # Get trade results
+                        conn_result = sqlite3.connect(str(DB_PATH))
+                        cursor_result = conn_result.cursor()
+                        cursor_result.execute('''
+                            SELECT exit_price, profit_loss, profit_loss_pct 
+                            FROM trade_results 
+                            WHERE prediction_id = ?
+                        ''', (int(row['id']),))
+                        result = cursor_result.fetchone()
+                        conn_result.close()
+                        
+                        if result:
+                            exit_val = f"{result[0]:,.2f}"
+                            pl_val = f"{result[1]:,.2f}"
+                            pl_pct_val = f"{result[2]:+.2f}%"
+                            
+                            # Calculate AI Error
+                            ai_error = ((row['predicted_price'] - result[0]) / result[0]) * 100
+                            ai_error_val = f"{ai_error:+.2f}%"
+                        else:
+                            exit_val = "—"
+                            pl_val = "—"
+                            pl_pct_val = "—"
+                            ai_error_val = "—"
+                    
+                    table_data.append({
+                        'ID': int(row['id']),
+                        'Status': status_emoji,
+                        'Date': entry_time,
+                        'Pair': row['pair'],
+                        'Prediction Entry': f"{row['current_price']:,.2f}",
+                        'Prediction Exit': f"{row['predicted_price']:,.2f}",
+                        'Actual Entry': f"{entry_price:,.2f}",
+                        'Actual Exit': exit_val,
+                        'P/L': pl_val,
+                        'P/L %': pl_pct_val,
+                        'AI Error': ai_error_val,
+                        'Signal': f"{row['signal_strength']}/10"
+                    })
+                
+                df_display = pd.DataFrame(table_data)
+                st.dataframe(df_display, use_container_width=True, hide_index=True)
+                
+                st.markdown("---")
+                
+                # Close Trade Form on pair page
+                open_trades_df = all_predictions[all_predictions['status'] == 'will_trade']
+                
+                if len(open_trades_df) > 0:
+                    st.markdown("### 📥 Close a Trade")
+                    
+                    # Dropdown
+                    trade_options = {}
+                    for _, row in open_trades_df.iterrows():
+                        entry = row['actual_entry_price'] if pd.notna(row['actual_entry_price']) else row['current_price']
+                        trade_options[int(row['id'])] = f"ID {int(row['id'])} - {row['pair']} (Entry: ${entry:,.2f})"
+                    
+                    selected_id = st.selectbox("Select trade to close:", list(trade_options.keys()), format_func=lambda x: trade_options[x], key="close_trade_pair_page")
+                    
+                    selected_row = open_trades_df[open_trades_df['id'] == selected_id].iloc[0]
+                    actual_entry = selected_row['actual_entry_price'] if pd.notna(selected_row['actual_entry_price']) else selected_row['current_price']
+                    
+                    # Form
+                    with st.form("close_trade_form_pair_page"):
+                        st.info(f"**{selected_row['pair']}** - Entry: ${actual_entry:,.2f}")
+                        
+                        col_exit, col_pl = st.columns([2, 1])
+                        
+                        with col_exit:
+                            exit_price = st.number_input(
+                                "💵 Your Exit Price",
+                                min_value=0.0,
+                                value=float(selected_row['predicted_price']),
+                                step=0.01,
+                                format="%.2f"
+                            )
+                        
+                        with col_pl:
+                            est_pl = exit_price - actual_entry
+                            est_pl_pct = (est_pl / actual_entry * 100) if actual_entry > 0 else 0
+                            st.metric("Est. P/L", f"${est_pl:,.2f}", f"{est_pl_pct:+.2f}%")
+                        
+                        notes = st.text_area("Notes (Optional)")
+                        
+                        submit = st.form_submit_button("✅ Close Trade", type="primary", use_container_width=True)
+                        
+                        if submit and exit_price > 0:
+                            success = save_trade_result(selected_id, actual_entry, exit_price, notes)
+                            if success:
+                                st.success(f"✅ Trade closed! P/L: ${est_pl:,.2f} ({est_pl_pct:+.2f}%)")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("❌ Error closing trade")
+                else:
+                    st.success("✅ All trades are closed!")
+            else:
+                st.info("ℹ️ No tracked trades yet. Use 'Save Trade Entry' button above to track trades.")
+            
+            st.markdown("---")
+        # ==================== END AI LEARNING TABLE ====================
         
         # RSI Insights
         if rsi_insights:
@@ -2950,7 +3090,7 @@ if df is not None and len(df) > 0:
             st.markdown("### 📊 Your Trades (Excel-Like)")
             st.info("""
             💡 **Simple Workflow:**
-            1. Track a trade on any pair page → Enter your actual entry price → Saved immediately!
+            1. On any pair page → Click "Save Trade Entry" button → Enter your actual entry price → Saved immediately!
             2. Table shows your tracked trades with entry already saved
             3. Close trade → Just enter exit price → Done!
             """)
@@ -3169,7 +3309,7 @@ if df is not None and len(df) > 0:
                 
                 **To start:**
                 1. Go to any pair page
-                2. Click "📊 Track This Trade"
+                2. Scroll down and click "✅ Save Trade Entry" button
                 3. Enter your actual entry price
                 4. Come back here to close it later
                 """)
