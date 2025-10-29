@@ -289,7 +289,8 @@ def get_all_recent_predictions(limit=20):
     conn.close()
     return df
 
-def save_trade_result(prediction_id, entry_price, exit_price, notes=""):
+# ==================== SURGICAL FIX 1: UPDATE save_trade_result() ====================
+def save_trade_result(prediction_id, entry_price, exit_price, notes="", position_type='LONG'):
     """Save actual trade result and trigger AI learning"""
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
@@ -301,8 +302,14 @@ def save_trade_result(prediction_id, entry_price, exit_price, notes=""):
         predicted_price = result[0]
         indicator_snapshot = json.loads(result[1]) if result[1] else None
         
-        profit_loss = exit_price - entry_price
-        profit_loss_pct = ((exit_price - entry_price) / entry_price) * 100
+        # Calculate P/L based on position type
+        if position_type == 'SHORT':
+            profit_loss = entry_price - exit_price  # SHORT: profit when price goes DOWN
+            profit_loss_pct = ((entry_price - exit_price) / entry_price) * 100
+        else:  # LONG
+            profit_loss = exit_price - entry_price  # LONG: profit when price goes UP
+            profit_loss_pct = ((exit_price - entry_price) / entry_price) * 100
+        
         prediction_error = ((predicted_price - exit_price) / exit_price) * 100
         
         cursor.execute('''
@@ -344,6 +351,7 @@ def save_trade_result(prediction_id, entry_price, exit_price, notes=""):
     
     conn.close()
     return False, None
+# ==================== END SURGICAL FIX 1 ====================
 
 def analyze_indicator_accuracy(indicator_snapshot, was_profitable, cursor):
     """Analyze which indicators were correct and update accuracy scores"""
@@ -690,7 +698,6 @@ def create_indicator_snapshot(df):
         return {}
 
 init_database()
-
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
 st.title("🤖 AI Trading Analysis Platform - ENHANCED")
@@ -1953,7 +1960,6 @@ if df is not None and len(df) > 0:
                     key=f"entry_input_{prediction_id}"
                 )
                 
-                # Show what will be saved
                 st.info(f"📝 **Will save:** Entry Price = ${actual_entry_price:,.2f}")
                 
                 col_btn1, col_btn2 = st.columns([1, 1])
@@ -1964,7 +1970,6 @@ if df is not None and len(df) > 0:
                 
                 if submit_track:
                     if actual_entry_price > 0:
-                        # Add debug logging
                         st.info(f"🔍 DEBUG: Saving entry price: ${actual_entry_price:,.2f} for prediction ID: {prediction_id}")
                         
                         success = mark_prediction_for_trading(prediction_id, actual_entry_price)
@@ -2015,7 +2020,6 @@ if df is not None and len(df) > 0:
                     entry_price = row['actual_entry_price'] if pd.notna(row['actual_entry_price']) else row['current_price']
                     entry_time = pd.to_datetime(row['entry_timestamp']).strftime('%Y-%m-%d %H:%M') if pd.notna(row['entry_timestamp']) else pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d %H:%M')
                     
-                    # Debug: Check if actual_entry_price exists and differs from current_price
                     has_actual_entry = pd.notna(row['actual_entry_price'])
                     
                     if row['status'] == 'will_trade':
@@ -2049,10 +2053,9 @@ if df is not None and len(df) > 0:
                             pl_pct_val = "—"
                             ai_error_val = "—"
                     
-                    # Add indicator if user entry differs from AI suggestion
                     entry_indicator = ""
                     if has_actual_entry and abs(entry_price - row['current_price']) > 0.01:
-                        entry_indicator = " 📝"  # Shows user entered different price
+                        entry_indicator = " 📝"
                     
                     table_data.append({
                         'ID': int(row['id']),
@@ -2089,8 +2092,17 @@ if df is not None and len(df) > 0:
                     selected_row = open_trades_df[open_trades_df['id'] == selected_id].iloc[0]
                     actual_entry = selected_row['actual_entry_price'] if pd.notna(selected_row['actual_entry_price']) else selected_row['current_price']
                     
+# ==================== SURGICAL FIX 2: ADD POSITION TYPE SELECTOR ====================
                     with st.form("close_trade_form_pair_page"):
                         st.info(f"**{selected_row['pair']}** - Entry: ${actual_entry:,.2f}")
+                        
+                        # Add position type selector
+                        position_type = st.selectbox(
+                            "📊 Position Type:",
+                            options=['LONG', 'SHORT'],
+                            index=0,
+                            help="LONG = profit when price goes UP | SHORT = profit when price goes DOWN"
+                        )
                         
                         col_exit, col_pl = st.columns([2, 1])
                         
@@ -2104,7 +2116,11 @@ if df is not None and len(df) > 0:
                             )
                         
                         with col_pl:
-                            est_pl = exit_price - actual_entry
+                            # Calculate preview based on position type
+                            if position_type == 'SHORT':
+                                est_pl = actual_entry - exit_price
+                            else:  # LONG
+                                est_pl = exit_price - actual_entry
                             est_pl_pct = (est_pl / actual_entry * 100) if actual_entry > 0 else 0
                             st.metric("Est. P/L", f"${est_pl:,.2f}", f"{est_pl_pct:+.2f}%")
                         
@@ -2113,7 +2129,7 @@ if df is not None and len(df) > 0:
                         submit = st.form_submit_button("✅ Close Trade & Trigger AI Learning", type="primary", use_container_width=True)
                         
                         if submit and exit_price > 0:
-                            success, retrain_message = save_trade_result(selected_id, actual_entry, exit_price, notes)
+                            success, retrain_message = save_trade_result(selected_id, actual_entry, exit_price, notes, position_type)
                             if success:
                                 st.success(f"✅ Trade closed! P/L: ${est_pl:,.2f} ({est_pl_pct:+.2f}%)")
                                 
@@ -2124,6 +2140,7 @@ if df is not None and len(df) > 0:
                                 st.rerun()
                             else:
                                 st.error("❌ Error closing trade")
+# ==================== END SURGICAL FIX 2 ====================
                 else:
                     st.success("✅ All trades are closed!")
             else:
@@ -2154,7 +2171,6 @@ if df is not None and len(df) > 0:
     
     st.markdown("---")
     
-    # ==================== SURGICAL ENHANCEMENT: TRADING CENTRAL FORMAT ====================
     st.markdown("### 💰 Trading Recommendations")
     st.markdown("*Powered by AI/ML + Trading Central Format*")
     
@@ -2162,11 +2178,9 @@ if df is not None and len(df) > 0:
     mfi = df['mfi'].iloc[-1] if 'mfi' in df.columns else 50
     adx = df['adx'].iloc[-1] if 'adx' in df.columns else 20
     
-    # Calculate Support/Resistance Levels
     sr_levels = calculate_support_resistance_levels(df, current_price)
     
-    # Key Point (Pivot)
-    key_point = sr_levels[3]  # Middle level
+    key_point = sr_levels[3]
     
     if signal_strength >= 3:
         warning_count, warning_details = calculate_warning_signs(df, signal_strength)
@@ -2174,11 +2188,9 @@ if df is not None and len(df) > 0:
         st.markdown("---")
         st.markdown("## 📊 Trading Central Signal Format")
         
-        # Key Point Section
         st.markdown("### 🎯 Key Point")
         st.info(f"**${key_point:,.2f}**")
         
-        # Our Preference Section
         st.markdown("### 📈 Our Preference")
         if warning_count == 0:
             target_price = predictions[0] if predictions else current_price * 1.025
@@ -2196,13 +2208,11 @@ if df is not None and len(df) > 0:
             st.error("**Bearish reversal expected**")
             st.caption(f"All 3 warning systems triggered. Consider exit.")
         
-        # Alternative Scenario Section
         st.markdown("### 🔄 Alternative Scenario")
         downside_target_1 = key_point * 0.98
         downside_target_2 = key_point * 0.96
         st.warning(f"The downside breakout of **${key_point:,.2f}** would call for **${downside_target_1:,.2f}** and **${downside_target_2:,.2f}**")
         
-        # Comment Section (Technical Analysis)
         st.markdown("### 💬 Comment")
         rsi_current = df['rsi'].iloc[-1] if 'rsi' in df.columns else 50
         macd_current = df['macd'].iloc[-1] if 'macd' in df.columns else 0
@@ -2212,7 +2222,6 @@ if df is not None and len(df) > 0:
         
         comment_parts = []
         
-        # RSI Comment
         if rsi_current < 30:
             comment_parts.append(f"The RSI is below its neutrality area at 50 (currently {rsi_current:.1f}), indicating oversold conditions.")
         elif rsi_current > 70:
@@ -2220,13 +2229,11 @@ if df is not None and len(df) > 0:
         else:
             comment_parts.append(f"The RSI is near neutrality at {rsi_current:.1f}.")
         
-        # MACD Comment
         if macd_current > macd_signal_current:
             comment_parts.append("The MACD is above its signal line and positive, suggesting bullish momentum.")
         else:
             comment_parts.append("The MACD is below its signal line, indicating bearish pressure.")
         
-        # Moving Average Comment
         if current_price > sma_20 and current_price > sma_50:
             comment_parts.append(f"The price is trading above both its 20-period MA (${sma_20:.2f}) and 50-period MA (${sma_50:.2f}).")
         elif current_price > sma_20:
@@ -2237,7 +2244,6 @@ if df is not None and len(df) > 0:
         full_comment = " ".join(comment_parts)
         st.info(full_comment)
         
-        # Supports and Resistances Section
         st.markdown("### 📊 Supports and Resistances")
         for i, level in enumerate(sr_levels):
             if i < 3:
@@ -2249,7 +2255,6 @@ if df is not None and len(df) > 0:
         
         st.markdown("---")
         
-        # 3-Part Behavioral Analysis
         st.markdown("### 🎯 3-Part Behavioral Analysis")
         
         col_price, col_volume, col_momentum = st.columns(3)
@@ -2286,7 +2291,6 @@ if df is not None and len(df) > 0:
         
         st.markdown("---")
         
-        # Trading Recommendations based on warnings
         if warning_count == 0:
             st.success("### 🟢 STRONG BUY - ALL SYSTEMS CONFIRM")
             entry = current_price
@@ -2533,8 +2537,6 @@ if df is not None and len(df) > 0:
             'Action': ['Set alert above', 'Set alert below', 'Do nothing']
         }
         st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
-    
-    # ==================== END SURGICAL ENHANCEMENT ====================
     
     st.warning("⚠️ **Risk Warning:** Use stop-losses. Never risk more than 1-2% per trade. Not financial advice.")
     
