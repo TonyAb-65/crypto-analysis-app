@@ -676,8 +676,8 @@ init_database()
 
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
-st.title("🤖 AI Trading Analysis Platform - IMPROVED")
-st.markdown("*Crypto, Forex, Metals + Enhanced AI Predictions + AI Learning System*")
+st.title("🤖 AI Trading Analysis Platform - ENHANCED")
+st.markdown("*Crypto, Forex, Metals + AI ML Predictions + Trading Central Format + AI Learning*")
 
 if 'binance_blocked' not in st.session_state:
     st.session_state.binance_blocked = False
@@ -1790,6 +1790,28 @@ def calculate_warning_signs(df, signal_strength):
     
     return warning_count, details
 
+def calculate_support_resistance_levels(df, current_price):
+    """Calculate 7 support and resistance levels using pivot points and technical analysis"""
+    high = df['high'].tail(20).max()
+    low = df['low'].tail(20).min()
+    close = df['close'].iloc[-1]
+    
+    pivot = (high + low + close) / 3
+    
+    r1 = (2 * pivot) - low
+    r2 = pivot + (high - low)
+    r3 = high + 2 * (pivot - low)
+    
+    s1 = (2 * pivot) - high
+    s2 = pivot - (high - low)
+    s3 = low - 2 * (high - pivot)
+    
+    all_levels = [r3, r2, r1, pivot, s1, s2, s3]
+    
+    all_levels.sort(reverse=True)
+    
+    return all_levels
+
 with st.spinner(f"🔄 Fetching {pair_display} data..."):
     df, data_source = fetch_data(symbol, asset_type)
 
@@ -2096,15 +2118,102 @@ if df is not None and len(df) > 0:
     
     st.markdown("---")
     
+    # ==================== SURGICAL ENHANCEMENT: TRADING CENTRAL FORMAT ====================
     st.markdown("### 💰 Trading Recommendations")
+    st.markdown("*Powered by AI/ML + Trading Central Format*")
     
     stoch_k = df['stoch_k'].iloc[-1] if 'stoch_k' in df.columns else 50
     mfi = df['mfi'].iloc[-1] if 'mfi' in df.columns else 50
     adx = df['adx'].iloc[-1] if 'adx' in df.columns else 20
     
+    # Calculate Support/Resistance Levels
+    sr_levels = calculate_support_resistance_levels(df, current_price)
+    
+    # Key Point (Pivot)
+    key_point = sr_levels[3]  # Middle level
+    
     if signal_strength >= 3:
         warning_count, warning_details = calculate_warning_signs(df, signal_strength)
         
+        st.markdown("---")
+        st.markdown("## 📊 Trading Central Signal Format")
+        
+        # Key Point Section
+        st.markdown("### 🎯 Key Point")
+        st.info(f"**${key_point:,.2f}**")
+        
+        # Our Preference Section
+        st.markdown("### 📈 Our Preference")
+        if warning_count == 0:
+            target_price = predictions[0] if predictions else current_price * 1.025
+            st.success(f"**Rise to ${target_price:,.2f}**")
+            st.caption("All technical indicators confirm bullish momentum. Strong buy opportunity.")
+        elif warning_count == 1:
+            target_price = predictions[0] if predictions else current_price * 1.015
+            st.warning(f"**Rise to ${target_price:,.2f}** (with caution)")
+            st.caption(f"1 warning detected: {warning_details['price_details'] if warning_details['price_warning'] else warning_details['volume_details'] if warning_details['volume_warning'] else warning_details['momentum_details']}")
+        elif warning_count == 2:
+            target_price = predictions[0] if predictions else current_price * 1.01
+            st.warning(f"**Cautious rise to ${target_price:,.2f}**")
+            st.caption(f"2 warnings present. Reduced conviction.")
+        else:
+            st.error("**Bearish reversal expected**")
+            st.caption(f"All 3 warning systems triggered. Consider exit.")
+        
+        # Alternative Scenario Section
+        st.markdown("### 🔄 Alternative Scenario")
+        downside_target_1 = key_point * 0.98
+        downside_target_2 = key_point * 0.96
+        st.warning(f"The downside breakout of **${key_point:,.2f}** would call for **${downside_target_1:,.2f}** and **${downside_target_2:,.2f}**")
+        
+        # Comment Section (Technical Analysis)
+        st.markdown("### 💬 Comment")
+        rsi_current = df['rsi'].iloc[-1] if 'rsi' in df.columns else 50
+        macd_current = df['macd'].iloc[-1] if 'macd' in df.columns else 0
+        macd_signal_current = df['macd_signal'].iloc[-1] if 'macd_signal' in df.columns else 0
+        sma_20 = df['sma_20'].iloc[-1] if 'sma_20' in df.columns else current_price
+        sma_50 = df['sma_50'].iloc[-1] if 'sma_50' in df.columns else current_price
+        
+        comment_parts = []
+        
+        # RSI Comment
+        if rsi_current < 30:
+            comment_parts.append(f"The RSI is below its neutrality area at 50 (currently {rsi_current:.1f}), indicating oversold conditions.")
+        elif rsi_current > 70:
+            comment_parts.append(f"The RSI is above its neutrality area at 50 (currently {rsi_current:.1f}), indicating overbought conditions.")
+        else:
+            comment_parts.append(f"The RSI is near neutrality at {rsi_current:.1f}.")
+        
+        # MACD Comment
+        if macd_current > macd_signal_current:
+            comment_parts.append("The MACD is above its signal line and positive, suggesting bullish momentum.")
+        else:
+            comment_parts.append("The MACD is below its signal line, indicating bearish pressure.")
+        
+        # Moving Average Comment
+        if current_price > sma_20 and current_price > sma_50:
+            comment_parts.append(f"The price is trading above both its 20-period MA (${sma_20:.2f}) and 50-period MA (${sma_50:.2f}).")
+        elif current_price > sma_20:
+            comment_parts.append(f"The price is trading above its 20-period MA (${sma_20:.2f}) but below its 50-period MA (${sma_50:.2f}).")
+        else:
+            comment_parts.append(f"The price is trading below both its 20-period MA (${sma_20:.2f}) and 50-period MA (${sma_50:.2f}).")
+        
+        full_comment = " ".join(comment_parts)
+        st.info(full_comment)
+        
+        # Supports and Resistances Section
+        st.markdown("### 📊 Supports and Resistances")
+        for i, level in enumerate(sr_levels):
+            if i < 3:
+                st.caption(f"**R{3-i}:** ${level:,.2f}")
+            elif i == 3:
+                st.caption(f"**Pivot:** ${level:,.2f} (Current: ${current_price:,.2f})")
+            else:
+                st.caption(f"**S{i-3}:** ${level:,.2f}")
+        
+        st.markdown("---")
+        
+        # 3-Part Behavioral Analysis
         st.markdown("### 🎯 3-Part Behavioral Analysis")
         
         col_price, col_volume, col_momentum = st.columns(3)
@@ -2139,6 +2248,9 @@ if df is not None and len(df) > 0:
                          warning_details['momentum_details'],
                          delta_color="normal")
         
+        st.markdown("---")
+        
+        # Trading Recommendations based on warnings
         if warning_count == 0:
             st.success("### 🟢 STRONG BUY - ALL SYSTEMS CONFIRM")
             entry = current_price
@@ -2202,6 +2314,35 @@ if df is not None and len(df) > 0:
             st.info("**If IN position:** 🚨 EXIT 75-100% NOW")
     
     elif signal_strength >= 1:
+        st.markdown("---")
+        st.markdown("## 📊 Trading Central Signal Format")
+        
+        st.markdown("### 🎯 Key Point")
+        st.info(f"**${key_point:,.2f}**")
+        
+        st.markdown("### 📈 Our Preference")
+        target_price = predictions[0] if predictions else current_price * 1.015
+        st.warning(f"**Cautious rise to ${target_price:,.2f}**")
+        st.caption(f"Signal: {signal_strength}/10 - Weak bullish momentum detected.")
+        
+        st.markdown("### 🔄 Alternative Scenario")
+        downside_target_1 = key_point * 0.985
+        downside_target_2 = key_point * 0.975
+        st.warning(f"The downside breakout of **${key_point:,.2f}** would call for **${downside_target_1:,.2f}** and **${downside_target_2:,.2f}**")
+        
+        st.markdown("### 💬 Comment")
+        st.info(f"Weak buy signal detected. Signal strength: {signal_strength}/10. Consider smaller position (50%) or wait for confirmation.")
+        
+        st.markdown("### 📊 Supports and Resistances")
+        for i, level in enumerate(sr_levels):
+            if i < 3:
+                st.caption(f"**R{3-i}:** ${level:,.2f}")
+            elif i == 3:
+                st.caption(f"**Pivot:** ${level:,.2f} (Current: ${current_price:,.2f})")
+            else:
+                st.caption(f"**S{i-3}:** ${level:,.2f}")
+        
+        st.markdown("---")
         st.warning("### 🟡 WEAK BUY SIGNAL")
         st.info(f"Signal: {signal_strength}/10 - Consider smaller position (50%) or wait for confirmation")
         
@@ -2220,6 +2361,36 @@ if df is not None and len(df) > 0:
         st.caption("⚠️ Wait for signal ≥ 3 for full position")
     
     elif signal_strength <= -3:
+        st.markdown("---")
+        st.markdown("## 📊 Trading Central Signal Format")
+        
+        st.markdown("### 🎯 Key Point")
+        st.info(f"**${key_point:,.2f}**")
+        
+        st.markdown("### 📉 Our Preference")
+        target_price = predictions[0] if predictions else current_price * 0.975
+        st.error(f"**Fall to ${target_price:,.2f}**")
+        st.caption("Strong bearish signals across all indicators.")
+        
+        st.markdown("### 🔄 Alternative Scenario")
+        upside_target_1 = key_point * 1.015
+        upside_target_2 = key_point * 1.025
+        st.info(f"The upside breakout of **${key_point:,.2f}** would call for **${upside_target_1:,.2f}** and **${upside_target_2:,.2f}**")
+        
+        st.markdown("### 💬 Comment")
+        rsi_current = df['rsi'].iloc[-1] if 'rsi' in df.columns else 50
+        st.info(f"Strong bearish momentum confirmed. RSI at {rsi_current:.1f}, MACD bearish. Short position recommended.")
+        
+        st.markdown("### 📊 Supports and Resistances")
+        for i, level in enumerate(sr_levels):
+            if i < 3:
+                st.caption(f"**R{3-i}:** ${level:,.2f}")
+            elif i == 3:
+                st.caption(f"**Pivot:** ${level:,.2f} (Current: ${current_price:,.2f})")
+            else:
+                st.caption(f"**S{i-3}:** ${level:,.2f}")
+        
+        st.markdown("---")
         st.error("### 🔴 STRONG SELL SIGNAL")
         entry = current_price
         tp1 = entry * 0.985
@@ -2237,6 +2408,35 @@ if df is not None and len(df) > 0:
         st.caption("📉 Short position recommended")
     
     elif signal_strength <= -1:
+        st.markdown("---")
+        st.markdown("## 📊 Trading Central Signal Format")
+        
+        st.markdown("### 🎯 Key Point")
+        st.info(f"**${key_point:,.2f}**")
+        
+        st.markdown("### 📉 Our Preference")
+        target_price = predictions[0] if predictions else current_price * 0.99
+        st.warning(f"**Cautious fall to ${target_price:,.2f}**")
+        st.caption(f"Signal: {signal_strength}/10 - Weak bearish pressure.")
+        
+        st.markdown("### 🔄 Alternative Scenario")
+        upside_target_1 = key_point * 1.01
+        upside_target_2 = key_point * 1.02
+        st.info(f"The upside breakout of **${key_point:,.2f}** would call for **${upside_target_1:,.2f}** and **${upside_target_2:,.2f}**")
+        
+        st.markdown("### 💬 Comment")
+        st.info(f"Weak bearish signal. Signal strength: {signal_strength}/10. Consider smaller short position or wait.")
+        
+        st.markdown("### 📊 Supports and Resistances")
+        for i, level in enumerate(sr_levels):
+            if i < 3:
+                st.caption(f"**R{3-i}:** ${level:,.2f}")
+            elif i == 3:
+                st.caption(f"**Pivot:** ${level:,.2f} (Current: ${current_price:,.2f})")
+            else:
+                st.caption(f"**S{i-3}:** ${level:,.2f}")
+        
+        st.markdown("---")
         st.warning("### 🟡 WEAK SELL SIGNAL")
         st.info(f"Signal: {signal_strength}/10 - Consider smaller position (50%) or wait for confirmation")
         
@@ -2255,6 +2455,35 @@ if df is not None and len(df) > 0:
         st.caption("⚠️ Wait for signal ≤ -3 for full position")
     
     else:
+        st.markdown("---")
+        st.markdown("## 📊 Trading Central Signal Format")
+        
+        st.markdown("### 🎯 Key Point")
+        st.info(f"**${key_point:,.2f}**")
+        
+        st.markdown("### ⚪ Market Status")
+        st.info("**Neutral - No clear directional bias**")
+        st.caption("Await breakout confirmation above or below key level.")
+        
+        st.markdown("### 🔄 Scenarios")
+        upside_target = key_point * 1.015
+        downside_target = key_point * 0.985
+        st.info(f"**Bullish Breakout (>3 signal):** Target ${upside_target:,.2f}")
+        st.warning(f"**Bearish Breakout (<-3 signal):** Target ${downside_target:,.2f}")
+        
+        st.markdown("### 💬 Comment")
+        st.info("Indicators are mixed. Price consolidating near key level. No trading action recommended until clear signal emerges.")
+        
+        st.markdown("### 📊 Supports and Resistances")
+        for i, level in enumerate(sr_levels):
+            if i < 3:
+                st.caption(f"**R{3-i}:** ${level:,.2f}")
+            elif i == 3:
+                st.caption(f"**Pivot:** ${level:,.2f} (Current: ${current_price:,.2f})")
+            else:
+                st.caption(f"**S{i-3}:** ${level:,.2f}")
+        
+        st.markdown("---")
         st.info("### ⚪ NEUTRAL - NO CLEAR DIRECTION")
         st.warning("🚫 Do NOT trade - Wait for signal ≥ 3 or ≤ -3")
         
@@ -2268,6 +2497,8 @@ if df is not None and len(df) > 0:
             'Action': ['Set alert above', 'Set alert below', 'Do nothing']
         }
         st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+    
+    # ==================== END SURGICAL ENHANCEMENT ====================
     
     st.warning("⚠️ **Risk Warning:** Use stop-losses. Never risk more than 1-2% per trade. Not financial advice.")
     
@@ -2508,9 +2739,10 @@ else:
 st.markdown("---")
 st.markdown(f"""
 <div style='text-align: center;'>
-    <p><b>🚀 AI TRADING PLATFORM WITH ADAPTIVE LEARNING</b></p>
-    <p><b>🧠 NEW:</b> AI learns from every trade automatically!</p>
-    <p><b>📡 Data Source:</b> Binance API</p>
+    <p><b>🚀 AI TRADING PLATFORM - ENHANCED WITH TRADING CENTRAL FORMAT</b></p>
+    <p><b>🧠 AI/ML Hybrid:</b> Machine Learning + Trading Central Presentation</p>
+    <p><b>🎓 AI Learning:</b> System learns from every trade automatically!</p>
+    <p><b>📡 Data Source:</b> Multi-API with fallbacks (Binance, OKX, CryptoCompare, etc.)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
     <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
 </div>
