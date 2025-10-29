@@ -205,10 +205,15 @@ def save_prediction(asset_type, pair, timeframe, current_price, predicted_price,
 def mark_prediction_for_trading(prediction_id, actual_entry_price):
     """Mark a prediction as the one you're actually trading and save entry price"""
     try:
+        print(f"📥 mark_prediction_for_trading called with:")
+        print(f"   prediction_id: {prediction_id}")
+        print(f"   actual_entry_price: {actual_entry_price}")
+        print(f"   actual_entry_price type: {type(actual_entry_price)}")
+        
         conn = sqlite3.connect(str(DB_PATH))
         cursor = conn.cursor()
         
-        cursor.execute('SELECT id, status FROM predictions WHERE id = ?', (prediction_id,))
+        cursor.execute('SELECT id, status, current_price FROM predictions WHERE id = ?', (prediction_id,))
         existing = cursor.fetchone()
         
         if not existing:
@@ -216,7 +221,10 @@ def mark_prediction_for_trading(prediction_id, actual_entry_price):
             conn.close()
             return False
         
-        print(f"✅ Found prediction ID {prediction_id}, current status: {existing[1]}")
+        print(f"✅ Found prediction ID {prediction_id}")
+        print(f"   Current status: {existing[1]}")
+        print(f"   Current price in DB: {existing[2]}")
+        print(f"   About to save actual_entry_price: {actual_entry_price}")
         
         cursor.execute('''
             UPDATE predictions 
@@ -236,17 +244,26 @@ def mark_prediction_for_trading(prediction_id, actual_entry_price):
         
         conn.commit()
         
+        # Verify the save
         cursor.execute('SELECT status, actual_entry_price, entry_timestamp FROM predictions WHERE id = ?', (prediction_id,))
         verify = cursor.fetchone()
         
         if verify:
-            print(f"✅ Verified: status='{verify[0]}', entry=${verify[1]}, timestamp={verify[2]}")
+            print(f"✅ VERIFICATION:")
+            print(f"   Status: '{verify[0]}'")
+            print(f"   Actual Entry Price: {verify[1]}")
+            print(f"   Entry Timestamp: {verify[2]}")
+            
+            if verify[1] != actual_entry_price:
+                print(f"⚠️ WARNING: Saved price {verify[1]} doesn't match input {actual_entry_price}")
         
         conn.close()
         return True
         
     except Exception as e:
         print(f"❌ ERROR in mark_prediction_for_trading: {e}")
+        import traceback
+        print(traceback.format_exc())
         return False
 
 def get_all_recent_predictions(limit=20):
@@ -1917,20 +1934,27 @@ if df is not None and len(df) > 0:
                 
                 col_info1, col_info2 = st.columns(2)
                 with col_info1:
-                    st.metric("Predicted Entry", f"${current_price:,.2f}")
+                    st.metric("AI Suggested Entry", f"${current_price:,.2f}")
+                    st.caption("(Current market price)")
                 with col_info2:
-                    st.metric("Predicted Exit", f"${predictions[0]:,.2f}")
+                    st.metric("AI Predicted Exit", f"${predictions[0]:,.2f}")
+                    st.caption("(Target price)")
                 
                 st.markdown("---")
-                actual_entry = st.number_input(
-                    "💵 What price did YOU actually enter at?",
+                st.warning("⚠️ **Important:** Enter YOUR actual entry price below (can be different from suggested price)")
+                
+                actual_entry_price = st.number_input(
+                    "💵 Your ACTUAL Entry Price (from your exchange):",
                     min_value=0.0,
                     value=float(current_price),
                     step=0.01,
                     format="%.2f",
-                    help="Enter your real entry price from your exchange/broker",
+                    help="This is the price YOU actually bought/entered at - it may differ from the suggested price above",
                     key=f"entry_input_{prediction_id}"
                 )
+                
+                # Show what will be saved
+                st.info(f"📝 **Will save:** Entry Price = ${actual_entry_price:,.2f}")
                 
                 col_btn1, col_btn2 = st.columns([1, 1])
                 with col_btn1:
@@ -1939,16 +1963,19 @@ if df is not None and len(df) > 0:
                     st.caption("Entry saved immediately ✨")
                 
                 if submit_track:
-                    if actual_entry > 0:
-                        success = mark_prediction_for_trading(prediction_id, actual_entry)
+                    if actual_entry_price > 0:
+                        # Add debug logging
+                        st.info(f"🔍 DEBUG: Saving entry price: ${actual_entry_price:,.2f} for prediction ID: {prediction_id}")
+                        
+                        success = mark_prediction_for_trading(prediction_id, actual_entry_price)
                         
                         if success:
                             st.success(f"""
                             ✅ **Trade Saved Successfully!**
                             
-                            **Pair:** {asset_type}  
-                            **Your Entry:** ${actual_entry:,.2f}  
-                            **Predicted Exit:** ${predictions[0]:,.2f}  
+                            **Pair:** {symbol}  
+                            **Your Actual Entry:** ${actual_entry_price:,.2f}  
+                            **AI Predicted Exit:** ${predictions[0]:,.2f}  
                             
                             🧠 **AI will learn from this trade when you close it!**
                             """)
@@ -1960,7 +1987,8 @@ if df is not None and len(df) > 0:
                         st.error("⚠️ Please enter a valid entry price greater than 0")
         else:
             actual_entry = result[1] if result and result[1] else current_price
-            st.success(f"✅ **Trade Tracked** - Entry: ${actual_entry:,.2f}")
+            st.success(f"✅ **Trade Tracked** - Your Entry: ${actual_entry:,.2f}")
+            st.caption(f"AI suggested entry was: ${current_price:,.2f}")
         
         st.markdown("---")
         
@@ -1986,6 +2014,9 @@ if df is not None and len(df) > 0:
                 for _, row in all_predictions.iterrows():
                     entry_price = row['actual_entry_price'] if pd.notna(row['actual_entry_price']) else row['current_price']
                     entry_time = pd.to_datetime(row['entry_timestamp']).strftime('%Y-%m-%d %H:%M') if pd.notna(row['entry_timestamp']) else pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d %H:%M')
+                    
+                    # Debug: Check if actual_entry_price exists and differs from current_price
+                    has_actual_entry = pd.notna(row['actual_entry_price'])
                     
                     if row['status'] == 'will_trade':
                         status_emoji = "🟢 OPEN"
@@ -2018,14 +2049,19 @@ if df is not None and len(df) > 0:
                             pl_pct_val = "—"
                             ai_error_val = "—"
                     
+                    # Add indicator if user entry differs from AI suggestion
+                    entry_indicator = ""
+                    if has_actual_entry and abs(entry_price - row['current_price']) > 0.01:
+                        entry_indicator = " 📝"  # Shows user entered different price
+                    
                     table_data.append({
                         'ID': int(row['id']),
                         'Status': status_emoji,
                         'Date': entry_time,
                         'Pair': row['pair'],
-                        'Prediction Entry': f"{row['current_price']:,.2f}",
-                        'Prediction Exit': f"{row['predicted_price']:,.2f}",
-                        'Actual Entry': f"{entry_price:,.2f}",
+                        'AI Entry': f"{row['current_price']:,.2f}",
+                        'Your Entry': f"{entry_price:,.2f}{entry_indicator}",
+                        'AI Exit': f"{row['predicted_price']:,.2f}",
                         'Actual Exit': exit_val,
                         'P/L': pl_val,
                         'P/L %': pl_pct_val,
