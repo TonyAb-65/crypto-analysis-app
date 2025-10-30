@@ -244,7 +244,6 @@ def mark_prediction_for_trading(prediction_id, actual_entry_price):
         
         conn.commit()
         
-        # Verify the save
         cursor.execute('SELECT status, actual_entry_price, entry_timestamp FROM predictions WHERE id = ?', (prediction_id,))
         verify = cursor.fetchone()
         
@@ -289,7 +288,6 @@ def get_all_recent_predictions(limit=20):
     conn.close()
     return df
 
-# ==================== SURGICAL FIX 1: UPDATE save_trade_result() ====================
 def save_trade_result(prediction_id, entry_price, exit_price, notes="", position_type='LONG'):
     """Save actual trade result and trigger AI learning"""
     conn = sqlite3.connect(str(DB_PATH))
@@ -302,12 +300,11 @@ def save_trade_result(prediction_id, entry_price, exit_price, notes="", position
         predicted_price = result[0]
         indicator_snapshot = json.loads(result[1]) if result[1] else None
         
-        # Calculate P/L based on position type
         if position_type == 'SHORT':
-            profit_loss = entry_price - exit_price  # SHORT: profit when price goes DOWN
+            profit_loss = entry_price - exit_price
             profit_loss_pct = ((entry_price - exit_price) / entry_price) * 100
-        else:  # LONG
-            profit_loss = exit_price - entry_price  # LONG: profit when price goes UP
+        else:
+            profit_loss = exit_price - entry_price
             profit_loss_pct = ((exit_price - entry_price) / entry_price) * 100
         
         prediction_error = ((predicted_price - exit_price) / exit_price) * 100
@@ -351,7 +348,6 @@ def save_trade_result(prediction_id, entry_price, exit_price, notes="", position
     
     conn.close()
     return False, None
-# ==================== END SURGICAL FIX 1 ====================
 
 def analyze_indicator_accuracy(indicator_snapshot, was_profitable, cursor):
     """Analyze which indicators were correct and update accuracy scores"""
@@ -698,6 +694,7 @@ def create_indicator_snapshot(df):
         return {}
 
 init_database()
+
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
 st.title("🤖 AI Trading Analysis Platform - ENHANCED")
@@ -768,7 +765,6 @@ except Exception as e:
     with st.sidebar.expander("Details", expanded=False):
         st.code(str(e))
 st.sidebar.markdown("---")
-
 asset_type = st.sidebar.selectbox(
     "📊 Select Asset Type",
     ["💰 Cryptocurrency", "🏆 Precious Metals", "💱 Forex", "🔍 Custom Search"],
@@ -878,6 +874,120 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### 🎓 AI Learning System")
 show_learning_dashboard = st.sidebar.checkbox("📊 Show Trades Table on Page", value=False,
                                               help="✅ Enable to see your tracked trades table")
+
+# ==================== SURGICAL ADD: AI LEARNING DASHBOARD ====================
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🧠 AI Learning Progress")
+
+try:
+    conn_learn = sqlite3.connect(str(DB_PATH))
+    cursor_learn = conn_learn.cursor()
+    
+    # Get total closed trades
+    cursor_learn.execute("SELECT COUNT(*) FROM trade_results")
+    total_closed = cursor_learn.fetchone()[0]
+    
+    if total_closed > 0:
+        # Get win rate and performance
+        cursor_learn.execute("""
+            SELECT 
+                COUNT(CASE WHEN profit_loss > 0 THEN 1 END) as wins,
+                AVG(profit_loss_pct) as avg_return,
+                SUM(profit_loss) as total_pl
+            FROM trade_results
+        """)
+        wins, avg_return, total_pl = cursor_learn.fetchone()
+        win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
+        
+        # Display metrics
+        st.sidebar.metric("📊 Closed Trades", total_closed)
+        st.sidebar.metric("🎯 Win Rate", f"{win_rate:.1f}%", 
+                         delta="Good" if win_rate >= 55 else "Review" if win_rate >= 45 else "Poor")
+        st.sidebar.metric("💰 Total P/L", f"${total_pl:.2f}",
+                         delta=f"{avg_return:.2f}% avg")
+        
+        # Show top 3 indicators
+        st.sidebar.markdown("**🏆 Top Indicators:**")
+        cursor_learn.execute("""
+            SELECT indicator_name, accuracy_rate, weight_multiplier
+            FROM indicator_accuracy
+            WHERE correct_count + wrong_count > 0
+            ORDER BY accuracy_rate DESC
+            LIMIT 3
+        """)
+        
+        top_indicators = cursor_learn.fetchall()
+        if top_indicators:
+            for ind_name, accuracy, weight in top_indicators:
+                emoji = "🟢" if accuracy > 0.6 else "🟡" if accuracy > 0.5 else "🔴"
+                st.sidebar.caption(f"{emoji} {ind_name}: {accuracy*100:.0f}% ({weight:.1f}x)")
+        else:
+            st.sidebar.caption("⚪ No indicator data yet")
+        
+        # Learning progress bar
+        st.sidebar.markdown("**📈 Learning Progress:**")
+        if total_closed < 20:
+            progress = total_closed / 20
+            st.sidebar.progress(progress)
+            st.sidebar.caption(f"⚠️ {20-total_closed} more trades for basic learning")
+        elif total_closed < 50:
+            progress = min(1.0, total_closed / 50)
+            st.sidebar.progress(progress)
+            st.sidebar.caption(f"✅ Good! {50-total_closed} more for strong learning")
+        else:
+            st.sidebar.progress(1.0)
+            st.sidebar.success(f"🎯 AI well-trained!")
+        
+        # Add expandable detailed stats
+        with st.sidebar.expander("📊 Detailed Stats", expanded=False):
+            # All indicators
+            cursor_learn.execute("""
+                SELECT indicator_name, correct_count, wrong_count, 
+                       accuracy_rate, weight_multiplier
+                FROM indicator_accuracy
+                WHERE correct_count + wrong_count > 0
+                ORDER BY accuracy_rate DESC
+            """)
+            
+            all_indicators = cursor_learn.fetchall()
+            if all_indicators:
+                st.markdown("**All Indicators:**")
+                for ind_name, correct, wrong, accuracy, weight in all_indicators:
+                    emoji = "🟢" if accuracy > 0.6 else "🟡" if accuracy > 0.5 else "🔴"
+                    weight_arrow = "⬆️" if weight > 1.0 else "⬇️" if weight < 1.0 else "➡️"
+                    st.caption(f"{emoji} **{ind_name}**")
+                    st.caption(f"   ✅ {correct} | ❌ {wrong} | {accuracy*100:.1f}% | {weight:.2f}x {weight_arrow}")
+            
+            # Recent trades
+            st.markdown("**📋 Last 3 Trades:**")
+            cursor_learn.execute("""
+                SELECT t.trade_date, p.pair, t.profit_loss_pct
+                FROM trade_results t
+                JOIN predictions p ON t.prediction_id = p.id
+                ORDER BY t.trade_date DESC
+                LIMIT 3
+            """)
+            
+            recent = cursor_learn.fetchall()
+            for date, pair, pl_pct in recent:
+                emoji = "✅" if pl_pct > 0 else "❌"
+                try:
+                    date_str = datetime.fromisoformat(date).strftime('%m/%d %H:%M')
+                except:
+                    date_str = date[:10]
+                st.caption(f"{emoji} {pair}: {pl_pct:+.2f}% ({date_str})")
+    
+    else:
+        st.sidebar.info("ℹ️ No closed trades yet")
+        st.sidebar.caption("Close trades to see AI learning!")
+    
+    conn_learn.close()
+
+except Exception as e:
+    st.sidebar.error("❌ Error loading learning stats")
+    if debug_mode:
+        st.sidebar.code(str(e))
+# ==================== END SURGICAL ADD ====================
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔥 Market Movers")
@@ -2092,11 +2202,9 @@ if df is not None and len(df) > 0:
                     selected_row = open_trades_df[open_trades_df['id'] == selected_id].iloc[0]
                     actual_entry = selected_row['actual_entry_price'] if pd.notna(selected_row['actual_entry_price']) else selected_row['current_price']
                     
-# ==================== SURGICAL FIX 2: ADD POSITION TYPE SELECTOR ====================
                     with st.form("close_trade_form_pair_page"):
                         st.info(f"**{selected_row['pair']}** - Entry: ${actual_entry:,.2f}")
                         
-                        # Add position type selector
                         position_type = st.selectbox(
                             "📊 Position Type:",
                             options=['LONG', 'SHORT'],
@@ -2116,10 +2224,9 @@ if df is not None and len(df) > 0:
                             )
                         
                         with col_pl:
-                            # Calculate preview based on position type
                             if position_type == 'SHORT':
                                 est_pl = actual_entry - exit_price
-                            else:  # LONG
+                            else:
                                 est_pl = exit_price - actual_entry
                             est_pl_pct = (est_pl / actual_entry * 100) if actual_entry > 0 else 0
                             st.metric("Est. P/L", f"${est_pl:,.2f}", f"{est_pl_pct:+.2f}%")
@@ -2140,7 +2247,6 @@ if df is not None and len(df) > 0:
                                 st.rerun()
                             else:
                                 st.error("❌ Error closing trade")
-# ==================== END SURGICAL FIX 2 ====================
                 else:
                     st.success("✅ All trades are closed!")
             else:
