@@ -695,6 +695,135 @@ def create_indicator_snapshot(df):
 
 init_database()
 
+# ==================== SURGICAL FIX #1: AI PREDICTION ENHANCEMENT ====================
+
+def check_support_resistance_barriers(df, predicted_price, current_price):
+    """Check if predicted price needs to break through major support/resistance levels"""
+    high_20 = df['high'].tail(20).max()
+    low_20 = df['low'].tail(20).min()
+    
+    recent_highs = df['high'].tail(50).nlargest(5).mean()
+    recent_lows = df['low'].tail(50).nsmallest(5).mean()
+    
+    barriers = []
+    
+    if current_price < predicted_price:
+        if predicted_price > high_20:
+            barriers.append(('resistance', high_20, abs(predicted_price - high_20)))
+        if predicted_price > recent_highs:
+            barriers.append(('strong_resistance', recent_highs, abs(predicted_price - recent_highs)))
+    else:
+        if predicted_price < low_20:
+            barriers.append(('support', low_20, abs(predicted_price - low_20)))
+        if predicted_price < recent_lows:
+            barriers.append(('strong_support', recent_lows, abs(predicted_price - recent_lows)))
+    
+    return barriers
+
+def analyze_timeframe_volatility(df, predicted_change_pct, timeframe_hours):
+    """Check if the predicted change is realistic for the given timeframe"""
+    recent_changes = df['close'].pct_change().tail(50)
+    
+    avg_hourly_change = abs(recent_changes).mean() * 100
+    max_hourly_change = abs(recent_changes).max() * 100
+    
+    predicted_hourly_rate = abs(predicted_change_pct) / timeframe_hours
+    
+    is_realistic = predicted_hourly_rate <= (avg_hourly_change * 2)
+    
+    volatility_context = {
+        'avg_hourly_change': avg_hourly_change,
+        'max_hourly_change': max_hourly_change,
+        'predicted_hourly_rate': predicted_hourly_rate,
+        'is_realistic': is_realistic
+    }
+    
+    return volatility_context
+
+def adjust_confidence_for_barriers(base_confidence, barriers, volatility_context):
+    """Adjust AI confidence based on barriers and volatility"""
+    adjusted_confidence = base_confidence
+    
+    for barrier_type, price_level, distance in barriers:
+        if barrier_type == 'strong_resistance' or barrier_type == 'strong_support':
+            adjusted_confidence *= 0.7
+        else:
+            adjusted_confidence *= 0.85
+    
+    if not volatility_context['is_realistic']:
+        adjusted_confidence *= 0.6
+    
+    adjusted_confidence = max(adjusted_confidence, 30.0)
+    adjusted_confidence = min(adjusted_confidence, 95.0)
+    
+    return adjusted_confidence
+
+# ==================== END SURGICAL FIX #1 ====================
+
+# ==================== SURGICAL FIX #2: RSI DURATION ANALYSIS ====================
+
+def count_rsi_consecutive_periods(df, threshold_high=70, threshold_low=30):
+    """Count how many consecutive periods RSI has been overbought/oversold"""
+    if 'rsi' not in df.columns or len(df) < 2:
+        return 0, 'neutral'
+    
+    rsi_values = df['rsi'].tail(20).values
+    
+    consecutive_high = 0
+    for i in range(len(rsi_values) - 1, -1, -1):
+        if rsi_values[i] > threshold_high:
+            consecutive_high += 1
+        else:
+            break
+    
+    consecutive_low = 0
+    for i in range(len(rsi_values) - 1, -1, -1):
+        if rsi_values[i] < threshold_low:
+            consecutive_low += 1
+        else:
+            break
+    
+    if consecutive_high > 0:
+        return consecutive_high, 'overbought'
+    elif consecutive_low > 0:
+        return consecutive_low, 'oversold'
+    else:
+        return 0, 'neutral'
+
+def calculate_rsi_duration_strength(consecutive_count, zone_type):
+    """Calculate signal strength based on how long RSI has been in a zone"""
+    if zone_type == 'neutral' or consecutive_count == 0:
+        return 0
+    
+    if consecutive_count <= 2:
+        strength = 1
+    elif consecutive_count <= 4:
+        strength = 2
+    elif consecutive_count <= 6:
+        strength = 3
+    else:
+        strength = 4
+    
+    if zone_type == 'overbought':
+        return -strength
+    elif zone_type == 'oversold':
+        return strength
+    
+    return 0
+
+def get_rsi_duration_weight(consecutive_count):
+    """Get weight multiplier based on RSI duration"""
+    if consecutive_count <= 2:
+        return 1.0
+    elif consecutive_count <= 4:
+        return 1.5
+    elif consecutive_count <= 6:
+        return 2.0
+    else:
+        return 2.5
+
+# ==================== END SURGICAL FIX #2 ====================
+
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
 st.title("🤖 AI Trading Analysis Platform - ENHANCED")
@@ -1574,7 +1703,7 @@ def create_pattern_features(df, lookback=6):
     return np.array(sequences), np.array(targets)
 
 def train_improved_model(df, lookback=6, prediction_periods=5):
-    """Pattern-based prediction with context"""
+    """Pattern-based prediction with context - NOW WITH SURGICAL ENHANCEMENTS"""
     try:
         if len(df) < 60:
             st.warning("⚠️ Need at least 60 data points")
@@ -1662,13 +1791,30 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
             ensemble_pred = 0.4 * rf_test_pred + 0.6 * gb_test_pred
             
             mape = mean_absolute_percentage_error(y_test, ensemble_pred) * 100
-            confidence = max(0, min(100, 100 - mape))
+            base_confidence = max(0, min(100, 100 - mape))
         else:
-            confidence = 65
+            base_confidence = 65
+        
+        # ==================== SURGICAL APPLICATION OF FIX #1 ====================
+        current_price = df_clean['close'].iloc[-1]
+        predicted_price = predictions[0]
+        pred_change_pct = ((predicted_price - current_price) / current_price) * 100
+        
+        # Check for barriers
+        barriers = check_support_resistance_barriers(df_clean, predicted_price, current_price)
+        
+        # Analyze timeframe volatility
+        timeframe_hours = prediction_periods
+        volatility_context = analyze_timeframe_volatility(df_clean, pred_change_pct, timeframe_hours)
+        
+        # Adjust confidence based on barriers and volatility
+        adjusted_confidence = adjust_confidence_for_barriers(base_confidence, barriers, volatility_context)
+        
+        # ==================== END SURGICAL APPLICATION ====================
         
         rsi_insights = analyze_rsi_bounce_patterns(df_clean)
         
-        return predictions, ['Pattern-based features'], confidence, rsi_insights
+        return predictions, ['Pattern-based features'], adjusted_confidence, rsi_insights
         
     except Exception as e:
         st.error(f"Prediction error: {str(e)}")
@@ -1677,19 +1823,36 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         return None, None, 0, None
 
 def calculate_signal_strength(df):
-    """Calculate trading signal strength with learned weights"""
+    """Calculate trading signal strength with learned weights - NOW WITH SURGICAL RSI DURATION FIX"""
     signals = []
     
     weights = get_indicator_weights()
     
+    # ==================== SURGICAL APPLICATION OF FIX #2: RSI DURATION ====================
     if 'rsi' in df.columns:
         rsi = df['rsi'].iloc[-1]
-        if rsi > 70:
-            signals.append(-2)
-        elif rsi < 30:
-            signals.append(2)
+        
+        # Count consecutive periods in overbought/oversold
+        consecutive_count, zone_type = count_rsi_consecutive_periods(df)
+        
+        # Calculate duration-based strength
+        duration_strength = calculate_rsi_duration_strength(consecutive_count, zone_type)
+        
+        # Get duration weight multiplier
+        duration_weight = get_rsi_duration_weight(consecutive_count)
+        
+        # Apply the duration-weighted signal
+        if duration_strength != 0:
+            signals.append(int(duration_strength * duration_weight))
         else:
-            signals.append(0)
+            # Fallback to basic RSI if no duration signal
+            if rsi > 70:
+                signals.append(-2)
+            elif rsi < 30:
+                signals.append(2)
+            else:
+                signals.append(0)
+    # ==================== END SURGICAL APPLICATION ====================
     
     if 'macd' in df.columns:
         macd_diff = df['macd'].iloc[-1] - df['macd_signal'].iloc[-1]
@@ -1979,6 +2142,8 @@ if df is not None and len(df) > 0:
     - ✅ Uses pattern-based prediction
     - ✅ Optimized ML models with feature scaling
     - 🆕 AI learns from your trades automatically!
+    - 🆕 Checks support/resistance barriers
+    - 🆕 RSI duration-weighted signals
     """)
     
     with st.spinner("🧠 Training AI models..."):
@@ -2883,8 +3048,10 @@ else:
 st.markdown("---")
 st.markdown(f"""
 <div style='text-align: center;'>
-    <p><b>🚀 AI TRADING PLATFORM - ENHANCED WITH TRADING CENTRAL FORMAT</b></p>
-    <p><b>🧠 AI/ML Hybrid:</b> Machine Learning + Trading Central Presentation</p>
+    <p><b>🚀 AI TRADING PLATFORM - ENHANCED WITH SURGICAL FIXES</b></p>
+    <p><b>🧠 AI/ML Hybrid:</b> Machine Learning + Trading Central + Surgical Enhancements</p>
+    <p><b>✅ FIX #1:</b> Support/Resistance & Timeframe Volatility Analysis</p>
+    <p><b>✅ FIX #2:</b> RSI Duration-Weighted Signal Calculation</p>
     <p><b>🎓 AI Learning:</b> System learns from every trade automatically!</p>
     <p><b>📡 Data Source:</b> Multi-API with fallbacks (Binance, OKX, CryptoCompare, etc.)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
