@@ -1823,12 +1823,12 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         return None, None, 0, None
 
 def calculate_signal_strength(df):
-    """Calculate trading signal strength with learned weights - NOW WITH SURGICAL RSI DURATION FIX"""
+    """Calculate trading signal strength with EQUAL WEIGHTS + historical behavior - SURGICAL FIX #3"""
     signals = []
     
     weights = get_indicator_weights()
     
-    # ==================== SURGICAL APPLICATION OF FIX #2: RSI DURATION ====================
+    # ==================== SURGICAL FIX #2: RSI DURATION (KEEPS DURATION LOGIC) ====================
     if 'rsi' in df.columns:
         rsi = df['rsi'].iloc[-1]
         
@@ -1841,44 +1841,51 @@ def calculate_signal_strength(df):
         # Get duration weight multiplier
         duration_weight = get_rsi_duration_weight(consecutive_count)
         
-        # Apply the duration-weighted signal
+        # Apply the duration-weighted signal (uses equal base weight ±1, multiplied by duration)
         if duration_strength != 0:
             signals.append(int(duration_strength * duration_weight))
         else:
-            # Fallback to basic RSI if no duration signal
+            # Fallback to basic RSI with EQUAL weight ±1
             if rsi > 70:
-                signals.append(-2)
+                signals.append(-1)  # Changed from -2 to -1
             elif rsi < 30:
-                signals.append(2)
+                signals.append(1)   # Changed from 2 to 1
             else:
                 signals.append(0)
-    # ==================== END SURGICAL APPLICATION ====================
+    # ==================== END SURGICAL FIX #2 ====================
+    
+    # ==================== SURGICAL FIX #3: ALL INDICATORS NOW USE EQUAL BASE WEIGHT ±1 ====================
     
     if 'macd' in df.columns:
         macd_diff = df['macd'].iloc[-1] - df['macd_signal'].iloc[-1]
-        signals.append(1 if macd_diff > 0 else -1)
+        weight = weights.get('MACD', 1.0)
+        # Equal base weight ±1 (already was ±1, keeping it)
+        signals.append(int(1 * weight) if macd_diff > 0 else int(-1 * weight))
     
     if 'sma_20' in df.columns and 'sma_50' in df.columns:
         price = df['close'].iloc[-1]
         sma20 = df['sma_20'].iloc[-1]
         sma50 = df['sma_50'].iloc[-1]
+        weight = weights.get('SMA', 1.0)
         
+        # Changed to equal base weight ±1 (was ±2 and ±1)
         if price > sma20 > sma50:
-            signals.append(2)
+            signals.append(int(1 * weight))  # Changed from 2 to 1
         elif price > sma20:
-            signals.append(1)
+            signals.append(int(1 * weight))  # Already 1
         elif price < sma20 < sma50:
-            signals.append(-2)
+            signals.append(int(-1 * weight))  # Changed from -2 to -1
         else:
-            signals.append(-1)
+            signals.append(int(-1 * weight))  # Already -1
     
     if 'mfi' in df.columns:
         mfi = df['mfi'].iloc[-1]
         weight = weights.get('MFI', 1.0)
+        # Changed to equal base weight ±1 (was ±2)
         if mfi > 80:
-            signals.append(int(-2 * weight))
+            signals.append(int(-1 * weight))  # Changed from -2 to -1
         elif mfi < 20:
-            signals.append(int(2 * weight))
+            signals.append(int(1 * weight))   # Changed from 2 to 1
         else:
             signals.append(0)
     
@@ -1888,6 +1895,7 @@ def calculate_signal_strength(df):
         minus_di = df['minus_di'].iloc[-1]
         weight = weights.get('ADX', 1.0)
         
+        # Equal base weight ±1 (already was ±1, keeping it)
         if adx > 25:
             if plus_di > minus_di:
                 signals.append(int(1 * weight))
@@ -1897,6 +1905,7 @@ def calculate_signal_strength(df):
     if 'stoch_k' in df.columns:
         stoch_k = df['stoch_k'].iloc[-1]
         weight = weights.get('Stochastic', 1.0)
+        # Equal base weight ±1 (already was ±1, keeping it)
         if stoch_k > 80:
             signals.append(int(-1 * weight))
         elif stoch_k < 20:
@@ -1905,6 +1914,7 @@ def calculate_signal_strength(df):
     if 'cci' in df.columns:
         cci = df['cci'].iloc[-1]
         weight = weights.get('CCI', 1.0)
+        # Equal base weight ±1 (already was ±1, keeping it)
         if cci > 100:
             signals.append(int(-1 * weight))
         elif cci < -100:
@@ -1915,10 +1925,13 @@ def calculate_signal_strength(df):
         obv_prev = df['obv'].iloc[-5] if len(df) > 5 else obv_current
         weight = weights.get('OBV', 1.0)
         
+        # Changed to equal base weight ±1 (was +2/-1)
         if obv_current > obv_prev and obv_current > 0:
-            signals.append(int(2 * weight))
+            signals.append(int(1 * weight))   # Changed from 2 to 1
         elif obv_current < obv_prev or obv_current < 0:
-            signals.append(int(-1 * weight))
+            signals.append(int(-1 * weight))  # Already -1
+    
+    # ==================== END SURGICAL FIX #3 ====================
     
     return sum(signals) if signals else 0
 
@@ -2144,6 +2157,7 @@ if df is not None and len(df) > 0:
     - 🆕 AI learns from your trades automatically!
     - 🆕 Checks support/resistance barriers
     - 🆕 RSI duration-weighted signals
+    - 🆕 Equal indicator weights (Fair signal calculation)
     """)
     
     with st.spinner("🧠 Training AI models..."):
@@ -3052,6 +3066,7 @@ st.markdown(f"""
     <p><b>🧠 AI/ML Hybrid:</b> Machine Learning + Trading Central + Surgical Enhancements</p>
     <p><b>✅ FIX #1:</b> Support/Resistance & Timeframe Volatility Analysis</p>
     <p><b>✅ FIX #2:</b> RSI Duration-Weighted Signal Calculation</p>
+    <p><b>✅ FIX #3:</b> Equal Indicator Weights (All indicators ±1 base weight)</p>
     <p><b>🎓 AI Learning:</b> System learns from every trade automatically!</p>
     <p><b>📡 Data Source:</b> Multi-API with fallbacks (Binance, OKX, CryptoCompare, etc.)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
