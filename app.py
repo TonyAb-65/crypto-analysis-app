@@ -171,6 +171,82 @@ def init_database():
     conn.commit()
     conn.close()
 
+# ==================== SURGICAL FIX #4: NEWS/SENTIMENT API ====================
+
+@st.cache_data(ttl=300)
+def get_fear_greed_index():
+    try:
+        url = "https://api.alternative.me/fng/?limit=1"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data and len(data['data']) > 0:
+                value = int(data['data'][0]['value'])
+                classification = data['data'][0]['value_classification']
+                return value, classification
+    except Exception as e:
+        print(f"Fear & Greed API error: {e}")
+    return None, None
+
+@st.cache_data(ttl=300)
+def get_crypto_news_sentiment(symbol="BTC"):
+    try:
+        url = "https://cryptopanic.com/api/v1/posts/"
+        params = {"auth_token": "free", "currencies": symbol, "kind": "news", "filter": "rising"}
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if 'results' in data:
+                news_items = data['results'][:10]
+                positive_count = sum(1 for item in news_items 
+                    if item.get('votes', {}).get('positive', 0) > item.get('votes', {}).get('negative', 0))
+                sentiment_score = (positive_count / len(news_items) * 100) if news_items else 50
+                headlines = [item.get('title', '') for item in news_items[:5]]
+                return sentiment_score, headlines
+    except:
+        pass
+    try:
+        url = "https://min-api.cryptocompare.com/data/v2/news/?lang=EN"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if 'Data' in data:
+                headlines = [item['title'] for item in data['Data'][:5]]
+                return 50, headlines
+    except:
+        pass
+    return None, []
+
+def analyze_news_sentiment_warning(fear_greed_value, news_sentiment, signal_strength):
+    if fear_greed_value is None:
+        return False, "News data unavailable", "Unknown"
+    is_bullish_technical = signal_strength > 0
+    if fear_greed_value < 25:
+        mood, is_bearish_sentiment = "Extreme Fear", True
+    elif fear_greed_value < 45:
+        mood, is_bearish_sentiment = "Fear", True
+    elif fear_greed_value < 55:
+        mood = "Neutral"
+        is_bearish_sentiment = is_bullish_sentiment = False
+    elif fear_greed_value < 75:
+        mood, is_bullish_sentiment = "Greed", True
+    else:
+        mood, is_bullish_sentiment = "Extreme Greed", True
+    sentiment_status = f"{mood} ({fear_greed_value}/100)"
+    has_warning = False
+    warning_message = f"Market sentiment: {mood}"
+    if is_bullish_technical and is_bearish_sentiment:
+        has_warning = True
+        warning_message = f"⚠️ DIVERGENCE: Technicals bullish BUT market in {mood}"
+    elif not is_bullish_technical and 'is_bullish_sentiment' in locals() and is_bullish_sentiment:
+        has_warning = True
+        warning_message = f"⚠️ DIVERGENCE: Technicals bearish BUT market in {mood}"
+    if fear_greed_value < 20 or fear_greed_value > 80:
+        has_warning = True
+        warning_message = f"🚨 EXTREME {mood.upper()} ({fear_greed_value})"
+    return has_warning, warning_message, sentiment_status
+
+# ==================== END SURGICAL FIX #4 ====================
 def save_prediction(asset_type, pair, timeframe, current_price, predicted_price, 
                    prediction_horizon, confidence, signal_strength, features, indicator_snapshot=None):
     """Save a prediction to database with indicator snapshot"""
@@ -694,7 +770,6 @@ def create_indicator_snapshot(df):
         return {}
 
 init_database()
-
 # ==================== SURGICAL FIX #1: AI PREDICTION ENHANCEMENT ====================
 
 def check_support_resistance_barriers(df, predicted_price, current_price):
@@ -824,1116 +899,135 @@ def get_rsi_duration_weight(consecutive_count):
 
 # ==================== END SURGICAL FIX #2 ====================
 
-st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
+# ==================== SURGICAL FIX: UPDATED calculate_signal_strength() ====================
 
-st.title("🤖 AI Trading Analysis Platform - ENHANCED")
-st.markdown("*Crypto, Forex, Metals + AI ML Predictions + Trading Central Format + AI Learning*")
-
-if 'binance_blocked' not in st.session_state:
-    st.session_state.binance_blocked = False
-
-if st.session_state.binance_blocked:
-    st.info("ℹ️ **Note:** Binance API is blocked in your region. Using OKX and backup APIs instead.")
-
-current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-st.markdown(f"**🕐 Last Updated:** {current_time}")
-
-with st.expander("💾 Database Information", expanded=False):
-    st.info(f"""
-    **Database Location:** `{DB_PATH}`
-    
-    **File Exists:** {'✅ Yes' if DB_PATH.exists() else '❌ No'}
-    
-    **Note:** All your trade history and predictions are saved to this database file.
-    """)
-
-st.markdown("---")
-
-st.sidebar.header("⚙️ Configuration")
-
-debug_mode = st.sidebar.checkbox("🔧 Debug Mode", value=False, help="Show detailed API information")
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 💾 Database Status")
-try:
-    db_exists = DB_PATH.exists()
-    if db_exists:
-        conn = sqlite3.connect(str(DB_PATH))
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM predictions")
-        pred_count = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM trade_results")
-        trade_count = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT MAX(timestamp) FROM predictions")
-        last_pred = cursor.fetchone()[0]
-        cursor.execute("SELECT MAX(trade_date) FROM trade_results")
-        last_trade = cursor.fetchone()[0]
-        
-        conn.close()
-        
-        st.sidebar.success(f"✅ Connected")
-        st.sidebar.caption(f"📍 `{DB_PATH.name}`")
-        st.sidebar.caption(f"📊 Predictions: {pred_count}")
-        st.sidebar.caption(f"💰 Trades: {trade_count}")
-        if last_pred:
-            st.sidebar.caption(f"🕐 Last prediction: {last_pred[:16]}")
-        if last_trade:
-            st.sidebar.caption(f"🕐 Last trade: {last_trade[:16]}")
-        
-        with st.sidebar.expander("🔍 Full Path", expanded=False):
-            st.code(str(DB_PATH))
-            if st.button("📋 Copy Path"):
-                st.info("Path shown above - copy manually")
-    else:
-        st.sidebar.warning(f"⚠️ Database not found")
-        st.sidebar.caption(f"Creating at: `{DB_PATH}`")
-        init_database()
-except Exception as e:
-    st.sidebar.error(f"❌ Error")
-    with st.sidebar.expander("Details", expanded=False):
-        st.code(str(e))
-st.sidebar.markdown("---")
-asset_type = st.sidebar.selectbox(
-    "📊 Select Asset Type",
-    ["💰 Cryptocurrency", "🏆 Precious Metals", "💱 Forex", "🔍 Custom Search"],
-    index=0
-)
-
-CRYPTO_SYMBOLS = {
-    "Bitcoin (BTC)": "BTC",
-    "Ethereum (ETH)": "ETH",
-    "Binance Coin (BNB)": "BNB",
-    "XRP": "XRP",
-    "Cardano (ADA)": "ADA",
-    "Solana (SOL)": "SOL",
-    "Dogecoin (DOGE)": "DOGE",
-    "Polygon (MATIC)": "MATIC",
-    "Polkadot (DOT)": "DOT",
-    "Avalanche (AVAX)": "AVAX"
-}
-
-PRECIOUS_METALS = {
-    "Gold (XAU/USD)": "XAU/USD",
-    "Silver (XAG/USD)": "XAG/USD"
-}
-
-FOREX_PAIRS = {
-    "EUR/USD": "EUR/USD",
-    "GBP/USD": "GBP/USD",
-    "USD/JPY": "USD/JPY",
-    "USD/CHF": "USD/CHF",
-    "AUD/USD": "AUD/USD",
-    "USD/CAD": "USD/CAD",
-    "NZD/USD": "NZD/USD",
-    "EUR/GBP": "EUR/GBP",
-    "EUR/JPY": "EUR/JPY",
-    "GBP/JPY": "GBP/JPY",
-    "AUD/JPY": "AUD/JPY",
-    "EUR/CHF": "EUR/CHF",
-    "AUD/CAD": "AUD/CAD",
-    "AUD/NZD": "AUD/NZD",
-    "CAD/JPY": "CAD/JPY"
-}
-
-if asset_type == "💰 Cryptocurrency":
-    pair_display = st.sidebar.selectbox("Select Cryptocurrency", list(CRYPTO_SYMBOLS.keys()), index=0)
-    symbol = CRYPTO_SYMBOLS[pair_display]
-elif asset_type == "🏆 Precious Metals":
-    pair_display = st.sidebar.selectbox("Select Metal", list(PRECIOUS_METALS.keys()), index=0)
-    symbol = PRECIOUS_METALS[pair_display]
-elif asset_type == "💱 Forex":
-    pair_display = st.sidebar.selectbox("Select Forex Pair", list(FOREX_PAIRS.keys()), index=0)
-    symbol = FOREX_PAIRS[pair_display]
-else:
-    custom_symbol = st.sidebar.text_input("Enter Symbol:", "BTC").upper()
-    pair_display = f"Custom: {custom_symbol}"
-    symbol = custom_symbol
-
-TIMEFRAMES = {
-    "5 Minutes": {"limit": 100, "binance": "5m", "okx": "5m"},
-    "10 Minutes": {"limit": 100, "binance": "10m", "okx": "10m"},
-    "15 Minutes": {"limit": 100, "binance": "15m", "okx": "15m"},
-    "30 Minutes": {"limit": 100, "binance": "30m", "okx": "30m"},
-    "1 Hour": {"limit": 100, "binance": "1h", "okx": "1H"},
-    "4 Hours": {"limit": 100, "binance": "4h", "okx": "4H"},
-    "1 Day": {"limit": 100, "binance": "1d", "okx": "1D"}
-}
-
-timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=4)
-timeframe_config = TIMEFRAMES[timeframe_name]
-
-auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False, 
-                                   help="Automatically refresh data every 60 seconds")
-
-if auto_refresh:
-    if 'last_refresh_time' not in st.session_state:
-        st.session_state.last_refresh_time = time.time()
-    
-    elapsed = time.time() - st.session_state.last_refresh_time
-    
-    if elapsed >= 60:
-        st.session_state.last_refresh_time = time.time()
-        st.rerun()
-    else:
-        remaining = int(60 - elapsed)
-        st.sidebar.info(f"⏱️ Next refresh in {remaining}s")
-        time.sleep(1)
-        st.rerun()
-
-st.sidebar.markdown("### 🤖 AI Configuration")
-prediction_periods = st.sidebar.slider("Prediction Periods", 1, 10, 5)
-lookback_hours = st.sidebar.slider("Context Window (hours)", 4, 12, 6, 
-                                   help="How many hours to look back for pattern analysis")
-
-st.sidebar.markdown("### 📊 Technical Indicators")
-use_sma = st.sidebar.checkbox("SMA (20, 50)", value=True)
-use_rsi = st.sidebar.checkbox("RSI (14)", value=True)
-use_macd = st.sidebar.checkbox("MACD", value=True)
-use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
-
-st.sidebar.markdown("#### 🆕 Advanced Indicators")
-use_obv = st.sidebar.checkbox("OBV (Volume)", value=False, help="On-Balance Volume - tracks volume flow")
-use_mfi = st.sidebar.checkbox("MFI (14)", value=False, help="Money Flow Index - volume-weighted RSI")
-use_adx = st.sidebar.checkbox("ADX (14)", value=False, help="Average Directional Index - trend strength")
-use_stoch = st.sidebar.checkbox("Stochastic", value=False, help="Stochastic Oscillator - momentum indicator")
-use_cci = st.sidebar.checkbox("CCI (20)", value=False, help="Commodity Channel Index - cyclical trends")
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🎓 AI Learning System")
-show_learning_dashboard = st.sidebar.checkbox("📊 Show Trades Table on Page", value=False,
-                                              help="✅ Enable to see your tracked trades table")
-
-# ==================== SURGICAL ADD: AI LEARNING DASHBOARD ====================
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🧠 AI Learning Progress")
-
-try:
-    conn_learn = sqlite3.connect(str(DB_PATH))
-    cursor_learn = conn_learn.cursor()
-    
-    # Get total closed trades
-    cursor_learn.execute("SELECT COUNT(*) FROM trade_results")
-    total_closed = cursor_learn.fetchone()[0]
-    
-    if total_closed > 0:
-        # Get win rate and performance
-        cursor_learn.execute("""
-            SELECT 
-                COUNT(CASE WHEN profit_loss > 0 THEN 1 END) as wins,
-                AVG(profit_loss_pct) as avg_return,
-                SUM(profit_loss) as total_pl
-            FROM trade_results
-        """)
-        wins, avg_return, total_pl = cursor_learn.fetchone()
-        win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
-        
-        # Display metrics
-        st.sidebar.metric("📊 Closed Trades", total_closed)
-        st.sidebar.metric("🎯 Win Rate", f"{win_rate:.1f}%", 
-                         delta="Good" if win_rate >= 55 else "Review" if win_rate >= 45 else "Poor")
-        st.sidebar.metric("💰 Total P/L", f"${total_pl:.2f}",
-                         delta=f"{avg_return:.2f}% avg")
-        
-        # Show top 3 indicators
-        st.sidebar.markdown("**🏆 Top Indicators:**")
-        cursor_learn.execute("""
-            SELECT indicator_name, accuracy_rate, weight_multiplier
-            FROM indicator_accuracy
-            WHERE correct_count + wrong_count > 0
-            ORDER BY accuracy_rate DESC
-            LIMIT 3
-        """)
-        
-        top_indicators = cursor_learn.fetchall()
-        if top_indicators:
-            for ind_name, accuracy, weight in top_indicators:
-                emoji = "🟢" if accuracy > 0.6 else "🟡" if accuracy > 0.5 else "🔴"
-                st.sidebar.caption(f"{emoji} {ind_name}: {accuracy*100:.0f}% ({weight:.1f}x)")
-        else:
-            st.sidebar.caption("⚪ No indicator data yet")
-        
-        # Learning progress bar
-        st.sidebar.markdown("**📈 Learning Progress:**")
-        if total_closed < 20:
-            progress = total_closed / 20
-            st.sidebar.progress(progress)
-            st.sidebar.caption(f"⚠️ {20-total_closed} more trades for basic learning")
-        elif total_closed < 50:
-            progress = min(1.0, total_closed / 50)
-            st.sidebar.progress(progress)
-            st.sidebar.caption(f"✅ Good! {50-total_closed} more for strong learning")
-        else:
-            st.sidebar.progress(1.0)
-            st.sidebar.success(f"🎯 AI well-trained!")
-        
-        # Add expandable detailed stats
-        with st.sidebar.expander("📊 Detailed Stats", expanded=False):
-            # All indicators
-            cursor_learn.execute("""
-                SELECT indicator_name, correct_count, wrong_count, 
-                       accuracy_rate, weight_multiplier
-                FROM indicator_accuracy
-                WHERE correct_count + wrong_count > 0
-                ORDER BY accuracy_rate DESC
-            """)
-            
-            all_indicators = cursor_learn.fetchall()
-            if all_indicators:
-                st.markdown("**All Indicators:**")
-                for ind_name, correct, wrong, accuracy, weight in all_indicators:
-                    emoji = "🟢" if accuracy > 0.6 else "🟡" if accuracy > 0.5 else "🔴"
-                    weight_arrow = "⬆️" if weight > 1.0 else "⬇️" if weight < 1.0 else "➡️"
-                    st.caption(f"{emoji} **{ind_name}**")
-                    st.caption(f"   ✅ {correct} | ❌ {wrong} | {accuracy*100:.1f}% | {weight:.2f}x {weight_arrow}")
-            
-            # Recent trades
-            st.markdown("**📋 Last 3 Trades:**")
-            cursor_learn.execute("""
-                SELECT t.trade_date, p.pair, t.profit_loss_pct
-                FROM trade_results t
-                JOIN predictions p ON t.prediction_id = p.id
-                ORDER BY t.trade_date DESC
-                LIMIT 3
-            """)
-            
-            recent = cursor_learn.fetchall()
-            for date, pair, pl_pct in recent:
-                emoji = "✅" if pl_pct > 0 else "❌"
-                try:
-                    date_str = datetime.fromisoformat(date).strftime('%m/%d %H:%M')
-                except:
-                    date_str = date[:10]
-                st.caption(f"{emoji} {pair}: {pl_pct:+.2f}% ({date_str})")
-    
-    else:
-        st.sidebar.info("ℹ️ No closed trades yet")
-        st.sidebar.caption("Close trades to see AI learning!")
-    
-    conn_learn.close()
-
-except Exception as e:
-    st.sidebar.error("❌ Error loading learning stats")
-    if debug_mode:
-        st.sidebar.code(str(e))
-# ==================== END SURGICAL ADD ====================
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🔥 Market Movers")
-show_market_movers = st.sidebar.checkbox("📈 Show Top Movers", value=False,
-                                        help="Display today's top gainers and losers")
-
-@st.cache_data(ttl=300)
-def get_market_movers():
-    """Get top movers from popular cryptocurrencies"""
-    popular_symbols = ['BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'MATIC', 'DOT', 'AVAX']
-    movers = []
-    
-    binance_failed = False
-    for symbol in popular_symbols:
-        try:
-            url = "https://api.binance.com/api/v3/ticker/24hr"
-            params = {"symbol": f"{symbol}USDT"}
-            response = requests.get(url, params=params, timeout=5)
-            
-            if response.status_code == 200:
-                data = response.json()
-                price_change_pct = float(data['priceChangePercent'])
-                current_price = float(data['lastPrice'])
-                volume = float(data['volume'])
-                
-                movers.append({
-                    'Symbol': symbol,
-                    'Price': current_price,
-                    'Change %': price_change_pct,
-                    'Volume': volume
-                })
-            else:
-                binance_failed = True
-                break
-        except:
-            binance_failed = True
-            break
-    
-    if binance_failed or len(movers) == 0:
-        movers = []
-        for symbol in popular_symbols:
-            try:
-                url = "https://www.okx.com/api/v5/market/ticker"
-                params = {"instId": f"{symbol}-USDT"}
-                response = requests.get(url, params=params, timeout=5)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get('code') == '0' and len(data.get('data', [])) > 0:
-                        ticker = data['data'][0]
-                        current_price = float(ticker['last'])
-                        open_24h = float(ticker['open24h'])
-                        price_change_pct = ((current_price - open_24h) / open_24h) * 100
-                        volume = float(ticker['vol24h'])
-                        
-                        movers.append({
-                            'Symbol': symbol,
-                            'Price': current_price,
-                            'Change %': price_change_pct,
-                            'Volume': volume
-                        })
-            except:
-                continue
-    
-    if movers:
-        df = pd.DataFrame(movers)
-        df = df.sort_values('Change %', ascending=False)
-        return df
-    return None
-
-if show_market_movers:
-    with st.sidebar:
-        movers_df = get_market_movers()
-        
-        if movers_df is not None and len(movers_df) > 0:
-            st.markdown("#### 📈 Top Gainers")
-            top_gainers = movers_df.head(3)
-            for _, row in top_gainers.iterrows():
-                delta = f"+{row['Change %']:.2f}%"
-                st.metric(row['Symbol'], f"${row['Price']:,.2f}", delta)
-            
-            st.markdown("#### 📉 Top Losers")
-            top_losers = movers_df.tail(3).sort_values('Change %')
-            for _, row in top_losers.iterrows():
-                delta = f"{row['Change %']:.2f}%"
-                st.metric(row['Symbol'], f"${row['Price']:,.2f}", delta)
-        else:
-            st.warning("Unable to load market movers")
-
-@st.cache_data(ttl=300)
-def get_okx_data(symbol, interval="1H", limit=100):
-    """Fetch data from OKX API"""
-    url = "https://www.okx.com/api/v5/market/candles"
-    limit = min(limit, 300)
-    params = {"instId": f"{symbol}-USDT", "bar": interval, "limit": str(limit)}
-    
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        if data.get('code') != '0':
-            error_msg = data.get('msg', 'Unknown error')
-            st.warning(f"⚠️ OKX error: {error_msg}")
-            return None, None
-        
-        candles = data.get('data', [])
-        if not candles or len(candles) == 0:
-            st.warning(f"⚠️ OKX returned no data")
-            return None, None
-        
-        df = pd.DataFrame(candles, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume', 
-            'volCcy', 'volCcyQuote', 'confirm'
-        ])
-        df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
-        
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            df[col] = df[col].astype(float)
-        
-        df = df.sort_values('timestamp').reset_index(drop=True)
-        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        st.success(f"✅ Loaded {len(df)} data points from OKX")
-        return df, "OKX"
-    except Exception as e:
-        st.warning(f"⚠️ OKX API failed: {str(e)}")
-        return None, None
-
-@st.cache_data(ttl=300)
-def get_binance_data(symbol, interval="1h", limit=100):
-    """Fetch data from Binance API"""
-    url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": f"{symbol}USDT", "interval": interval, "limit": limit}
-    
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        if isinstance(data, dict) and 'code' in data:
-            st.warning(f"⚠️ Binance error: {data.get('msg', 'Unknown')}")
-            return None, None
-        
-        if not data or len(data) == 0:
-            st.warning("⚠️ Binance returned no data")
-            return None, None
-        
-        df = pd.DataFrame(data, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_asset_volume', 'number_of_trades',
-            'taker_buy_base', 'taker_buy_quote', 'ignore'
-        ])
-        
-        df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            df[col] = df[col].astype(float)
-        
-        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        df = df.sort_values('timestamp').reset_index(drop=True)
-        st.success(f"✅ Loaded {len(df)} data points from Binance")
-        return df, "Binance"
-    except Exception as e:
-        st.warning(f"⚠️ Binance API failed: {str(e)}")
-        return None, None
-
-@st.cache_data(ttl=300)
-def get_cryptocompare_data(symbol, limit=100):
-    """Fetch data from CryptoCompare API"""
-    url = "https://min-api.cryptocompare.com/data/v2/histohour"
-    params = {"fsym": symbol, "tsym": "USD", "limit": limit}
-    
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        if data.get('Response') != 'Success':
-            st.warning(f"⚠️ CryptoCompare error: {data.get('Message', 'Unknown')}")
-            return None, None
-        
-        hist_data = data.get('Data', {}).get('Data', [])
-        if not hist_data:
-            st.warning("⚠️ CryptoCompare returned no data")
-            return None, None
-        
-        df = pd.DataFrame(hist_data)
-        df['timestamp'] = pd.to_datetime(df['time'], unit='s')
-        df = df.rename(columns={
-            'open': 'open', 
-            'high': 'high', 
-            'low': 'low', 
-            'close': 'close', 
-            'volumefrom': 'volume'
-        })
-        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        df = df.sort_values('timestamp').reset_index(drop=True)
-        st.success(f"✅ Loaded {len(df)} data points from CryptoCompare")
-        return df, "CryptoCompare"
-    except Exception as e:
-        st.warning(f"⚠️ CryptoCompare API failed: {str(e)}")
-        return None, None
-
-@st.cache_data(ttl=300)
-def get_coingecko_data(symbol, limit=100):
-    """Fetch data from CoinGecko API"""
-    symbol_map = {
-        'BTC': 'bitcoin',
-        'ETH': 'ethereum',
-        'BNB': 'binancecoin',
-        'XRP': 'ripple',
-        'ADA': 'cardano',
-        'SOL': 'solana',
-        'DOGE': 'dogecoin',
-        'MATIC': 'matic-network',
-        'DOT': 'polkadot',
-        'AVAX': 'avalanche-2'
-    }
-    
-    coin_id = symbol_map.get(symbol, symbol.lower())
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-    params = {"vs_currency": "usd", "days": "7", "interval": "hourly"}
-    
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        if 'prices' not in data:
-            st.warning("⚠️ CoinGecko: No price data")
-            return None, None
-        
-        prices = data['prices']
-        volumes = data.get('total_volumes', [[p[0], 1000000] for p in prices])
-        
-        df = pd.DataFrame({
-            'timestamp': [pd.to_datetime(p[0], unit='ms') for p in prices],
-            'close': [p[1] for p in prices],
-            'volume': [v[1] for v in volumes]
-        })
-        
-        df['open'] = df['close']
-        df['high'] = df['close'] * 1.001
-        df['low'] = df['close'] * 0.999
-        
-        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        df = df.tail(limit).reset_index(drop=True)
-        st.success(f"✅ Loaded {len(df)} data points from CoinGecko")
-        return df, "CoinGecko"
-    except Exception as e:
-        st.warning(f"⚠️ CoinGecko API failed: {str(e)}")
-        return None, None
-
-@st.cache_data(ttl=300)
-def get_forex_metals_data(symbol, interval="60min", limit=100):
-    """Fetch forex and precious metals data using Twelve Data API"""
-    interval_map = {
-        "5m": "5min",
-        "10m": "15min",
-        "15m": "15min",
-        "30m": "30min",
-        "1h": "1h",
-        "4h": "4h",
-        "1d": "1day"
-    }
-    
-    mapped_interval = interval_map.get(interval, "1h")
-    
-    try:
-        api_key = st.secrets["TWELVE_DATA_API_KEY"]
-    except Exception as e:
-        st.warning(f"⚠️ Twelve Data API key not found in secrets. Using free tier.")
-        api_key = None
-    
-    url = "https://api.twelvedata.com/time_series"
-    params = {
-        "symbol": symbol,
-        "interval": mapped_interval,
-        "outputsize": min(limit, 100),
-        "format": "JSON"
-    }
-    
-    if api_key:
-        params["apikey"] = api_key
-    
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        if 'status' in data and data['status'] == 'error':
-            st.warning(f"⚠️ Twelve Data error: {data.get('message', 'Unknown error')}")
-            return None, None
-        
-        if 'values' not in data or not data['values']:
-            st.warning(f"⚠️ No data returned for {symbol}")
-            return None, None
-        
-        values = data['values']
-        df = pd.DataFrame(values)
-        
-        df = df.rename(columns={
-            'datetime': 'timestamp',
-            'open': 'open',
-            'high': 'high',
-            'low': 'low',
-            'close': 'close',
-            'volume': 'volume'
-        })
-        
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        
-        for col in ['open', 'high', 'low', 'close']:
-            df[col] = df[col].astype(float)
-        
-        if 'volume' in df.columns:
-            df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
-        else:
-            df['volume'] = 0
-        
-        df = df.sort_values('timestamp').reset_index(drop=True)
-        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        
-        api_status = "Twelve Data (API Key)" if api_key else "Twelve Data (Free)"
-        st.success(f"✅ Loaded {len(df)} data points from {api_status}")
-        return df, api_status
-        
-    except Exception as e:
-        st.warning(f"⚠️ Twelve Data API failed: {str(e)}")
-        
-    try:
-        st.info("📊 Using sample data for demonstration...")
-        dates = pd.date_range(end=datetime.now(), periods=limit, freq='H')
-        
-        base_price = 1.0900 if 'EUR' in symbol else 110.50 if 'JPY' in symbol else 1800 if 'XAU' in symbol else 1.2500
-        
-        prices = []
-        current_price = base_price
-        for i in range(limit):
-            change = np.random.normal(0, base_price * 0.002)
-            current_price += change
-            prices.append(current_price)
-        
-        df = pd.DataFrame({
-            'timestamp': dates,
-            'open': prices,
-            'high': [p * (1 + abs(np.random.normal(0, 0.001))) for p in prices],
-            'low': [p * (1 - abs(np.random.normal(0, 0.001))) for p in prices],
-            'close': [p + np.random.normal(0, p * 0.001) for p in prices],
-            'volume': [np.random.randint(1000, 10000) for _ in range(limit)]
-        })
-        
-        st.warning("⚠️ Using sample data. Real data unavailable.")
-        return df, "Sample Data"
-        
-    except Exception as e:
-        st.error(f"❌ Error generating sample data: {str(e)}")
-        return None, None
-
-def fetch_data(symbol, asset_type):
-    """Main function to fetch data with multiple fallbacks"""
-    if asset_type == "💰 Cryptocurrency" or asset_type == "🔍 Custom Search":
-        interval_map = timeframe_config
-        
-        st.info(f"🔄 Trying to fetch {symbol} data...")
-        
-        df, source = get_binance_data(symbol, interval_map['binance'], interval_map['limit'])
-        if df is not None and len(df) > 0:
-            return df, source
-        
-        st.info("🔄 Trying backup API (OKX)...")
-        df, source = get_okx_data(symbol, interval_map['okx'], interval_map['limit'])
-        if df is not None and len(df) > 0:
-            return df, source
-        
-        st.info("🔄 Trying backup API (CryptoCompare)...")
-        df, source = get_cryptocompare_data(symbol, interval_map['limit'])
-        if df is not None and len(df) > 0:
-            return df, source
-        
-        st.info("🔄 Trying backup API (CoinGecko)...")
-        df, source = get_coingecko_data(symbol, interval_map['limit'])
-        if df is not None and len(df) > 0:
-            return df, source
-        
-        st.error(f"❌ Could not fetch data for {symbol}")
-        return None, None
-    
-    elif asset_type == "💱 Forex" or asset_type == "🏆 Precious Metals":
-        interval_map = timeframe_config
-        
-        st.info(f"🔄 Fetching {symbol} data...")
-        
-        interval = interval_map['binance']
-        df, source = get_forex_metals_data(symbol, interval, interval_map['limit'])
-        
-        if df is not None and len(df) > 0:
-            return df, source
-        
-        st.error(f"❌ Could not fetch data for {symbol}")
-        return None, None
-    
-    return None, None
-
-def calculate_obv(df):
-    """Calculate On-Balance Volume"""
-    obv = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
-    return obv
-
-def calculate_mfi(df, period=14):
-    """Calculate Money Flow Index"""
-    typical_price = (df['high'] + df['low'] + df['close']) / 3
-    money_flow = typical_price * df['volume']
-    
-    positive_flow = pd.Series(0.0, index=df.index)
-    negative_flow = pd.Series(0.0, index=df.index)
-    
-    positive_flow[df['close'] > df['close'].shift(1)] = money_flow[df['close'] > df['close'].shift(1)]
-    negative_flow[df['close'] < df['close'].shift(1)] = money_flow[df['close'] < df['close'].shift(1)]
-    
-    positive_mf = positive_flow.rolling(window=period).sum()
-    negative_mf = negative_flow.rolling(window=period).sum()
-    
-    mfi = 100 - (100 / (1 + positive_mf / (negative_mf + 1e-10)))
-    return mfi.fillna(50)
-
-def calculate_adx(df, period=14):
-    """Calculate Average Directional Index"""
-    high_diff = df['high'].diff()
-    low_diff = -df['low'].diff()
-    
-    pos_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0)
-    neg_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0)
-    
-    high_low = df['high'] - df['low']
-    high_close = np.abs(df['high'] - df['close'].shift())
-    low_close = np.abs(df['low'] - df['close'].shift())
-    ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    true_range = ranges.max(axis=1)
-    atr = true_range.rolling(window=period).mean()
-    
-    pos_di = 100 * (pos_dm.rolling(window=period).mean() / (atr + 1e-10))
-    neg_di = 100 * (neg_dm.rolling(window=period).mean() / (atr + 1e-10))
-    
-    dx = 100 * np.abs(pos_di - neg_di) / (pos_di + neg_di + 1e-10)
-    adx = dx.rolling(window=period).mean()
-    
-    return adx.fillna(0), pos_di.fillna(0), neg_di.fillna(0)
-
-def calculate_stochastic(df, k_period=14, d_period=3):
-    """Calculate Stochastic Oscillator"""
-    low_min = df['low'].rolling(window=k_period).min()
-    high_max = df['high'].rolling(window=k_period).max()
-    
-    k = 100 * (df['close'] - low_min) / (high_max - low_min + 1e-10)
-    d = k.rolling(window=d_period).mean()
-    
-    return k.fillna(50), d.fillna(50)
-
-def calculate_cci(df, period=20):
-    """Calculate Commodity Channel Index"""
-    typical_price = (df['high'] + df['low'] + df['close']) / 3
-    sma = typical_price.rolling(window=period).mean()
-    mean_deviation = typical_price.rolling(window=period).apply(lambda x: np.abs(x - x.mean()).mean())
-    
-    cci = (typical_price - sma) / (0.015 * mean_deviation + 1e-10)
-    return cci.fillna(0)
-
-def calculate_technical_indicators(df):
-    """Calculate technical indicators"""
-    try:
-        df['sma_20'] = df['close'].rolling(window=20).mean()
-        df['sma_50'] = df['close'].rolling(window=50).mean()
-        
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / (loss + 1e-10)
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
-        exp1 = df['close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['close'].ewm(span=26, adjust=False).mean()
-        df['macd'] = exp1 - exp2
-        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
-        df['macd_hist'] = df['macd'] - df['macd_signal']
-        
-        df['bb_middle'] = df['close'].rolling(window=20).mean()
-        bb_std = df['close'].rolling(window=20).std()
-        df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
-        df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
-        
-        df['volatility'] = df['close'].pct_change().rolling(window=20).std()
-        
-        df['obv'] = calculate_obv(df)
-        df['mfi'] = calculate_mfi(df, 14)
-        df['adx'], df['plus_di'], df['minus_di'] = calculate_adx(df, 14)
-        df['stoch_k'], df['stoch_d'] = calculate_stochastic(df, 14, 3)
-        df['cci'] = calculate_cci(df, 20)
-        
-        return df
-    except Exception as e:
-        st.error(f"Error calculating indicators: {str(e)}")
-        return df
-
-def analyze_rsi_bounce_patterns(df):
-    """Analyze historical RSI bounce patterns"""
-    if 'rsi' not in df.columns or len(df) < 50:
-        return None
-    
-    rsi = df['rsi'].values
-    price = df['close'].values
-    
-    overbought_bounces = []
-    oversold_bounces = []
-    
-    for i in range(10, len(rsi) - 10):
-        current_rsi = rsi[i]
-        future_rsi = rsi[i+1:min(i+11, len(rsi))]
-        current_price = price[i]
-        future_prices = price[i+1:min(i+11, len(price))]
-        
-        if current_rsi > 70:
-            bounce_points = future_rsi[future_rsi < 70]
-            if len(bounce_points) > 0:
-                periods = np.where(future_rsi < 70)[0][0] + 1
-                if periods < len(future_prices):
-                    price_change = ((future_prices[periods-1] - current_price) / current_price) * 100
-                    overbought_bounces.append({
-                        'price_change': price_change,
-                        'periods': periods
-                    })
-        
-        elif current_rsi < 30:
-            bounce_points = future_rsi[future_rsi > 30]
-            if len(bounce_points) > 0:
-                periods = np.where(future_rsi > 30)[0][0] + 1
-                if periods < len(future_prices):
-                    price_change = ((future_prices[periods-1] - current_price) / current_price) * 100
-                    oversold_bounces.append({
-                        'price_change': price_change,
-                        'periods': periods
-                    })
-    
-    insights = ""
-    if len(overbought_bounces) > 5:
-        avg_change = np.mean([b['price_change'] for b in overbought_bounces])
-        avg_periods = np.mean([b['periods'] for b in overbought_bounces])
-        insights += f"📉 **Overbought Pattern**: {len(overbought_bounces)} cases, avg {avg_change:.2f}% change in {avg_periods:.1f} periods\n"
-    
-    if len(oversold_bounces) > 5:
-        avg_change = np.mean([b['price_change'] for b in oversold_bounces])
-        avg_periods = np.mean([b['periods'] for b in oversold_bounces])
-        insights += f"📈 **Oversold Pattern**: {len(oversold_bounces)} cases, avg {avg_change:.2f}% change in {avg_periods:.1f} periods"
-    
-    return insights if insights else "Insufficient RSI pattern data"
-
-def create_pattern_features(df, lookback=6):
-    """Create features using last N hours as context"""
-    sequences = []
-    targets = []
-    
-    for i in range(lookback, len(df) - 1):
-        sequence = []
-        for j in range(i - lookback, i):
-            hour_features = [
-                df['close'].iloc[j],
-                df['volume'].iloc[j],
-                df['rsi'].iloc[j] if 'rsi' in df.columns else 50,
-                df['macd'].iloc[j] if 'macd' in df.columns else 0,
-                df['sma_20'].iloc[j] if 'sma_20' in df.columns else df['close'].iloc[j],
-                df['volatility'].iloc[j] if 'volatility' in df.columns else 0
-            ]
-            
-            if j > i - lookback:
-                prev_close = df['close'].iloc[j-1]
-                hour_features.append((df['close'].iloc[j] - prev_close) / (prev_close + 1e-10))
-            else:
-                hour_features.append(0)
-            
-            sequence.extend(hour_features)
-        
-        sequences.append(sequence)
-        targets.append(df['close'].iloc[i])
-    
-    return np.array(sequences), np.array(targets)
-
-def train_improved_model(df, lookback=6, prediction_periods=5):
-    """Pattern-based prediction with context - NOW WITH SURGICAL ENHANCEMENTS"""
-    try:
-        if len(df) < 60:
-            st.warning("⚠️ Need at least 60 data points")
-            return None, None, 0, None
-        
-        df_clean = df.fillna(method='ffill').fillna(method='bfill').fillna(0)
-        
-        X, y = create_pattern_features(df_clean, lookback=lookback)
-        
-        if len(X) < 30:
-            st.warning("⚠️ Not enough data after cleaning")
-            return None, None, 0, None
-        
-        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-        y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
-        
-        if np.any(np.isnan(X)) or np.any(np.isnan(y)):
-            st.error("❌ Data contains NaN values after cleaning")
-            return None, None, 0, None
-        
-        scaler = RobustScaler()
-        X_scaled = scaler.fit_transform(X)
-        
-        split_idx = int(len(X_scaled) * 0.8)
-        X_train = X_scaled[:split_idx]
-        y_train = y[:split_idx]
-        X_test = X_scaled[split_idx:]
-        y_test = y[split_idx:]
-        
-        rf_model = RandomForestRegressor(
-            n_estimators=150,
-            max_depth=12,
-            min_samples_split=5,
-            random_state=42,
-            n_jobs=-1
-        )
-        
-        gb_model = GradientBoostingRegressor(
-            n_estimators=150,
-            max_depth=6,
-            learning_rate=0.05,
-            subsample=0.8,
-            random_state=42
-        )
-        
-        rf_model.fit(X_train, y_train)
-        gb_model.fit(X_train, y_train)
-        
-        current_sequence = []
-        lookback_start = len(df_clean) - lookback
-        
-        for i in range(lookback_start, len(df_clean)):
-            hour_features = [
-                df_clean['close'].iloc[i],
-                df_clean['volume'].iloc[i],
-                df_clean['rsi'].iloc[i] if 'rsi' in df_clean.columns else 50,
-                df_clean['macd'].iloc[i] if 'macd' in df_clean.columns else 0,
-                df_clean['sma_20'].iloc[i] if 'sma_20' in df_clean.columns else df_clean['close'].iloc[i],
-                df_clean['volatility'].iloc[i] if 'volatility' in df_clean.columns else 0
-            ]
-            
-            if i > lookback_start:
-                prev_close = df_clean['close'].iloc[i-1]
-                hour_features.append((df_clean['close'].iloc[i] - prev_close) / (prev_close + 1e-10))
-            else:
-                hour_features.append(0)
-            
-            current_sequence.extend(hour_features)
-        
-        current_sequence = np.array(current_sequence).reshape(1, -1)
-        current_sequence = np.nan_to_num(current_sequence, nan=0.0, posinf=0.0, neginf=0.0)
-        
-        current_scaled = scaler.transform(current_sequence)
-        
-        predictions = []
-        for _ in range(prediction_periods):
-            rf_pred = rf_model.predict(current_scaled)[0]
-            gb_pred = gb_model.predict(current_scaled)[0]
-            pred_price = 0.4 * rf_pred + 0.6 * gb_pred
-            predictions.append(float(pred_price))
-        
-        if len(X_test) > 0:
-            rf_test_pred = rf_model.predict(X_test)
-            gb_test_pred = gb_model.predict(X_test)
-            ensemble_pred = 0.4 * rf_test_pred + 0.6 * gb_test_pred
-            
-            mape = mean_absolute_percentage_error(y_test, ensemble_pred) * 100
-            base_confidence = max(0, min(100, 100 - mape))
-        else:
-            base_confidence = 65
-        
-        # ==================== SURGICAL APPLICATION OF FIX #1 ====================
-        current_price = df_clean['close'].iloc[-1]
-        predicted_price = predictions[0]
-        pred_change_pct = ((predicted_price - current_price) / current_price) * 100
-        
-        # Check for barriers
-        barriers = check_support_resistance_barriers(df_clean, predicted_price, current_price)
-        
-        # Analyze timeframe volatility
-        timeframe_hours = prediction_periods
-        volatility_context = analyze_timeframe_volatility(df_clean, pred_change_pct, timeframe_hours)
-        
-        # Adjust confidence based on barriers and volatility
-        adjusted_confidence = adjust_confidence_for_barriers(base_confidence, barriers, volatility_context)
-        
-        # ==================== END SURGICAL APPLICATION ====================
-        
-        rsi_insights = analyze_rsi_bounce_patterns(df_clean)
-        
-        return predictions, ['Pattern-based features'], adjusted_confidence, rsi_insights
-        
-    except Exception as e:
-        st.error(f"Prediction error: {str(e)}")
-        import traceback
-        st.error(f"Details: {traceback.format_exc()}")
-        return None, None, 0, None
-
-def calculate_signal_strength(df):
-    """Calculate trading signal strength with EQUAL WEIGHTS + historical behavior - SURGICAL FIX #3"""
+def calculate_signal_strength(df, warning_details=None):
+    """Calculate trading signal strength with EQUAL WEIGHTS + warning adjustments"""
     signals = []
     
     weights = get_indicator_weights()
     
-    # ==================== SURGICAL FIX #2: RSI DURATION (KEEPS DURATION LOGIC) ====================
+    # RSI WITH DURATION
     if 'rsi' in df.columns:
         rsi = df['rsi'].iloc[-1]
         
-        # Count consecutive periods in overbought/oversold
         consecutive_count, zone_type = count_rsi_consecutive_periods(df)
-        
-        # Calculate duration-based strength
         duration_strength = calculate_rsi_duration_strength(consecutive_count, zone_type)
-        
-        # Get duration weight multiplier
         duration_weight = get_rsi_duration_weight(consecutive_count)
         
-        # Apply the duration-weighted signal (uses equal base weight ±1, multiplied by duration)
         if duration_strength != 0:
             signals.append(int(duration_strength * duration_weight))
         else:
-            # Fallback to basic RSI with EQUAL weight ±1
             if rsi > 70:
-                signals.append(-1)  # Changed from -2 to -1
+                signals.append(-1)
             elif rsi < 30:
-                signals.append(1)   # Changed from 2 to 1
+                signals.append(1)
             else:
                 signals.append(0)
-    # ==================== END SURGICAL FIX #2 ====================
     
-    # ==================== SURGICAL FIX #3: ALL INDICATORS NOW USE EQUAL BASE WEIGHT ±1 ====================
-    
+    # MACD
     if 'macd' in df.columns:
         macd_diff = df['macd'].iloc[-1] - df['macd_signal'].iloc[-1]
         weight = weights.get('MACD', 1.0)
-        # Equal base weight ±1 (already was ±1, keeping it)
         signals.append(int(1 * weight) if macd_diff > 0 else int(-1 * weight))
     
+    # SMA
     if 'sma_20' in df.columns and 'sma_50' in df.columns:
         price = df['close'].iloc[-1]
         sma20 = df['sma_20'].iloc[-1]
         sma50 = df['sma_50'].iloc[-1]
         weight = weights.get('SMA', 1.0)
         
-        # Changed to equal base weight ±1 (was ±2 and ±1)
         if price > sma20 > sma50:
-            signals.append(int(1 * weight))  # Changed from 2 to 1
+            signals.append(int(1 * weight))
         elif price > sma20:
-            signals.append(int(1 * weight))  # Already 1
+            signals.append(int(1 * weight))
         elif price < sma20 < sma50:
-            signals.append(int(-1 * weight))  # Changed from -2 to -1
+            signals.append(int(-1 * weight))
         else:
-            signals.append(int(-1 * weight))  # Already -1
+            signals.append(int(-1 * weight))
     
+    # MFI
     if 'mfi' in df.columns:
         mfi = df['mfi'].iloc[-1]
         weight = weights.get('MFI', 1.0)
-        # Changed to equal base weight ±1 (was ±2)
         if mfi > 80:
-            signals.append(int(-1 * weight))  # Changed from -2 to -1
+            signals.append(int(-1 * weight))
         elif mfi < 20:
-            signals.append(int(1 * weight))   # Changed from 2 to 1
+            signals.append(int(1 * weight))
         else:
             signals.append(0)
     
+    # ADX WITH MOMENTUM WARNING ADJUSTMENT (SURGICAL FIX!)
     if 'adx' in df.columns and 'plus_di' in df.columns and 'minus_di' in df.columns:
         adx = df['adx'].iloc[-1]
         plus_di = df['plus_di'].iloc[-1]
         minus_di = df['minus_di'].iloc[-1]
         weight = weights.get('ADX', 1.0)
-        
-        # Equal base weight ±1 (already was ±1, keeping it)
         if adx > 25:
-            if plus_di > minus_di:
-                signals.append(int(1 * weight))
+            if warning_details and warning_details.get('momentum_warning'):
+                # FLIP SIGNAL when momentum warning is present
+                if plus_di > minus_di:
+                    signals.append(int(-1 * weight))
+                else:
+                    signals.append(int(1 * weight))
             else:
-                signals.append(int(-1 * weight))
+                # Normal signal
+                if plus_di > minus_di:
+                    signals.append(int(1 * weight))
+                else:
+                    signals.append(int(-1 * weight))
     
+    # STOCHASTIC
     if 'stoch_k' in df.columns:
         stoch_k = df['stoch_k'].iloc[-1]
         weight = weights.get('Stochastic', 1.0)
-        # Equal base weight ±1 (already was ±1, keeping it)
         if stoch_k > 80:
             signals.append(int(-1 * weight))
         elif stoch_k < 20:
             signals.append(int(1 * weight))
     
+    # CCI
     if 'cci' in df.columns:
         cci = df['cci'].iloc[-1]
         weight = weights.get('CCI', 1.0)
-        # Equal base weight ±1 (already was ±1, keeping it)
         if cci > 100:
             signals.append(int(-1 * weight))
         elif cci < -100:
             signals.append(int(1 * weight))
     
+    # OBV WITH VOLUME WARNING ADJUSTMENT (SURGICAL FIX!)
     if 'obv' in df.columns:
         obv_current = df['obv'].iloc[-1]
         obv_prev = df['obv'].iloc[-5] if len(df) > 5 else obv_current
         weight = weights.get('OBV', 1.0)
         
-        # Changed to equal base weight ±1 (was +2/-1)
-        if obv_current > obv_prev and obv_current > 0:
-            signals.append(int(1 * weight))   # Changed from 2 to 1
-        elif obv_current < obv_prev or obv_current < 0:
-            signals.append(int(-1 * weight))  # Already -1
+        if warning_details and warning_details.get('volume_warning'):
+            # FLIP SIGNAL when volume warning is present
+            if obv_current > obv_prev and obv_current > 0:
+                signals.append(int(-1 * weight))
+            else:
+                signals.append(int(1 * weight))
+        else:
+            # Normal signal
+            if obv_current > obv_prev and obv_current > 0:
+                signals.append(int(1 * weight))
+            elif obv_current < obv_prev or obv_current < 0:
+                signals.append(int(-1 * weight))
     
-    # ==================== END SURGICAL FIX #3 ====================
+    raw_signal = sum(signals) if signals else 0
     
-    return sum(signals) if signals else 0
+    # PRICE WARNING REDUCTION (SURGICAL FIX!)
+    if warning_details and warning_details.get('price_warning'):
+        raw_signal = int(raw_signal * 0.8)
+    
+    # NEWS WARNING REDUCTION (SURGICAL FIX!)
+    if warning_details and warning_details.get('news_warning'):
+        raw_signal = int(raw_signal * 0.7)
+    
+    return raw_signal
+
+# ==================== END SURGICAL FIX ====================
 
 def analyze_price_action(df, for_bullish=True):
     """Analyze candlestick patterns for warnings"""
@@ -2076,17 +1170,28 @@ def analyze_di_balance(df, for_bullish=True):
     
     return False, "Balanced", di_gap
 
-def calculate_warning_signs(df, signal_strength):
-    """Calculate 3-part warning system"""
+# ==================== SURGICAL FIX: UPDATED calculate_warning_signs() ====================
+
+def calculate_warning_signs(df, signal_strength, news_warning_data=None):
+    """Calculate 4-part warning system (Price, Volume, Momentum, News)"""
     is_bullish = signal_strength > 0
     
     price_warning, price_details = analyze_price_action(df, for_bullish=is_bullish)
     volume_warning, volume_details, obv_status = get_obv_warning(df, for_bullish=is_bullish)
     momentum_warning, momentum_details, di_gap = analyze_di_balance(df, for_bullish=is_bullish)
     
-    warning_count = sum([price_warning, volume_warning, momentum_warning])
+    # NEWS WARNING (SURGICAL FIX!)
+    news_warning = False
+    news_details = "No news data"
+    sentiment_status = "Unknown"
+    if news_warning_data:
+        news_warning = news_warning_data['has_warning']
+        news_details = news_warning_data['warning_message']
+        sentiment_status = news_warning_data['sentiment_status']
     
-    details = {
+    warning_count = sum([price_warning, volume_warning, momentum_warning, news_warning])
+    
+    return warning_count, {
         'price_warning': price_warning,
         'price_details': price_details,
         'volume_warning': volume_warning,
@@ -2095,10 +1200,13 @@ def calculate_warning_signs(df, signal_strength):
         'momentum_warning': momentum_warning,
         'momentum_details': momentum_details,
         'di_gap': di_gap,
+        'news_warning': news_warning,
+        'news_details': news_details,
+        'sentiment_status': sentiment_status,
         'warning_count': warning_count
     }
-    
-    return warning_count, details
+
+# ==================== END SURGICAL FIX ====================
 
 def calculate_support_resistance_levels(df, current_price):
     """Calculate 7 support and resistance levels using pivot points and technical analysis"""
@@ -2121,6 +1229,7 @@ def calculate_support_resistance_levels(df, current_price):
     all_levels.sort(reverse=True)
     
     return all_levels
+    # ==================== MAIN DATA FETCHING ====================
 
 with st.spinner(f"🔄 Fetching {pair_display} data..."):
     df, data_source = fetch_data(symbol, asset_type)
@@ -2147,6 +1256,38 @@ if df is not None and len(df) > 0:
     
     st.markdown("---")
     
+    # ==================== SURGICAL FIX #4: NEWS INTEGRATION ====================
+    st.markdown("### 📰 Market Intelligence Check")
+    
+    with st.spinner("🔄 Fetching market sentiment..."):
+        fear_greed_value, fear_greed_class = get_fear_greed_index()
+        news_sentiment, news_headlines = get_crypto_news_sentiment(symbol)
+    
+    col_sentiment1, col_sentiment2 = st.columns(2)
+    
+    with col_sentiment1:
+        if fear_greed_value:
+            emoji = "😱" if fear_greed_value < 25 else "😰" if fear_greed_value < 45 else "😐" if fear_greed_value < 55 else "😃" if fear_greed_value < 75 else "🤑"
+            st.metric("Fear & Greed Index", f"{emoji} {fear_greed_value}/100", fear_greed_class)
+        else:
+            st.warning("⚠️ Fear & Greed data unavailable")
+    
+    with col_sentiment2:
+        if news_sentiment:
+            emoji = "🔴" if news_sentiment < 40 else "🟡" if news_sentiment < 60 else "🟢"
+            st.metric("News Sentiment", f"{emoji} {news_sentiment:.0f}/100",
+                     "Bearish" if news_sentiment < 40 else "Neutral" if news_sentiment < 60 else "Bullish")
+        else:
+            st.info("ℹ️ News sentiment unavailable")
+    
+    if news_headlines and len(news_headlines) > 0:
+        with st.expander("📰 Recent Headlines", expanded=False):
+            for i, headline in enumerate(news_headlines, 1):
+                st.caption(f"{i}. {headline}")
+    
+    st.markdown("---")
+    # ==================== END NEWS INTEGRATION ====================
+    
     st.markdown("### 🤖 Improved AI Predictions with Learning")
     st.info(f"""
     **🎯 Improvements:**
@@ -2158,6 +1299,7 @@ if df is not None and len(df) > 0:
     - 🆕 Checks support/resistance barriers
     - 🆕 RSI duration-weighted signals
     - 🆕 Equal indicator weights (Fair signal calculation)
+    - 🆕 **News sentiment integrated as 4th warning type!**
     """)
     
     with st.spinner("🧠 Training AI models..."):
@@ -2169,7 +1311,6 @@ if df is not None and len(df) > 0:
     
     if predictions and len(predictions) > 0:
         pred_change = ((predictions[-1] - current_price) / current_price) * 100
-        signal_strength = calculate_signal_strength(df)
         
         indicator_snapshot = create_indicator_snapshot(df)
         
@@ -2184,7 +1325,7 @@ if df is not None and len(df) > 0:
                 predicted_price=predictions[-1],
                 prediction_horizon=prediction_periods,
                 confidence=confidence,
-                signal_strength=signal_strength,
+                signal_strength=0,  # Will be calculated below with consultant meeting
                 features=features if features else {},
                 indicator_snapshot=indicator_snapshot
             )
@@ -2195,20 +1336,51 @@ if df is not None and len(df) > 0:
         else:
             prediction_id = st.session_state.current_prediction_id
         
+        # ==================== SURGICAL FIX #5: CONSULTANT MEETING ====================
+        # Step 1: Calculate raw signal (without warnings)
+        raw_signal_strength = calculate_signal_strength(df, warning_details=None)
+        
+        # Step 2: Check news warning
+        news_warning_data = None
+        if fear_greed_value is not None:
+            has_news_warning, news_msg, sentiment_status = analyze_news_sentiment_warning(
+                fear_greed_value, news_sentiment, raw_signal_strength
+            )
+            news_warning_data = {
+                'has_warning': has_news_warning,
+                'warning_message': news_msg,
+                'sentiment_status': sentiment_status
+            }
+        
+        # Step 3: Calculate all warnings (including news)
+        warning_count, warning_details = calculate_warning_signs(
+            df, raw_signal_strength, news_warning_data
+        )
+        
+        # Step 4: Recalculate signal WITH warning adjustments
+        final_signal_strength = calculate_signal_strength(df, warning_details)
+        
+        # Step 5: Adjust AI confidence based on warnings
+        adjusted_confidence = confidence
+        if warning_count >= 1:
+            adjusted_confidence = confidence * (1 - (warning_count * 0.15))
+            adjusted_confidence = max(adjusted_confidence, 30.0)
+        # ==================== END CONSULTANT MEETING ====================
+        
         col1, col2, col3 = st.columns(3)
         
         with col1:
             st.metric("AI Prediction", f"${predictions[-1]:,.2f}", f"{pred_change:+.2f}%")
         
         with col2:
-            confidence_color = "🟢" if confidence > 80 else "🟡" if confidence > 60 else "🔴"
-            st.metric("Confidence", f"{confidence_color} {confidence:.1f}%", 
-                     "High" if confidence > 80 else "Medium" if confidence > 60 else "Low")
+            confidence_color = "🟢" if adjusted_confidence > 80 else "🟡" if adjusted_confidence > 60 else "🔴"
+            st.metric("Confidence", f"{confidence_color} {adjusted_confidence:.1f}%", 
+                     "High" if adjusted_confidence > 80 else "Medium" if adjusted_confidence > 60 else "Low")
         
         with col3:
-            signal_emoji = "🟢" if signal_strength > 0 else "🔴" if signal_strength < 0 else "⚪"
-            st.metric("Signal", f"{signal_emoji} {abs(signal_strength)}/10",
-                     "Bullish" if signal_strength > 0 else "Bearish" if signal_strength < 0 else "Neutral")
+            signal_emoji = "🟢" if final_signal_strength > 0 else "🔴" if final_signal_strength < 0 else "⚪"
+            st.metric("Signal", f"{signal_emoji} {abs(final_signal_strength)}/10",
+                     "Bullish" if final_signal_strength > 0 else "Bearish" if final_signal_strength < 0 else "Neutral")
         
         st.markdown("---")
         
@@ -2467,9 +1639,7 @@ if df is not None and len(df) > 0:
     
     key_point = sr_levels[3]
     
-    if signal_strength >= 3:
-        warning_count, warning_details = calculate_warning_signs(df, signal_strength)
-        
+    if final_signal_strength >= 3:
         st.markdown("---")
         st.markdown("## 📊 Trading Central Signal Format")
         
@@ -2484,14 +1654,26 @@ if df is not None and len(df) > 0:
         elif warning_count == 1:
             target_price = predictions[0] if predictions else current_price * 1.015
             st.warning(f"**Rise to ${target_price:,.2f}** (with caution)")
-            st.caption(f"1 warning detected: {warning_details['price_details'] if warning_details['price_warning'] else warning_details['volume_details'] if warning_details['volume_warning'] else warning_details['momentum_details']}")
+            warning_list = []
+            if warning_details['price_warning']:
+                warning_list.append(warning_details['price_details'])
+            if warning_details['volume_warning']:
+                warning_list.append(warning_details['volume_details'])
+            if warning_details['momentum_warning']:
+                warning_list.append(warning_details['momentum_details'])
+            if warning_details['news_warning']:
+                warning_list.append(warning_details['news_details'])
+            st.caption(f"1 warning detected: {warning_list[0]}")
         elif warning_count == 2:
             target_price = predictions[0] if predictions else current_price * 1.01
             st.warning(f"**Cautious rise to ${target_price:,.2f}**")
             st.caption(f"2 warnings present. Reduced conviction.")
+        elif warning_count == 3:
+            st.warning("**Weak bullish signal**")
+            st.caption(f"3 warnings present. Very low conviction.")
         else:
             st.error("**Bearish reversal expected**")
-            st.caption(f"All 3 warning systems triggered. Consider exit.")
+            st.caption(f"All 4 warning systems triggered. Consider exit.")
         
         st.markdown("### 🔄 Alternative Scenario")
         downside_target_1 = key_point * 0.98
@@ -2540,39 +1722,43 @@ if df is not None and len(df) > 0:
         
         st.markdown("---")
         
-        st.markdown("### 🎯 3-Part Behavioral Analysis")
+        # ==================== SURGICAL FIX #6: 4-COLUMN WARNING DISPLAY ====================
+        st.markdown("### 🎯 4-Part Behavioral Analysis (Including News)")
         
-        col_price, col_volume, col_momentum = st.columns(3)
+        col_price, col_volume, col_momentum, col_news = st.columns(4)
         
         with col_price:
             if warning_details['price_warning']:
                 st.metric("📊 Price Action", "⚠️ Warning", 
-                         warning_details['price_details'],
-                         delta_color="inverse")
+                         warning_details['price_details'], delta_color="inverse")
             else:
                 st.metric("📊 Price Action", "✅ Strong",
-                         warning_details['price_details'],
-                         delta_color="normal")
+                         warning_details['price_details'], delta_color="normal")
         
         with col_volume:
             if warning_details['volume_warning']:
                 st.metric("💰 Volume Flow", "⚠️ Warning",
-                         warning_details['volume_details'],
-                         delta_color="inverse")
+                         warning_details['volume_details'], delta_color="inverse")
             else:
                 st.metric("💰 Volume Flow", "✅ Confirming",
-                         warning_details['volume_details'],
-                         delta_color="normal")
+                         warning_details['volume_details'], delta_color="normal")
         
         with col_momentum:
             if warning_details['momentum_warning']:
                 st.metric("⚡ Momentum", "⚠️ Warning",
-                         warning_details['momentum_details'],
-                         delta_color="inverse")
+                         warning_details['momentum_details'], delta_color="inverse")
             else:
                 st.metric("⚡ Momentum", "✅ Strong",
-                         warning_details['momentum_details'],
-                         delta_color="normal")
+                         warning_details['momentum_details'], delta_color="normal")
+        
+        with col_news:
+            if warning_details['news_warning']:
+                st.metric("📰 News/Sentiment", "⚠️ Warning",
+                         warning_details['news_details'], delta_color="inverse")
+            else:
+                st.metric("📰 News/Sentiment", "✅ Aligned",
+                         warning_details['news_details'], delta_color="normal")
+        # ==================== END 4-COLUMN WARNING DISPLAY ====================
         
         st.markdown("---")
         
@@ -2609,7 +1795,7 @@ if df is not None and len(df) > 0:
             st.caption("⚠️ Reduced position size recommended (50-75%)")
         
         elif warning_count == 2:
-            st.warning("### 🟠 STRONG BULLISH BUT WARNINGS PRESENT (2/3)")
+            st.warning("### 🟠 STRONG BULLISH BUT WARNINGS PRESENT (2/4)")
             entry = current_price
             tp1 = entry * 1.01
             sl = entry * 0.99
@@ -2624,8 +1810,24 @@ if df is not None and len(df) > 0:
             st.info("**If NOT in position:** Wait or very small position (25%)")
             st.info("**If IN position:** Take 50% profit, tighten stops")
         
+        elif warning_count == 3:
+            st.warning("### 🟠 WEAK BULLISH (3/4 Warnings)")
+            entry = current_price
+            tp1 = entry * 1.005
+            sl = entry * 0.995
+            
+            trade_data = {
+                'Level': ['Entry (10% position)', 'TP1', 'Stop Loss'],
+                'Price': [f"${entry:,.2f}", f"${tp1:,.2f}", f"${sl:,.2f}"],
+                'Change': ['0%', '+0.5%', '-0.5%'],
+                'Risk/Reward': ['-', '1:1', '-']
+            }
+            st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+            st.info("**If NOT in position:** DO NOT ENTER - Too risky")
+            st.info("**If IN position:** Exit 75%, move stop to breakeven")
+        
         else:
-            st.error("### 🔴 RESISTANCE CONFIRMED - EXIT SIGNAL (3/3 Warnings)")
+            st.error("### 🔴 RESISTANCE CONFIRMED - EXIT SIGNAL (4/4 Warnings)")
             current = current_price
             exit_target = current * 0.995
             
@@ -2636,9 +1838,9 @@ if df is not None and len(df) > 0:
             }
             st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
             st.info("**If NOT in position:** ❌ DO NOT ENTER")
-            st.info("**If IN position:** 🚨 EXIT 75-100% NOW")
+            st.info("**If IN position:** 🚨 EXIT 100% NOW")
     
-    elif signal_strength >= 1:
+    elif final_signal_strength >= 1:
         st.markdown("---")
         st.markdown("## 📊 Trading Central Signal Format")
         
@@ -2648,7 +1850,7 @@ if df is not None and len(df) > 0:
         st.markdown("### 📈 Our Preference")
         target_price = predictions[0] if predictions else current_price * 1.015
         st.warning(f"**Cautious rise to ${target_price:,.2f}**")
-        st.caption(f"Signal: {signal_strength}/10 - Weak bullish momentum detected.")
+        st.caption(f"Signal: {final_signal_strength}/10 - Weak bullish momentum detected.")
         
         st.markdown("### 🔄 Alternative Scenario")
         downside_target_1 = key_point * 0.985
@@ -2656,7 +1858,7 @@ if df is not None and len(df) > 0:
         st.warning(f"The downside breakout of **${key_point:,.2f}** would call for **${downside_target_1:,.2f}** and **${downside_target_2:,.2f}**")
         
         st.markdown("### 💬 Comment")
-        st.info(f"Weak buy signal detected. Signal strength: {signal_strength}/10. Consider smaller position (50%) or wait for confirmation.")
+        st.info(f"Weak buy signal detected. Signal strength: {final_signal_strength}/10. Consider smaller position (50%) or wait for confirmation.")
         
         st.markdown("### 📊 Supports and Resistances")
         for i, level in enumerate(sr_levels):
@@ -2669,7 +1871,7 @@ if df is not None and len(df) > 0:
         
         st.markdown("---")
         st.warning("### 🟡 WEAK BUY SIGNAL")
-        st.info(f"Signal: {signal_strength}/10 - Consider smaller position (50%) or wait for confirmation")
+        st.info(f"Signal: {final_signal_strength}/10 - Consider smaller position (50%) or wait for confirmation")
         
         entry = current_price
         tp1 = entry * 1.01
@@ -2685,7 +1887,7 @@ if df is not None and len(df) > 0:
         st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
         st.caption("⚠️ Wait for signal ≥ 3 for full position")
     
-    elif signal_strength <= -3:
+    elif final_signal_strength <= -3:
         st.markdown("---")
         st.markdown("## 📊 Trading Central Signal Format")
         
@@ -2732,7 +1934,7 @@ if df is not None and len(df) > 0:
         st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
         st.caption("📉 Short position recommended")
     
-    elif signal_strength <= -1:
+    elif final_signal_strength <= -1:
         st.markdown("---")
         st.markdown("## 📊 Trading Central Signal Format")
         
@@ -2742,7 +1944,7 @@ if df is not None and len(df) > 0:
         st.markdown("### 📉 Our Preference")
         target_price = predictions[0] if predictions else current_price * 0.99
         st.warning(f"**Cautious fall to ${target_price:,.2f}**")
-        st.caption(f"Signal: {signal_strength}/10 - Weak bearish pressure.")
+        st.caption(f"Signal: {final_signal_strength}/10 - Weak bearish pressure.")
         
         st.markdown("### 🔄 Alternative Scenario")
         upside_target_1 = key_point * 1.01
@@ -2750,7 +1952,7 @@ if df is not None and len(df) > 0:
         st.info(f"The upside breakout of **${key_point:,.2f}** would call for **${upside_target_1:,.2f}** and **${upside_target_2:,.2f}**")
         
         st.markdown("### 💬 Comment")
-        st.info(f"Weak bearish signal. Signal strength: {signal_strength}/10. Consider smaller short position or wait.")
+        st.info(f"Weak bearish signal. Signal strength: {final_signal_strength}/10. Consider smaller short position or wait.")
         
         st.markdown("### 📊 Supports and Resistances")
         for i, level in enumerate(sr_levels):
@@ -2763,7 +1965,7 @@ if df is not None and len(df) > 0:
         
         st.markdown("---")
         st.warning("### 🟡 WEAK SELL SIGNAL")
-        st.info(f"Signal: {signal_strength}/10 - Consider smaller position (50%) or wait for confirmation")
+        st.info(f"Signal: {final_signal_strength}/10 - Consider smaller position (50%) or wait for confirmation")
         
         entry = current_price
         tp1 = entry * 0.99
@@ -3062,11 +2264,14 @@ else:
 st.markdown("---")
 st.markdown(f"""
 <div style='text-align: center;'>
-    <p><b>🚀 AI TRADING PLATFORM - ENHANCED WITH SURGICAL FIXES</b></p>
+    <p><b>🚀 AI TRADING PLATFORM - ENHANCED WITH ALL 6 SURGICAL FIXES</b></p>
     <p><b>🧠 AI/ML Hybrid:</b> Machine Learning + Trading Central + Surgical Enhancements</p>
     <p><b>✅ FIX #1:</b> Support/Resistance & Timeframe Volatility Analysis</p>
     <p><b>✅ FIX #2:</b> RSI Duration-Weighted Signal Calculation</p>
     <p><b>✅ FIX #3:</b> Equal Indicator Weights (All indicators ±1 base weight)</p>
+    <p><b>✅ FIX #4:</b> News/Sentiment API Integration (Fear & Greed Index + News Headlines)</p>
+    <p><b>✅ FIX #5:</b> Consultant Meeting Pattern (Warnings influence signals)</p>
+    <p><b>✅ FIX #6:</b> 4-Part Behavioral Analysis (Price, Volume, Momentum, News)</p>
     <p><b>🎓 AI Learning:</b> System learns from every trade automatically!</p>
     <p><b>📡 Data Source:</b> Multi-API with fallbacks (Binance, OKX, CryptoCompare, etc.)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
