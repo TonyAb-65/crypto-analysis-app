@@ -1229,26 +1229,6 @@ def calculate_support_resistance_levels(df, current_price):
     all_levels.sort(reverse=True)
     
     return all_levels
-    def calculate_support_resistance_levels(df, current_price):
-    """Calculate 7 support and resistance levels using pivot points and technical analysis"""
-    high = df['high'].tail(20).max()
-    low = df['low'].tail(20).min()
-    close = df['close'].iloc[-1]
-    
-    pivot = (high + low + close) / 3
-    
-    r1 = (2 * pivot) - low
-    r2 = pivot + (high - low)
-    r3 = high + 2 * (pivot - low)
-    
-    s1 = (2 * pivot) - high
-    s2 = pivot - (high - low)
-    s3 = low - 2 * (high - pivot)
-    
-    all_levels = [r3, r2, r1, pivot, s1, s2, s3]
-    
-    all_levels.sort(reverse=True)
-    
     return all_levels                                  # ← LINE 1231
 
 # ↓↓↓ INSERT THE ENTIRE STREAMLIT CONFIGURATION CODE HERE ↓↓↓
