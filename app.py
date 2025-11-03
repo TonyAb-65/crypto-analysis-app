@@ -16,13 +16,12 @@ from pathlib import Path
 import shutil
 warnings.filterwarnings('ignore')
 
-# ==================== DATABASE PERSISTENCE FIX ====================
+# ==================== DATABASE PERSISTENCE ====================
 HOME = Path.home()
 DB_PATH = HOME / 'trading_ai_learning.db'
 print(f"💾 Database location: {DB_PATH}")
-# ==================================================================
 
-# ==================== PHASE 1: BATCH REQUEST CAPABILITY ====================
+# ==================== BATCH REQUEST CAPABILITY ====================
 def get_batch_data_binance(symbols_list, interval="1h", limit=100):
     """Batch request capability - can fetch multiple symbols at once"""
     results = {}
@@ -58,7 +57,7 @@ def get_batch_data_binance(symbols_list, interval="1h", limit=100):
     
     return results
 
-# ==================== DATABASE FUNCTIONS ====================
+# ==================== DATABASE INITIALIZATION ====================
 def init_database():
     """Initialize SQLite database for trade tracking with AI learning"""
     conn = sqlite3.connect(str(DB_PATH))
@@ -246,7 +245,8 @@ def analyze_news_sentiment_warning(fear_greed_value, news_sentiment, signal_stre
         warning_message = f"🚨 EXTREME {mood.upper()} ({fear_greed_value})"
     return has_warning, warning_message, sentiment_status
 
-# ==================== END SURGICAL FIX #4 ====================
+# Initialize database
+init_database()
 def save_prediction(asset_type, pair, timeframe, current_price, predicted_price, 
                    prediction_horizon, confidence, signal_strength, features, indicator_snapshot=None):
     """Save a prediction to database with indicator snapshot"""
@@ -768,9 +768,7 @@ def create_indicator_snapshot(df):
     except Exception as e:
         print(f"Error creating indicator snapshot: {e}")
         return {}
-
-init_database()
-# ==================== SURGICAL FIX #1: AI PREDICTION ENHANCEMENT ====================
+        # ==================== SURGICAL FIX #1: AI PREDICTION ENHANCEMENT ====================
 
 def check_support_resistance_barriers(df, predicted_price, current_price):
     """Check if predicted price needs to break through major support/resistance levels"""
@@ -832,8 +830,6 @@ def adjust_confidence_for_barriers(base_confidence, barriers, volatility_context
     adjusted_confidence = min(adjusted_confidence, 95.0)
     
     return adjusted_confidence
-
-# ==================== END SURGICAL FIX #1 ====================
 
 # ==================== SURGICAL FIX #2: RSI DURATION ANALYSIS ====================
 
@@ -897,9 +893,7 @@ def get_rsi_duration_weight(consecutive_count):
     else:
         return 2.5
 
-# ==================== END SURGICAL FIX #2 ====================
-
-# ==================== SURGICAL FIX: UPDATED calculate_signal_strength() ====================
+# ==================== SURGICAL FIX #3 & #5: SIGNAL STRENGTH WITH WARNING ADJUSTMENTS ====================
 
 def calculate_signal_strength(df, warning_details=None):
     """Calculate trading signal strength with EQUAL WEIGHTS + warning adjustments"""
@@ -1027,7 +1021,7 @@ def calculate_signal_strength(df, warning_details=None):
     
     return raw_signal
 
-# ==================== END SURGICAL FIX ====================
+# ==================== WARNING ANALYSIS FUNCTIONS ====================
 
 def analyze_price_action(df, for_bullish=True):
     """Analyze candlestick patterns for warnings"""
@@ -1170,8 +1164,6 @@ def analyze_di_balance(df, for_bullish=True):
     
     return False, "Balanced", di_gap
 
-# ==================== SURGICAL FIX: UPDATED calculate_warning_signs() ====================
-
 def calculate_warning_signs(df, signal_strength, news_warning_data=None):
     """Calculate 4-part warning system (Price, Volume, Momentum, News)"""
     is_bullish = signal_strength > 0
@@ -1206,8 +1198,6 @@ def calculate_warning_signs(df, signal_strength, news_warning_data=None):
         'warning_count': warning_count
     }
 
-# ==================== END SURGICAL FIX ====================
-
 def calculate_support_resistance_levels(df, current_price):
     """Calculate 7 support and resistance levels using pivot points and technical analysis"""
     high = df['high'].tail(20).max()
@@ -1229,15 +1219,1001 @@ def calculate_support_resistance_levels(df, current_price):
     all_levels.sort(reverse=True)
     
     return all_levels
-    return all_levels                                  # ← LINE 1231
+    # ==================== STREAMLIT PAGE CONFIGURATION ====================
 
-# ↓↓↓ INSERT THE ENTIRE STREAMLIT CONFIGURATION CODE HERE ↓↓↓
-# (Between line 1231 and line 1232)
+st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
-    # ==================== MAIN DATA FETCHING ====================  # ← LINE 1232
+st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH SURGICAL FIXES")
+st.markdown("*Crypto, Forex, Metals + AI ML Predictions + Trading Central Format + AI Learning + News Sentiment*")
 
-with st.spinner(f"🔄 Fetching {pair_display} data..."):
-    # ==================== MAIN DATA FETCHING ====================
+if 'binance_blocked' not in st.session_state:
+    st.session_state.binance_blocked = False
+
+if st.session_state.binance_blocked:
+    st.info("ℹ️ **Note:** Binance API is blocked in your region. Using OKX and backup APIs instead.")
+
+current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+st.markdown(f"**🕐 Last Updated:** {current_time}")
+
+with st.expander("💾 Database Information", expanded=False):
+    st.info(f"""
+    **Database Location:** `{DB_PATH}`
+    
+    **File Exists:** {'✅ Yes' if DB_PATH.exists() else '❌ No'}
+    
+    **Note:** All your trade history and predictions are saved to this database file.
+    """)
+
+st.markdown("---")
+
+# ==================== SIDEBAR CONFIGURATION ====================
+st.sidebar.header("⚙️ Configuration")
+
+debug_mode = st.sidebar.checkbox("🔧 Debug Mode", value=False, help="Show detailed API information")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 💾 Database Status")
+try:
+    db_exists = DB_PATH.exists()
+    if db_exists:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM predictions")
+        pred_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM trade_results")
+        trade_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT MAX(timestamp) FROM predictions")
+        last_pred = cursor.fetchone()[0]
+        cursor.execute("SELECT MAX(trade_date) FROM trade_results")
+        last_trade = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        st.sidebar.success(f"✅ Connected")
+        st.sidebar.caption(f"📍 `{DB_PATH.name}`")
+        st.sidebar.caption(f"📊 Predictions: {pred_count}")
+        st.sidebar.caption(f"💰 Trades: {trade_count}")
+        if last_pred:
+            st.sidebar.caption(f"🕐 Last prediction: {last_pred[:16]}")
+        if last_trade:
+            st.sidebar.caption(f"🕐 Last trade: {last_trade[:16]}")
+        
+        with st.sidebar.expander("🔍 Full Path", expanded=False):
+            st.code(str(DB_PATH))
+            if st.button("📋 Copy Path"):
+                st.info("Path shown above - copy manually")
+    else:
+        st.sidebar.warning(f"⚠️ Database not found")
+        st.sidebar.caption(f"Creating at: `{DB_PATH}`")
+        init_database()
+except Exception as e:
+    st.sidebar.error(f"❌ Error")
+    with st.sidebar.expander("Details", expanded=False):
+        st.code(str(e))
+
+st.sidebar.markdown("---")
+
+# ==================== ASSET SELECTION ====================
+asset_type = st.sidebar.selectbox(
+    "📊 Select Asset Type",
+    ["💰 Cryptocurrency", "🏆 Precious Metals", "💱 Forex", "🔍 Custom Search"],
+    index=0
+)
+
+CRYPTO_SYMBOLS = {
+    "Bitcoin (BTC)": "BTC",
+    "Ethereum (ETH)": "ETH",
+    "Binance Coin (BNB)": "BNB",
+    "XRP": "XRP",
+    "Cardano (ADA)": "ADA",
+    "Solana (SOL)": "SOL",
+    "Dogecoin (DOGE)": "DOGE",
+    "Polygon (MATIC)": "MATIC",
+    "Polkadot (DOT)": "DOT",
+    "Avalanche (AVAX)": "AVAX"
+}
+
+PRECIOUS_METALS = {
+    "Gold (XAU/USD)": "XAU/USD",
+    "Silver (XAG/USD)": "XAG/USD"
+}
+
+FOREX_PAIRS = {
+    "EUR/USD": "EUR/USD",
+    "GBP/USD": "GBP/USD",
+    "USD/JPY": "USD/JPY",
+    "USD/CHF": "USD/CHF",
+    "AUD/USD": "AUD/USD",
+    "USD/CAD": "USD/CAD",
+    "NZD/USD": "NZD/USD",
+    "EUR/GBP": "EUR/GBP",
+    "EUR/JPY": "EUR/JPY",
+    "GBP/JPY": "GBP/JPY",
+    "AUD/JPY": "AUD/JPY",
+    "EUR/CHF": "EUR/CHF",
+    "AUD/CAD": "AUD/CAD",
+    "AUD/NZD": "AUD/NZD",
+    "CAD/JPY": "CAD/JPY"
+}
+
+if asset_type == "💰 Cryptocurrency":
+    pair_display = st.sidebar.selectbox("Select Cryptocurrency", list(CRYPTO_SYMBOLS.keys()), index=0)
+    symbol = CRYPTO_SYMBOLS[pair_display]
+elif asset_type == "🏆 Precious Metals":
+    pair_display = st.sidebar.selectbox("Select Metal", list(PRECIOUS_METALS.keys()), index=0)
+    symbol = PRECIOUS_METALS[pair_display]
+elif asset_type == "💱 Forex":
+    pair_display = st.sidebar.selectbox("Select Forex Pair", list(FOREX_PAIRS.keys()), index=0)
+    symbol = FOREX_PAIRS[pair_display]
+else:
+    custom_symbol = st.sidebar.text_input("Enter Symbol:", "BTC").upper()
+    pair_display = f"Custom: {custom_symbol}"
+    symbol = custom_symbol
+
+TIMEFRAMES = {
+    "5 Minutes": {"limit": 100, "binance": "5m", "okx": "5m"},
+    "10 Minutes": {"limit": 100, "binance": "10m", "okx": "10m"},
+    "15 Minutes": {"limit": 100, "binance": "15m", "okx": "15m"},
+    "30 Minutes": {"limit": 100, "binance": "30m", "okx": "30m"},
+    "1 Hour": {"limit": 100, "binance": "1h", "okx": "1H"},
+    "4 Hours": {"limit": 100, "binance": "4h", "okx": "4H"},
+    "1 Day": {"limit": 100, "binance": "1d", "okx": "1D"}
+}
+
+timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=4)
+timeframe_config = TIMEFRAMES[timeframe_name]
+
+auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False, 
+                                   help="Automatically refresh data every 60 seconds")
+
+if auto_refresh:
+    if 'last_refresh_time' not in st.session_state:
+        st.session_state.last_refresh_time = time.time()
+    
+    elapsed = time.time() - st.session_state.last_refresh_time
+    
+    if elapsed >= 60:
+        st.session_state.last_refresh_time = time.time()
+        st.rerun()
+    else:
+        remaining = int(60 - elapsed)
+        st.sidebar.info(f"⏱️ Next refresh in {remaining}s")
+        time.sleep(1)
+        st.rerun()
+
+st.sidebar.markdown("### 🤖 AI Configuration")
+prediction_periods = st.sidebar.slider("Prediction Periods", 1, 10, 5)
+lookback_hours = st.sidebar.slider("Context Window (hours)", 4, 12, 6, 
+                                   help="How many hours to look back for pattern analysis")
+
+st.sidebar.markdown("### 📊 Technical Indicators")
+use_sma = st.sidebar.checkbox("SMA (20, 50)", value=True)
+use_rsi = st.sidebar.checkbox("RSI (14)", value=True)
+use_macd = st.sidebar.checkbox("MACD", value=True)
+use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
+
+st.sidebar.markdown("#### 🆕 Advanced Indicators")
+use_obv = st.sidebar.checkbox("OBV (Volume)", value=False, help="On-Balance Volume - tracks volume flow")
+use_mfi = st.sidebar.checkbox("MFI (14)", value=False, help="Money Flow Index - volume-weighted RSI")
+use_adx = st.sidebar.checkbox("ADX (14)", value=False, help="Average Directional Index - trend strength")
+use_stoch = st.sidebar.checkbox("Stochastic", value=False, help="Stochastic Oscillator - momentum indicator")
+use_cci = st.sidebar.checkbox("CCI (20)", value=False, help="Commodity Channel Index - cyclical trends")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🎓 AI Learning System")
+show_learning_dashboard = st.sidebar.checkbox("📊 Show Trades Table on Page", value=False,
+                                              help="✅ Enable to see your tracked trades table")
+# ==================== AI LEARNING DASHBOARD (Sidebar) ====================
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🧠 AI Learning Progress")
+
+try:
+    conn_learn = sqlite3.connect(str(DB_PATH))
+    cursor_learn = conn_learn.cursor()
+    
+    cursor_learn.execute("SELECT COUNT(*) FROM trade_results")
+    total_closed = cursor_learn.fetchone()[0]
+    
+    if total_closed > 0:
+        cursor_learn.execute("""
+            SELECT 
+                COUNT(CASE WHEN profit_loss > 0 THEN 1 END) as wins,
+                AVG(profit_loss_pct) as avg_return,
+                SUM(profit_loss) as total_pl
+            FROM trade_results
+        """)
+        wins, avg_return, total_pl = cursor_learn.fetchone()
+        win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
+        
+        st.sidebar.metric("📊 Closed Trades", total_closed)
+        st.sidebar.metric("🎯 Win Rate", f"{win_rate:.1f}%", 
+                         delta="Good" if win_rate >= 55 else "Review" if win_rate >= 45 else "Poor")
+        st.sidebar.metric("💰 Total P/L", f"${total_pl:.2f}",
+                         delta=f"{avg_return:.2f}% avg")
+        
+        st.sidebar.markdown("**🏆 Top Indicators:**")
+        cursor_learn.execute("""
+            SELECT indicator_name, accuracy_rate, weight_multiplier
+            FROM indicator_accuracy
+            WHERE correct_count + wrong_count > 0
+            ORDER BY accuracy_rate DESC
+            LIMIT 3
+        """)
+        
+        top_indicators = cursor_learn.fetchall()
+        if top_indicators:
+            for ind_name, accuracy, weight in top_indicators:
+                emoji = "🟢" if accuracy > 0.6 else "🟡" if accuracy > 0.5 else "🔴"
+                st.sidebar.caption(f"{emoji} {ind_name}: {accuracy*100:.0f}% ({weight:.1f}x)")
+        else:
+            st.sidebar.caption("⚪ No indicator data yet")
+        
+        st.sidebar.markdown("**📈 Learning Progress:**")
+        if total_closed < 20:
+            progress = total_closed / 20
+            st.sidebar.progress(progress)
+            st.sidebar.caption(f"⚠️ {20-total_closed} more trades for basic learning")
+        elif total_closed < 50:
+            progress = min(1.0, total_closed / 50)
+            st.sidebar.progress(progress)
+            st.sidebar.caption(f"✅ Good! {50-total_closed} more for strong learning")
+        else:
+            st.sidebar.progress(1.0)
+            st.sidebar.success(f"🎯 AI well-trained!")
+        
+        with st.sidebar.expander("📊 Detailed Stats", expanded=False):
+            cursor_learn.execute("""
+                SELECT indicator_name, correct_count, wrong_count, 
+                       accuracy_rate, weight_multiplier
+                FROM indicator_accuracy
+                WHERE correct_count + wrong_count > 0
+                ORDER BY accuracy_rate DESC
+            """)
+            
+            all_indicators = cursor_learn.fetchall()
+            if all_indicators:
+                st.markdown("**All Indicators:**")
+                for ind_name, correct, wrong, accuracy, weight in all_indicators:
+                    emoji = "🟢" if accuracy > 0.6 else "🟡" if accuracy > 0.5 else "🔴"
+                    weight_arrow = "⬆️" if weight > 1.0 else "⬇️" if weight < 1.0 else "➡️"
+                    st.caption(f"{emoji} **{ind_name}**")
+                    st.caption(f"   ✅ {correct} | ❌ {wrong} | {accuracy*100:.1f}% | {weight:.2f}x {weight_arrow}")
+            
+            st.markdown("**📋 Last 3 Trades:**")
+            cursor_learn.execute("""
+                SELECT t.trade_date, p.pair, t.profit_loss_pct
+                FROM trade_results t
+                JOIN predictions p ON t.prediction_id = p.id
+                ORDER BY t.trade_date DESC
+                LIMIT 3
+            """)
+            
+            recent = cursor_learn.fetchall()
+            for date, pair, pl_pct in recent:
+                emoji = "✅" if pl_pct > 0 else "❌"
+                try:
+                    date_str = datetime.fromisoformat(date).strftime('%m/%d %H:%M')
+                except:
+                    date_str = date[:10]
+                st.caption(f"{emoji} {pair}: {pl_pct:+.2f}% ({date_str})")
+    
+    else:
+        st.sidebar.info("ℹ️ No closed trades yet")
+        st.sidebar.caption("Close trades to see AI learning!")
+    
+    conn_learn.close()
+
+except Exception as e:
+    st.sidebar.error("❌ Error loading learning stats")
+    if debug_mode:
+        st.sidebar.code(str(e))
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🔥 Market Movers")
+show_market_movers = st.sidebar.checkbox("📈 Show Top Movers", value=False,
+                                        help="Display today's top gainers and losers")
+
+@st.cache_data(ttl=300)
+def get_market_movers():
+    """Get top movers from popular cryptocurrencies"""
+    popular_symbols = ['BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'MATIC', 'DOT', 'AVAX']
+    movers = []
+    
+    binance_failed = False
+    for symbol_temp in popular_symbols:
+        try:
+            url = "https://api.binance.com/api/v3/ticker/24hr"
+            params = {"symbol": f"{symbol_temp}USDT"}
+            response = requests.get(url, params=params, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                price_change_pct = float(data['priceChangePercent'])
+                current_price_temp = float(data['lastPrice'])
+                volume_temp = float(data['volume'])
+                
+                movers.append({
+                    'Symbol': symbol_temp,
+                    'Price': current_price_temp,
+                    'Change %': price_change_pct,
+                    'Volume': volume_temp
+                })
+            else:
+                binance_failed = True
+                break
+        except:
+            binance_failed = True
+            break
+    
+    if binance_failed or len(movers) == 0:
+        movers = []
+        for symbol_temp in popular_symbols:
+            try:
+                url = "https://www.okx.com/api/v5/market/ticker"
+                params = {"instId": f"{symbol_temp}-USDT"}
+                response = requests.get(url, params=params, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('code') == '0' and len(data.get('data', [])) > 0:
+                        ticker = data['data'][0]
+                        current_price_temp = float(ticker['last'])
+                        open_24h = float(ticker['open24h'])
+                        price_change_pct = ((current_price_temp - open_24h) / open_24h) * 100
+                        volume_temp = float(ticker['vol24h'])
+                        
+                        movers.append({
+                            'Symbol': symbol_temp,
+                            'Price': current_price_temp,
+                            'Change %': price_change_pct,
+                            'Volume': volume_temp
+                        })
+            except:
+                continue
+    
+    if movers:
+        df_movers = pd.DataFrame(movers)
+        df_movers = df_movers.sort_values('Change %', ascending=False)
+        return df_movers
+    return None
+
+if show_market_movers:
+    with st.sidebar:
+        movers_df = get_market_movers()
+        
+        if movers_df is not None and len(movers_df) > 0:
+            st.markdown("#### 📈 Top Gainers")
+            top_gainers = movers_df.head(3)
+            for _, row in top_gainers.iterrows():
+                delta = f"+{row['Change %']:.2f}%"
+                st.metric(row['Symbol'], f"${row['Price']:,.2f}", delta)
+            
+            st.markdown("#### 📉 Top Losers")
+            top_losers = movers_df.tail(3).sort_values('Change %')
+            for _, row in top_losers.iterrows():
+                delta = f"{row['Change %']:.2f}%"
+                st.metric(row['Symbol'], f"${row['Price']:,.2f}", delta)
+        else:
+            st.warning("Unable to load market movers")
+
+# ==================== DATA FETCHING FUNCTIONS ====================
+
+@st.cache_data(ttl=300)
+def get_okx_data(symbol_param, interval="1H", limit=100):
+    """Fetch data from OKX API"""
+    url = "https://www.okx.com/api/v5/market/candles"
+    limit = min(limit, 300)
+    params = {"instId": f"{symbol_param}-USDT", "bar": interval, "limit": str(limit)}
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('code') != '0':
+            error_msg = data.get('msg', 'Unknown error')
+            st.warning(f"⚠️ OKX error: {error_msg}")
+            return None, None
+        
+        candles = data.get('data', [])
+        if not candles or len(candles) == 0:
+            st.warning(f"⚠️ OKX returned no data")
+            return None, None
+        
+        df = pd.DataFrame(candles, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume', 
+            'volCcy', 'volCcyQuote', 'confirm'
+        ])
+        df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
+        
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        st.success(f"✅ Loaded {len(df)} data points from OKX")
+        return df, "OKX"
+    except Exception as e:
+        st.warning(f"⚠️ OKX API failed: {str(e)}")
+        return None, None
+
+@st.cache_data(ttl=300)
+def get_binance_data(symbol_param, interval="1h", limit=100):
+    """Fetch data from Binance API"""
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": f"{symbol_param}USDT", "interval": interval, "limit": limit}
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if isinstance(data, dict) and 'code' in data:
+            st.warning(f"⚠️ Binance error: {data.get('msg', 'Unknown')}")
+            return None, None
+        
+        if not data or len(data) == 0:
+            st.warning("⚠️ Binance returned no data")
+            return None, None
+        
+        df = pd.DataFrame(data, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'number_of_trades',
+            'taker_buy_base', 'taker_buy_quote', 'ignore'
+        ])
+        
+        df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        st.success(f"✅ Loaded {len(df)} data points from Binance")
+        return df, "Binance"
+    except Exception as e:
+        st.warning(f"⚠️ Binance API failed: {str(e)}")
+        return None, None
+
+@st.cache_data(ttl=300)
+def get_cryptocompare_data(symbol_param, limit=100):
+    """Fetch data from CryptoCompare API"""
+    url = "https://min-api.cryptocompare.com/data/v2/histohour"
+    params = {"fsym": symbol_param, "tsym": "USD", "limit": limit}
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('Response') != 'Success':
+            st.warning(f"⚠️ CryptoCompare error: {data.get('Message', 'Unknown')}")
+            return None, None
+        
+        hist_data = data.get('Data', {}).get('Data', [])
+        if not hist_data:
+            st.warning("⚠️ CryptoCompare returned no data")
+            return None, None
+        
+        df = pd.DataFrame(hist_data)
+        df['timestamp'] = pd.to_datetime(df['time'], unit='s')
+        df = df.rename(columns={
+            'open': 'open', 
+            'high': 'high', 
+            'low': 'low', 
+            'close': 'close', 
+            'volumefrom': 'volume'
+        })
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        st.success(f"✅ Loaded {len(df)} data points from CryptoCompare")
+        return df, "CryptoCompare"
+    except Exception as e:
+        st.warning(f"⚠️ CryptoCompare API failed: {str(e)}")
+        return None, None
+
+@st.cache_data(ttl=300)
+def get_coingecko_data(symbol_param, limit=100):
+    """Fetch data from CoinGecko API"""
+    symbol_map = {
+        'BTC': 'bitcoin',
+        'ETH': 'ethereum',
+        'BNB': 'binancecoin',
+        'XRP': 'ripple',
+        'ADA': 'cardano',
+        'SOL': 'solana',
+        'DOGE': 'dogecoin',
+        'MATIC': 'matic-network',
+        'DOT': 'polkadot',
+        'AVAX': 'avalanche-2'
+    }
+    
+    coin_id = symbol_map.get(symbol_param, symbol_param.lower())
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+    params = {"vs_currency": "usd", "days": "7", "interval": "hourly"}
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'prices' not in data:
+            st.warning("⚠️ CoinGecko: No price data")
+            return None, None
+        
+        prices = data['prices']
+        volumes = data.get('total_volumes', [[p[0], 1000000] for p in prices])
+        
+        df = pd.DataFrame({
+            'timestamp': [pd.to_datetime(p[0], unit='ms') for p in prices],
+            'close': [p[1] for p in prices],
+            'volume': [v[1] for v in volumes]
+        })
+        
+        df['open'] = df['close']
+        df['high'] = df['close'] * 1.001
+        df['low'] = df['close'] * 0.999
+        
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.tail(limit).reset_index(drop=True)
+        st.success(f"✅ Loaded {len(df)} data points from CoinGecko")
+        return df, "CoinGecko"
+    except Exception as e:
+        st.warning(f"⚠️ CoinGecko API failed: {str(e)}")
+        return None, None
+
+@st.cache_data(ttl=300)
+def get_forex_metals_data(symbol_param, interval="60min", limit=100):
+    """Fetch forex and precious metals data using Twelve Data API"""
+    interval_map = {
+        "5m": "5min",
+        "10m": "15min",
+        "15m": "15min",
+        "30m": "30min",
+        "1h": "1h",
+        "4h": "4h",
+        "1d": "1day"
+    }
+    
+    mapped_interval = interval_map.get(interval, "1h")
+    
+    try:
+        api_key = st.secrets.get("TWELVE_DATA_API_KEY", None)
+    except:
+        api_key = None
+    
+    url = "https://api.twelvedata.com/time_series"
+    params = {
+        "symbol": symbol_param,
+        "interval": mapped_interval,
+        "outputsize": min(limit, 100),
+        "format": "JSON"
+    }
+    
+    if api_key:
+        params["apikey"] = api_key
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'status' in data and data['status'] == 'error':
+            st.warning(f"⚠️ Twelve Data error: {data.get('message', 'Unknown error')}")
+            return None, None
+        
+        if 'values' not in data or not data['values']:
+            st.warning(f"⚠️ No data returned for {symbol_param}")
+            return None, None
+        
+        values = data['values']
+        df = pd.DataFrame(values)
+        
+        df = df.rename(columns={
+            'datetime': 'timestamp',
+            'open': 'open',
+            'high': 'high',
+            'low': 'low',
+            'close': 'close',
+            'volume': 'volume'
+        })
+        
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        
+        for col in ['open', 'high', 'low', 'close']:
+            df[col] = df[col].astype(float)
+        
+        if 'volume' in df.columns:
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
+        else:
+            df['volume'] = 0
+        
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        
+        api_status = "Twelve Data (API Key)" if api_key else "Twelve Data (Free)"
+        st.success(f"✅ Loaded {len(df)} data points from {api_status}")
+        return df, api_status
+        
+    except Exception as e:
+        st.warning(f"⚠️ Twelve Data API failed: {str(e)}")
+        
+    try:
+        st.info("📊 Using sample data for demonstration...")
+        dates = pd.date_range(end=datetime.now(), periods=limit, freq='H')
+        
+        base_price = 1.0900 if 'EUR' in symbol_param else 110.50 if 'JPY' in symbol_param else 1800 if 'XAU' in symbol_param else 1.2500
+        
+        prices = []
+        current_price_calc = base_price
+        for i in range(limit):
+            change = np.random.normal(0, base_price * 0.002)
+            current_price_calc += change
+            prices.append(current_price_calc)
+        
+        df = pd.DataFrame({
+            'timestamp': dates,
+            'open': prices,
+            'high': [p * (1 + abs(np.random.normal(0, 0.001))) for p in prices],
+            'low': [p * (1 - abs(np.random.normal(0, 0.001))) for p in prices],
+            'close': [p + np.random.normal(0, p * 0.001) for p in prices],
+            'volume': [np.random.randint(1000, 10000) for _ in range(limit)]
+        })
+        
+        st.warning("⚠️ Using sample data. Real data unavailable.")
+        return df, "Sample Data"
+        
+    except Exception as e:
+        st.error(f"❌ Error generating sample data: {str(e)}")
+        return None, None
+
+def fetch_data(symbol_param, asset_type_param):
+    """Main function to fetch data with multiple fallbacks"""
+    if asset_type_param == "💰 Cryptocurrency" or asset_type_param == "🔍 Custom Search":
+        interval_map = timeframe_config
+        
+        st.info(f"🔄 Trying to fetch {symbol_param} data...")
+        
+        df, source = get_binance_data(symbol_param, interval_map['binance'], interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.info("🔄 Trying backup API (OKX)...")
+        df, source = get_okx_data(symbol_param, interval_map['okx'], interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.info("🔄 Trying backup API (CryptoCompare)...")
+        df, source = get_cryptocompare_data(symbol_param, interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.info("🔄 Trying backup API (CoinGecko)...")
+        df, source = get_coingecko_data(symbol_param, interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.error(f"❌ Could not fetch data for {symbol_param}")
+        return None, None
+    
+    elif asset_type_param == "💱 Forex" or asset_type_param == "🏆 Precious Metals":
+        interval_map = timeframe_config
+        
+        st.info(f"🔄 Fetching {symbol_param} data...")
+        
+        interval = interval_map['binance']
+        df, source = get_forex_metals_data(symbol_param, interval, interval_map['limit'])
+        
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.error(f"❌ Could not fetch data for {symbol_param}")
+        return None, None
+    
+    return None, None
+
+# ==================== TECHNICAL INDICATORS ====================
+
+def calculate_obv(df):
+    """Calculate On-Balance Volume"""
+    obv = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
+    return obv
+
+def calculate_mfi(df, period=14):
+    """Calculate Money Flow Index"""
+    typical_price = (df['high'] + df['low'] + df['close']) / 3
+    money_flow = typical_price * df['volume']
+    
+    positive_flow = pd.Series(0.0, index=df.index)
+    negative_flow = pd.Series(0.0, index=df.index)
+    
+    positive_flow[df['close'] > df['close'].shift(1)] = money_flow[df['close'] > df['close'].shift(1)]
+    negative_flow[df['close'] < df['close'].shift(1)] = money_flow[df['close'] < df['close'].shift(1)]
+    
+    positive_mf = positive_flow.rolling(window=period).sum()
+    negative_mf = negative_flow.rolling(window=period).sum()
+    
+    mfi = 100 - (100 / (1 + positive_mf / (negative_mf + 1e-10)))
+    return mfi.fillna(50)
+
+def calculate_adx(df, period=14):
+    """Calculate Average Directional Index"""
+    high_diff = df['high'].diff()
+    low_diff = -df['low'].diff()
+    
+    pos_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0)
+    neg_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0)
+    
+    high_low = df['high'] - df['low']
+    high_close = np.abs(df['high'] - df['close'].shift())
+    low_close = np.abs(df['low'] - df['close'].shift())
+    ranges = pd.concat([high_low, high_close, low_close], axis=1)
+    true_range = ranges.max(axis=1)
+    atr = true_range.rolling(window=period).mean()
+    
+    pos_di = 100 * (pos_dm.rolling(window=period).mean() / (atr + 1e-10))
+    neg_di = 100 * (neg_dm.rolling(window=period).mean() / (atr + 1e-10))
+    
+    dx = 100 * np.abs(pos_di - neg_di) / (pos_di + neg_di + 1e-10)
+    adx = dx.rolling(window=period).mean()
+    
+    return adx.fillna(0), pos_di.fillna(0), neg_di.fillna(0)
+
+def calculate_stochastic(df, k_period=14, d_period=3):
+    """Calculate Stochastic Oscillator"""
+    low_min = df['low'].rolling(window=k_period).min()
+    high_max = df['high'].rolling(window=k_period).max()
+    
+    k = 100 * (df['close'] - low_min) / (high_max - low_min + 1e-10)
+    d = k.rolling(window=d_period).mean()
+    
+    return k.fillna(50), d.fillna(50)
+
+def calculate_cci(df, period=20):
+    """Calculate Commodity Channel Index"""
+    typical_price = (df['high'] + df['low'] + df['close']) / 3
+    sma = typical_price.rolling(window=period).mean()
+    mean_deviation = typical_price.rolling(window=period).apply(lambda x: np.abs(x - x.mean()).mean())
+    
+    cci = (typical_price - sma) / (0.015 * mean_deviation + 1e-10)
+    return cci.fillna(0)
+
+def calculate_technical_indicators(df):
+    """Calculate all technical indicators"""
+    try:
+        df['sma_20'] = df['close'].rolling(window=20).mean()
+        df['sma_50'] = df['close'].rolling(window=50).mean()
+        
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / (loss + 1e-10)
+        df['rsi'] = 100 - (100 / (1 + rs))
+        
+        exp1 = df['close'].ewm(span=12, adjust=False).mean()
+        exp2 = df['close'].ewm(span=26, adjust=False).mean()
+        df['macd'] = exp1 - exp2
+        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+        df['macd_hist'] = df['macd'] - df['macd_signal']
+        
+        df['bb_middle'] = df['close'].rolling(window=20).mean()
+        bb_std = df['close'].rolling(window=20).std()
+        df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
+        df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
+        
+        df['volatility'] = df['close'].pct_change().rolling(window=20).std()
+        
+        df['obv'] = calculate_obv(df)
+        df['mfi'] = calculate_mfi(df, 14)
+        df['adx'], df['plus_di'], df['minus_di'] = calculate_adx(df, 14)
+        df['stoch_k'], df['stoch_d'] = calculate_stochastic(df, 14, 3)
+        df['cci'] = calculate_cci(df, 20)
+        
+        return df
+    except Exception as e:
+        st.error(f"Error calculating indicators: {str(e)}")
+        return df
+
+# ==================== AI MODEL TRAINING ====================
+
+def analyze_rsi_bounce_patterns(df):
+    """Analyze historical RSI bounce patterns"""
+    if 'rsi' not in df.columns or len(df) < 50:
+        return None
+    
+    rsi = df['rsi'].values
+    price = df['close'].values
+    
+    overbought_bounces = []
+    oversold_bounces = []
+    
+    for i in range(10, len(rsi) - 10):
+        current_rsi = rsi[i]
+        future_rsi = rsi[i+1:min(i+11, len(rsi))]
+        current_price_val = price[i]
+        future_prices = price[i+1:min(i+11, len(price))]
+        
+        if current_rsi > 70:
+            bounce_points = future_rsi[future_rsi < 70]
+            if len(bounce_points) > 0:
+                periods = np.where(future_rsi < 70)[0][0] + 1
+                if periods < len(future_prices):
+                    price_change = ((future_prices[periods-1] - current_price_val) / current_price_val) * 100
+                    overbought_bounces.append({
+                        'price_change': price_change,
+                        'periods': periods
+                    })
+        
+        elif current_rsi < 30:
+            bounce_points = future_rsi[future_rsi > 30]
+            if len(bounce_points) > 0:
+                periods = np.where(future_rsi > 30)[0][0] + 1
+                if periods < len(future_prices):
+                    price_change = ((future_prices[periods-1] - current_price_val) / current_price_val) * 100
+                    oversold_bounces.append({
+                        'price_change': price_change,
+                        'periods': periods
+                    })
+    
+    insights = ""
+    if len(overbought_bounces) > 5:
+        avg_change = np.mean([b['price_change'] for b in overbought_bounces])
+        avg_periods = np.mean([b['periods'] for b in overbought_bounces])
+        insights += f"📉 **Overbought Pattern**: {len(overbought_bounces)} cases, avg {avg_change:.2f}% change in {avg_periods:.1f} periods\n"
+    
+    if len(oversold_bounces) > 5:
+        avg_change = np.mean([b['price_change'] for b in oversold_bounces])
+        avg_periods = np.mean([b['periods'] for b in oversold_bounces])
+        insights += f"📈 **Oversold Pattern**: {len(oversold_bounces)} cases, avg {avg_change:.2f}% change in {avg_periods:.1f} periods"
+    
+    return insights if insights else "Insufficient RSI pattern data"
+
+def create_pattern_features(df, lookback=6):
+    """Create features using last N hours as context"""
+    sequences = []
+    targets = []
+    
+    for i in range(lookback, len(df) - 1):
+        sequence = []
+        for j in range(i - lookback, i):
+            hour_features = [
+                df['close'].iloc[j],
+                df['volume'].iloc[j],
+                df['rsi'].iloc[j] if 'rsi' in df.columns else 50,
+                df['macd'].iloc[j] if 'macd' in df.columns else 0,
+                df['sma_20'].iloc[j] if 'sma_20' in df.columns else df['close'].iloc[j],
+                df['volatility'].iloc[j] if 'volatility' in df.columns else 0
+            ]
+            
+            if j > i - lookback:
+                prev_close = df['close'].iloc[j-1]
+                hour_features.append((df['close'].iloc[j] - prev_close) / (prev_close + 1e-10))
+            else:
+                hour_features.append(0)
+            
+            sequence.extend(hour_features)
+        
+        sequences.append(sequence)
+        targets.append(df['close'].iloc[i])
+    
+    return np.array(sequences), np.array(targets)
+
+def train_improved_model(df, lookback=6, prediction_periods=5):
+    """Pattern-based prediction with context - WITH SURGICAL FIX #1 APPLIED"""
+    try:
+        if len(df) < 60:
+            st.warning("⚠️ Need at least 60 data points")
+            return None, None, 0, None
+        
+        df_clean = df.fillna(method='ffill').fillna(method='bfill').fillna(0)
+        
+        X, y = create_pattern_features(df_clean, lookback=lookback)
+        
+        if len(X) < 30:
+            st.warning("⚠️ Not enough data after cleaning")
+            return None, None, 0, None
+        
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        if np.any(np.isnan(X)) or np.any(np.isnan(y)):
+            st.error("❌ Data contains NaN values after cleaning")
+            return None, None, 0, None
+        
+        scaler = RobustScaler()
+        X_scaled = scaler.fit_transform(X)
+        
+        split_idx = int(len(X_scaled) * 0.8)
+        X_train = X_scaled[:split_idx]
+        y_train = y[:split_idx]
+        X_test = X_scaled[split_idx:]
+        y_test = y[split_idx:]
+        
+        rf_model = RandomForestRegressor(
+            n_estimators=150,
+            max_depth=12,
+            min_samples_split=5,
+            random_state=42,
+            n_jobs=-1
+        )
+        
+        gb_model = GradientBoostingRegressor(
+            n_estimators=150,
+            max_depth=6,
+            learning_rate=0.05,
+            subsample=0.8,
+            random_state=42
+        )
+        
+        rf_model.fit(X_train, y_train)
+        gb_model.fit(X_train, y_train)
+        
+        current_sequence = []
+        lookback_start = len(df_clean) - lookback
+        
+        for i in range(lookback_start, len(df_clean)):
+            hour_features = [
+                df_clean['close'].iloc[i],
+                df_clean['volume'].iloc[i],
+                df_clean['rsi'].iloc[i] if 'rsi' in df_clean.columns else 50,
+                df_clean['macd'].iloc[i] if 'macd' in df_clean.columns else 0,
+                df_clean['sma_20'].iloc[i] if 'sma_20' in df_clean.columns else df_clean['close'].iloc[i],
+                df_clean['volatility'].iloc[i] if 'volatility' in df_clean.columns else 0
+            ]
+            
+            if i > lookback_start:
+                prev_close = df_clean['close'].iloc[i-1]
+                hour_features.append((df_clean['close'].iloc[i] - prev_close) / (prev_close + 1e-10))
+            else:
+                hour_features.append(0)
+            
+            current_sequence.extend(hour_features)
+        
+        current_sequence = np.array(current_sequence).reshape(1, -1)
+        current_sequence = np.nan_to_num(current_sequence, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        current_scaled = scaler.transform(current_sequence)
+        
+        predictions = []
+        for _ in range(prediction_periods):
+            rf_pred = rf_model.predict(current_scaled)[0]
+            gb_pred = gb_model.predict(current_scaled)[0]
+            pred_price = 0.4 * rf_pred + 0.6 * gb_pred
+            predictions.append(float(pred_price))
+        
+        if len(X_test) > 0:
+            rf_test_pred = rf_model.predict(X_test)
+            gb_test_pred = gb_model.predict(X_test)
+            ensemble_pred = 0.4 * rf_test_pred + 0.6 * gb_test_pred
+            
+            mape = mean_absolute_percentage_error(y_test, ensemble_pred) * 100
+            base_confidence = max(0, min(100, 100 - mape))
+        else:
+            base_confidence = 65
+        
+        # ==================== SURGICAL FIX #1 APPLICATION ====================
+        current_price_model = df_clean['close'].iloc[-1]
+        predicted_price = predictions[0]
+        pred_change_pct = ((predicted_price - current_price_model) / current_price_model) * 100
+        
+        barriers = check_support_resistance_barriers(df_clean, predicted_price, current_price_model)
+        
+        timeframe_hours = prediction_periods
+        volatility_context = analyze_timeframe_volatility(df_clean, pred_change_pct, timeframe_hours)
+        
+        adjusted_confidence = adjust_confidence_for_barriers(base_confidence, barriers, volatility_context)
+        # ==================== END SURGICAL FIX #1 ====================
+        
+        rsi_insights = analyze_rsi_bounce_patterns(df_clean)
+        
+        return predictions, ['Pattern-based features'], adjusted_confidence, rsi_insights
+        
+    except Exception as e:
+        st.error(f"Prediction error: {str(e)}")
+        import traceback
+        st.error(f"Details: {traceback.format_exc()}")
+        return None, None, 0, None
+        # ==================== MAIN DATA FETCHING & ANALYSIS ====================
 
 with st.spinner(f"🔄 Fetching {pair_display} data..."):
     df, data_source = fetch_data(symbol, asset_type)
