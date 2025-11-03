@@ -1889,36 +1889,122 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         st.error(f"Details: {traceback.format_exc()}")
         return None, None, 0, None
 
-def calculate_signal_strength(df):
-    """Calculate trading signal strength with EQUAL WEIGHTS + historical behavior - SURGICAL FIX #3"""
-    signals = []
-    
-    weights = get_indicator_weights()
-    
-    # ==================== SURGICAL FIX #2: RSI DURATION (KEEPS DURATION LOGIC) ====================
-    if 'rsi' in df.columns:
-        rsi = df['rsi'].iloc[-1]
-        
-        # Count consecutive periods in overbought/oversold
-        consecutive_count, zone_type = count_rsi_consecutive_periods(df)
-        
-        # Calculate duration-based strength
-        duration_strength = calculate_rsi_duration_strength(consecutive_count, zone_type)
-        
-        # Get duration weight multiplier
-        duration_weight = get_rsi_duration_weight(consecutive_count)
-        
-        # Apply the duration-weighted signal (uses equal base weight ±1, multiplied by duration)
-        if duration_strength != 0:
-            signals.append(int(duration_strength * duration_weight))
-        else:
-            # Fallback to basic RSI with EQUAL weight ±1
-            if rsi > 70:
-                signals.append(-1)  # Changed from -2 to -1
-            elif rsi < 30:
-                signals.append(1)   # Changed from 2 to 1
-            else:
-                signals.append(0)
+def calculate_signal_strength(df, warning_details=None):
+101    signals = []
+102    weights = get_indicator_weights()
+103    
+104    # RSI WITH DURATION (keep your existing RSI logic but add this)
+105    if 'rsi' in df.columns:
+106        rsi = df['rsi'].iloc[-1]
+107        consecutive_count, zone_type = count_rsi_consecutive_periods(df)
+108        duration_strength = calculate_rsi_duration_strength(consecutive_count, zone_type)
+109        duration_weight = get_rsi_duration_weight(consecutive_count)
+110        if duration_strength != 0:
+111            signals.append(int(duration_strength * duration_weight))
+112        else:
+113            if rsi > 70:
+114                signals.append(-1)
+115            elif rsi < 30:
+116                signals.append(1)
+117            else:
+118                signals.append(0)
+119    
+120    # MACD (keep your existing logic)
+121    if 'macd' in df.columns:
+122        macd_diff = df['macd'].iloc[-1] - df['macd_signal'].iloc[-1]
+123        weight = weights.get('MACD', 1.0)
+124        signals.append(int(1 * weight) if macd_diff > 0 else int(-1 * weight))
+125    
+126    # SMA (keep your existing logic)
+127    if 'sma_20' in df.columns and 'sma_50' in df.columns:
+128        price = df['close'].iloc[-1]
+129        sma20 = df['sma_20'].iloc[-1]
+130        sma50 = df['sma_50'].iloc[-1]
+131        weight = weights.get('SMA', 1.0)
+132        if price > sma20 > sma50:
+133            signals.append(int(1 * weight))
+134        elif price > sma20:
+135            signals.append(int(1 * weight))
+136        elif price < sma20 < sma50:
+137            signals.append(int(-1 * weight))
+138        else:
+139            signals.append(int(-1 * weight))
+140    
+141    # MFI (keep your existing logic)
+142    if 'mfi' in df.columns:
+143        mfi = df['mfi'].iloc[-1]
+144        weight = weights.get('MFI', 1.0)
+145        if mfi > 80:
+146            signals.append(int(-1 * weight))
+147        elif mfi < 20:
+148            signals.append(int(1 * weight))
+149        else:
+150            signals.append(0)
+151    
+152    # ADX WITH MOMENTUM WARNING ADJUSTMENT (SURGICAL FIX!)
+153    if 'adx' in df.columns and 'plus_di' in df.columns and 'minus_di' in df.columns:
+154        adx = df['adx'].iloc[-1]
+155        plus_di = df['plus_di'].iloc[-1]
+156        minus_di = df['minus_di'].iloc[-1]
+157        weight = weights.get('ADX', 1.0)
+158        if adx > 25:
+159            if warning_details and warning_details.get('momentum_warning'):
+160                if plus_di > minus_di:
+161                    signals.append(int(-1 * weight))
+162                else:
+163                    signals.append(int(1 * weight))
+164            else:
+165                if plus_di > minus_di:
+166                    signals.append(int(1 * weight))
+167                else:
+168                    signals.append(int(-1 * weight))
+169    
+170    # STOCHASTIC (keep your existing logic)
+171    if 'stoch_k' in df.columns:
+172        stoch_k = df['stoch_k'].iloc[-1]
+173        weight = weights.get('Stochastic', 1.0)
+174        if stoch_k > 80:
+175            signals.append(int(-1 * weight))
+176        elif stoch_k < 20:
+177            signals.append(int(1 * weight))
+178    
+179    # CCI (keep your existing logic)
+180    if 'cci' in df.columns:
+181        cci = df['cci'].iloc[-1]
+182        weight = weights.get('CCI', 1.0)
+183        if cci > 100:
+184            signals.append(int(-1 * weight))
+185        elif cci < -100:
+186            signals.append(int(1 * weight))
+187    
+188    # OBV WITH VOLUME WARNING ADJUSTMENT (SURGICAL FIX!)
+189    if 'obv' in df.columns:
+190        obv_current = df['obv'].iloc[-1]
+191        obv_prev = df['obv'].iloc[-5] if len(df) > 5 else obv_current
+192        weight = weights.get('OBV', 1.0)
+193        if warning_details and warning_details.get('volume_warning'):
+194            if obv_current > obv_prev and obv_current > 0:
+195                signals.append(int(-1 * weight))
+196            else:
+197                signals.append(int(1 * weight))
+198        else:
+199            if obv_current > obv_prev and obv_current > 0:
+200                signals.append(int(1 * weight))
+201            elif obv_current < obv_prev or obv_current < 0:
+202                signals.append(int(-1 * weight))
+203    
+204    raw_signal = sum(signals) if signals else 0
+205    
+206    # PRICE WARNING REDUCTION (SURGICAL FIX!)
+207    if warning_details and warning_details.get('price_warning'):
+208        raw_signal = int(raw_signal * 0.8)
+209    
+210    # NEWS WARNING REDUCTION (SURGICAL FIX!)
+211    if warning_details and warning_details.get('news_warning'):
+212        raw_signal = int(raw_signal * 0.7)
+213    
+214    return raw_signal
+215"""
     # ==================== END SURGICAL FIX #2 ====================
     
     # ==================== SURGICAL FIX #3: ALL INDICATORS NOW USE EQUAL BASE WEIGHT ±1 ====================
