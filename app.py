@@ -170,7 +170,74 @@ def init_database():
     
     conn.commit()
     conn.close()
+# ==================== SURGICAL FIX #4: NEWS/SENTIMENT API ====================
+@st.cache_data(ttl=300)
+def get_fear_greed_index():
+    try:
+        url = "https://api.alternative.me/fng/?limit=1"
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if 'data' in data and len(data['data']) > 0:
+                v = int(data['data'][0]['value'])
+                cls = data['data'][0]['value_classification']
+                return v, cls
+    except Exception as e:
+        print(f"Fear & Greed API error: {e}")
+    return None, None
 
+@st.cache_data(ttl=300)
+def get_crypto_news_sentiment(symbol="BTC"):
+    try:
+        url = "https://cryptopanic.com/api/v1/posts/"
+        params = {"auth_token": "free", "currencies": symbol, "kind": "news", "filter": "rising"}
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if 'results' in data:
+                items = data['results'][:10]
+                pos = sum(1 for it in items if it.get('votes', {}).get('positive', 0) > it.get('votes', {}).get('negative', 0))
+                score = (pos / len(items) * 100) if items else 50
+                headlines = [it.get('title', '') for it in items[:5]]
+                return score, headlines
+    except:
+        pass
+    try:
+        url = "https://min-api.cryptocompare.com/data/v2/news/?lang=EN"
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if 'Data' in data:
+                headlines = [it['title'] for it in data['Data'][:5]]
+                return 50, headlines
+    except:
+        pass
+    return None, []
+
+def analyze_news_sentiment_warning(fear_greed_value, news_sentiment, signal_strength):
+    if fear_greed_value is None:
+        return False, "News data unavailable", "Unknown"
+    is_bullish_technical = signal_strength > 0
+    if fear_greed_value < 25:
+        mood, is_bearish_sentiment = "Extreme Fear", True
+    elif fear_greed_value < 45:
+        mood, is_bearish_sentiment = "Fear", True
+    elif fear_greed_value < 55:
+        mood = "Neutral"; is_bearish_sentiment = is_bullish_sentiment = False
+    elif fear_greed_value < 75:
+        mood, is_bullish_sentiment = "Greed", True
+    else:
+        mood, is_bullish_sentiment = "Extreme Greed", True
+    status = f"{mood} ({fear_greed_value}/100)"
+    warn = False
+    msg = f"Market sentiment: {mood}"
+    if is_bullish_technical and is_bearish_sentiment:
+        warn = True; msg = f"⚠️ DIVERGENCE: Technicals bullish BUT market in {mood}"
+    elif not is_bullish_technical and 'is_bullish_sentiment' in locals() and is_bullish_sentiment:
+        warn = True; msg = f"⚠️ DIVERGENCE: Technicals bearish BUT market in {mood}"
+    if fear_greed_value < 20 or fear_greed_value > 80:
+        warn = True; msg = f"🚨 EXTREME {mood.upper()} ({fear_greed_value})"
+    return warn, msg, status
 def save_prediction(asset_type, pair, timeframe, current_price, predicted_price, 
                    prediction_horizon, confidence, signal_strength, features, indicator_snapshot=None):
     """Save a prediction to database with indicator snapshot"""
