@@ -186,15 +186,12 @@ def init_database():
     if fixed_count > 0:
         print(f"✅ Database fix: Updated {fixed_count} predictions with empty status to 'analysis_only'")
     
-    
-    # DEVELOPER FIX #8: Enable WAL mode for better concurrency
-    # DEVELOPER FIX #8: Enable WAL mode for better concurrency (skip on Streamlit Cloud)
-try:
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-except Exception as e:
-    # Streamlit Cloud doesn't allow PRAGMA commands - that's okay
-    pass
+    # DEVELOPER FIX #8: Enable WAL mode (skip on Streamlit Cloud where it's restricted)
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+    except Exception:
+        pass  # Streamlit Cloud doesn't allow PRAGMA - continue without it
     
     # DEVELOPER FIX #8: Create indexes for faster queries
     cursor.execute("""
@@ -202,17 +199,12 @@ except Exception as e:
         ON predictions(timestamp DESC)
     """)
     cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_predictions_symbol 
-        ON predictions(symbol, timestamp DESC)
-    """)
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_actuals_symbol 
-        ON actuals(symbol, timestamp DESC)
+        CREATE INDEX IF NOT EXISTS idx_predictions_pair 
+        ON predictions(pair, timestamp DESC)
     """)
     
     conn.commit()
     conn.close()
-
 # ==================== SURGICAL FIX #4: NEWS/SENTIMENT API ====================
 
 @st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
