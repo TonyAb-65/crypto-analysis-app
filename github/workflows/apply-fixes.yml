@@ -1,9 +1,9 @@
 name: Apply All 17 Fixes
 
 on:
-
-  workflow_dispatch:  # Manual trigger button
-
+  push:
+    branches:
+      - main
 jobs:
   apply-fixes:
     runs-on: ubuntu-latest
