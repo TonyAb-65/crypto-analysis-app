@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
+from requests.adapters import HTTPAdapter  # DEVELOPER FIX #6
+from urllib3.util.retry import Retry  # DEVELOPER FIX #6
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -16,6 +18,23 @@ from pathlib import Path
 import shutil
 warnings.filterwarnings('ignore')
 
+
+# DEVELOPER FIX #6: HTTP retry logic with exponential backoff
+def get_retry_session(retries=3, backoff_factor=0.3):
+    """Create requests session with retry logic"""
+    session = requests.Session()
+    retry = Retry(
+        total=retries,
+        read=retries,
+        connect=retries,
+        backoff_factor=backoff_factor,
+        status_forcelist=(500, 502, 504)
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
+
 # ==================== DATABASE PERSISTENCE ====================
 HOME = Path.home()
 DB_PATH = HOME / 'trading_ai_learning.db'
@@ -27,14 +46,14 @@ def get_batch_data_binance(symbols_list, interval="1h", limit=100):
     results = {}
     try:
         url = "https://api.binance.com/api/v3/ticker/24hr"
-        response = requests.get(url, timeout=10)
+        response = get_retry_session().get(url, timeout=10)
         tickers = response.json()
         
         for symbol in symbols_list:
             try:
                 kline_url = "https://api.binance.com/api/v3/klines"
                 params = {"symbol": f"{symbol}USDT", "interval": interval, "limit": limit}
-                kline_response = requests.get(kline_url, params=params, timeout=10)
+                kline_response = get_retry_session().get(kline_url, params=params, timeout=10)
                 
                 if kline_response.status_code == 200:
                     data = kline_response.json()
@@ -167,16 +186,35 @@ def init_database():
     if fixed_count > 0:
         print(f"✅ Database fix: Updated {fixed_count} predictions with empty status to 'analysis_only'")
     
+    
+    # DEVELOPER FIX #8: Enable WAL mode for better concurrency
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    
+    # DEVELOPER FIX #8: Create indexes for faster queries
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_predictions_timestamp 
+        ON predictions(timestamp DESC)
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_predictions_symbol 
+        ON predictions(symbol, timestamp DESC)
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_actuals_symbol 
+        ON actuals(symbol, timestamp DESC)
+    """)
+    
     conn.commit()
     conn.close()
 
 # ==================== SURGICAL FIX #4: NEWS/SENTIMENT API ====================
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
 def get_fear_greed_index():
     try:
         url = "https://api.alternative.me/fng/?limit=1"
-        response = requests.get(url, timeout=10)
+        response = get_retry_session().get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
             if 'data' in data and len(data['data']) > 0:
@@ -187,12 +225,12 @@ def get_fear_greed_index():
         print(f"Fear & Greed API error: {e}")
     return None, None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
 def get_crypto_news_sentiment(symbol="BTC"):
     try:
         url = "https://cryptopanic.com/api/v1/posts/"
         params = {"auth_token": "free", "currencies": symbol, "kind": "news", "filter": "rising"}
-        response = requests.get(url, params=params, timeout=10)
+        response = get_retry_session().get(url, params=params, timeout=10)
         if response.status_code == 200:
             data = response.json()
             if 'results' in data:
@@ -206,7 +244,7 @@ def get_crypto_news_sentiment(symbol="BTC"):
         pass
     try:
         url = "https://min-api.cryptocompare.com/data/v2/news/?lang=EN"
-        response = requests.get(url, timeout=10)
+        response = get_retry_session().get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
             if 'Data' in data:
@@ -1514,7 +1552,7 @@ st.sidebar.markdown("### 🔥 Market Movers")
 show_market_movers = st.sidebar.checkbox("📈 Show Top Movers", value=False,
                                         help="Display today's top gainers and losers")
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
 def get_market_movers():
     """Get top movers from popular cryptocurrencies"""
     popular_symbols = ['BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'MATIC', 'DOT', 'AVAX']
@@ -1525,7 +1563,7 @@ def get_market_movers():
         try:
             url = "https://api.binance.com/api/v3/ticker/24hr"
             params = {"symbol": f"{symbol_temp}USDT"}
-            response = requests.get(url, params=params, timeout=5)
+            response = get_retry_session().get(url, params=params, timeout=5)
             
             if response.status_code == 200:
                 data = response.json()
@@ -1552,7 +1590,7 @@ def get_market_movers():
             try:
                 url = "https://www.okx.com/api/v5/market/ticker"
                 params = {"instId": f"{symbol_temp}-USDT"}
-                response = requests.get(url, params=params, timeout=5)
+                response = get_retry_session().get(url, params=params, timeout=5)
                 
                 if response.status_code == 200:
                     data = response.json()
@@ -1599,7 +1637,7 @@ if show_market_movers:
 
 # ==================== DATA FETCHING FUNCTIONS ====================
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
 def get_okx_data(symbol_param, interval="1H", limit=100):
     """Fetch data from OKX API"""
     url = "https://www.okx.com/api/v5/market/candles"
@@ -1607,7 +1645,7 @@ def get_okx_data(symbol_param, interval="1H", limit=100):
     params = {"instId": f"{symbol_param}-USDT", "bar": interval, "limit": str(limit)}
     
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = get_retry_session().get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -1638,14 +1676,14 @@ def get_okx_data(symbol_param, interval="1H", limit=100):
         st.warning(f"⚠️ OKX API failed: {str(e)}")
         return None, None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
 def get_binance_data(symbol_param, interval="1h", limit=100):
     """Fetch data from Binance API"""
     url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": f"{symbol_param}USDT", "interval": interval, "limit": limit}
     
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = get_retry_session().get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -1675,14 +1713,14 @@ def get_binance_data(symbol_param, interval="1h", limit=100):
         st.warning(f"⚠️ Binance API failed: {str(e)}")
         return None, None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
 def get_cryptocompare_data(symbol_param, limit=100):
     """Fetch data from CryptoCompare API"""
     url = "https://min-api.cryptocompare.com/data/v2/histohour"
     params = {"fsym": symbol_param, "tsym": "USD", "limit": limit}
     
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = get_retry_session().get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -1712,7 +1750,7 @@ def get_cryptocompare_data(symbol_param, limit=100):
         st.warning(f"⚠️ CryptoCompare API failed: {str(e)}")
         return None, None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
 def get_coingecko_data(symbol_param, limit=100):
     """Fetch data from CoinGecko API"""
     symbol_map = {
@@ -1733,7 +1771,7 @@ def get_coingecko_data(symbol_param, limit=100):
     params = {"vs_currency": "usd", "days": "7", "interval": "hourly"}
     
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = get_retry_session().get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -1762,7 +1800,7 @@ def get_coingecko_data(symbol_param, limit=100):
         st.warning(f"⚠️ CoinGecko API failed: {str(e)}")
         return None, None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
 def get_forex_metals_data(symbol_param, interval="60min", limit=100):
     """Fetch forex and precious metals data using Twelve Data API"""
     interval_map = {
@@ -1794,7 +1832,7 @@ def get_forex_metals_data(symbol_param, interval="60min", limit=100):
         params["apikey"] = api_key
     
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = get_retry_session().get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -2146,7 +2184,47 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         )
         
         rf_model.fit(X_train, y_train)
+        # DEVELOPER FIX #10: Time-series cross-validation
+        tscv = TimeSeriesSplit(n_splits=5)
+        cv_scores = []
+        for train_idx, val_idx in tscv.split(X_train):
+            X_cv_train, X_cv_val = X_train[train_idx], X_train[val_idx]
+            y_cv_train, y_cv_val = y_train[train_idx], y_train[val_idx]
+            
+            cv_model = RandomForestRegressor(n_estimators=100, random_state=42)
+            cv_model.fit(X_cv_train, y_cv_train)
+            cv_pred = cv_model.predict(X_cv_val)
+            
+            # MAPE on returns for CV
+            returns_actual_cv = np.diff(y_cv_val) / y_cv_val[:-1]
+            returns_pred_cv = np.diff(cv_pred) / cv_pred[:-1]
+            cv_mape = mean_absolute_percentage_error(returns_actual_cv, returns_pred_cv)
+            cv_scores.append(cv_mape)
+        
+        avg_cv_score = np.mean(cv_scores)
+        st.info(f"📊 Cross-validation MAPE: {avg_cv_score:.2%}")
+
         gb_model.fit(X_train, y_train)
+        # DEVELOPER FIX #10: Time-series cross-validation
+        tscv = TimeSeriesSplit(n_splits=5)
+        cv_scores = []
+        for train_idx, val_idx in tscv.split(X_train):
+            X_cv_train, X_cv_val = X_train[train_idx], X_train[val_idx]
+            y_cv_train, y_cv_val = y_train[train_idx], y_train[val_idx]
+            
+            cv_model = RandomForestRegressor(n_estimators=100, random_state=42)
+            cv_model.fit(X_cv_train, y_cv_train)
+            cv_pred = cv_model.predict(X_cv_val)
+            
+            # MAPE on returns for CV
+            returns_actual_cv = np.diff(y_cv_val) / y_cv_val[:-1]
+            returns_pred_cv = np.diff(cv_pred) / cv_pred[:-1]
+            cv_mape = mean_absolute_percentage_error(returns_actual_cv, returns_pred_cv)
+            cv_scores.append(cv_mape)
+        
+        avg_cv_score = np.mean(cv_scores)
+        st.info(f"📊 Cross-validation MAPE: {avg_cv_score:.2%}")
+
         
         current_sequence = []
         lookback_start = len(df_clean) - lookback
