@@ -188,8 +188,13 @@ def init_database():
     
     
     # DEVELOPER FIX #8: Enable WAL mode for better concurrency
+    # DEVELOPER FIX #8: Enable WAL mode for better concurrency (skip on Streamlit Cloud)
+try:
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA synchronous=NORMAL")
+except Exception as e:
+    # Streamlit Cloud doesn't allow PRAGMA commands - that's okay
+    pass
     
     # DEVELOPER FIX #8: Create indexes for faster queries
     cursor.execute("""
