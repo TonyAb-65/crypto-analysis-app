@@ -1754,7 +1754,7 @@ def multi_timeframe_analysis(symbol, asset_type):
             'details': details,
             'note': f"⚠️ Timeframe conflict: 1h={signals.get('1h', 'N/A')}, 4h={signals.get('4h', 'N/A')}, 1d={signals.get('1d', 'N/A')}"
         }
-        # ==================== MULTI-TIMEFRAME ANALYSIS ====================
+# ==================== MULTI-TIMEFRAME ANALYSIS ====================
 
 def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
     """
@@ -1936,7 +1936,7 @@ def multi_timeframe_analysis(symbol, asset_type):
             'note': f"⚠️ Timeframe conflict: 1h={signals.get('1h', 'N/A')}, 4h={signals.get('4h', 'N/A')}, 1d={signals.get('1d', 'N/A')}"
         }
 
-# ==================== END MULTI-TIMEFRAME ANALYSIS ====================
+# ==================== END MULTI-TIMEFRAME ANALYSIS ====================        
 def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None):
 def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None):
     """
