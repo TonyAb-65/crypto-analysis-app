@@ -3520,7 +3520,6 @@ if df is not None and len(df) > 0:
         pass  # If S/R fails, chart still displays
     # ==================== END S/R LINES ====================    
     st.plotly_chart(fig, use_container_width=True)
-    st.plotly_chart(fig, use_container_width=True)
     
     if any([use_obv, use_mfi, use_adx, use_stoch, use_cci]):
         st.markdown("---")
