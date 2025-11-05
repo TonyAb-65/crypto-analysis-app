@@ -1392,7 +1392,7 @@ def get_price_targets_based_on_sr(current_price, sr_zones):
     }
 
 
-def check_at_key_level(current_price, sr_zones, tolerance=0.02):
+def check_at_key_level(current_price, sr_zones, tolerance=0.01):
     """
     Check if current price is AT a key S/R level right now
     Returns: (at_level, level_type, level_info)
