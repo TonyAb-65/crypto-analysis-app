@@ -1715,6 +1715,13 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price):
     # Adjust for risk (C3)
     risk_multiplier = c3['strength'] / 10.0
     final_score *= risk_multiplier
+    # Calculate hold duration
+    if c4['weight'] >= 70:
+        hold_hours = 24  # Critical news - hold 24h
+    elif c4['weight'] >= 40:
+        hold_hours = 8   # Major news - hold 8h
+    else:
+        hold_hours = 9  # Default 9h for intraday trades
     
     # Determine position with SMART TARGETS based on S/R and timeframe
     if final_score > 2:
@@ -1794,14 +1801,6 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price):
         entry = current_price
         target = current_price
         stop_loss = current_price
-    
-    # Calculate hold duration
-    if c4['weight'] >= 70:
-        hold_hours = 24  # Critical news - hold 24h
-    elif c4['weight'] >= 40:
-        hold_hours = 8   # Major news - hold 8h
-    else:
-        hold_hours = 4 + int(confidence / 15)  # 4-10h based on confidence
     
     # Calculate risk/reward
     if position != "NEUTRAL":
