@@ -1255,6 +1255,328 @@ def calculate_support_resistance_levels(df, current_price):
     all_levels.sort(reverse=True)
     
     return all_levels
+    
+# ==================== CONSULTANT MEETING SYSTEM ====================
+
+def consultant_c1_pattern_structure(df, symbol):
+    """
+    C1: Pattern & Structure Analysis
+    Focus: RSI, Support/Resistance, Price Action
+    """
+    if df is None or len(df) < 50:
+        return {"signal": "NEUTRAL", "strength": 5, "reasoning": "Insufficient data"}
+    
+    latest = df.iloc[-1]
+    rsi = latest.get('rsi', 50)
+    close = latest.get('close', 0)
+    
+    # Calculate support/resistance
+    recent_high = df['high'].tail(20).max()
+    recent_low = df['low'].tail(20).min()
+    
+    signal = "NEUTRAL"
+    strength = 5
+    reasoning = []
+    
+    # RSI Analysis
+    if rsi < 30:
+        signal = "BULLISH"
+        strength = 8
+        reasoning.append(f"RSI {rsi:.1f} oversold_bounce_setup")
+    elif rsi > 70:
+        signal = "BEARISH"
+        strength = 8
+        reasoning.append(f"RSI {rsi:.1f} overbought_reversal_risk")
+    elif 40 <= rsi <= 60:
+        reasoning.append(f"RSI {rsi:.1f} neutral_zone")
+    
+    # Support/Resistance
+    if close <= recent_low * 1.02:
+        strength = min(strength + 2, 10)
+        reasoning.append("near_support")
+    elif close >= recent_high * 0.98:
+        strength = min(strength + 2, 10)
+        reasoning.append("near_resistance")
+    
+    return {
+        "signal": signal,
+        "strength": strength,
+        "reasoning": " ".join(reasoning) if reasoning else "neutral"
+    }
+
+
+def consultant_c2_trend_momentum(df, symbol):
+    """
+    C2: Trend & Momentum Analysis
+    Focus: ADX, MACD, SMA
+    """
+    if df is None or len(df) < 50:
+        return {"signal": "NEUTRAL", "strength": 5, "reasoning": "Insufficient data"}
+    
+    latest = df.iloc[-1]
+    adx = latest.get('adx', 20)
+    macd = latest.get('macd', 0)
+    macd_signal = latest.get('macd_signal', 0)
+    sma_20 = latest.get('sma_20', 0)
+    close = latest.get('close', 0)
+    
+    signal = "NEUTRAL"
+    strength = 5
+    reasoning = []
+    
+    # ADX Trend Strength
+    if adx > 40:
+        if close > sma_20:
+            signal = "BULLISH"
+            strength = 8
+            reasoning.append(f"ADX {adx:.1f} strong_uptrend")
+        else:
+            signal = "BEARISH"
+            strength = 8
+            reasoning.append(f"ADX {adx:.1f} strong_downtrend")
+    elif adx < 20:
+        reasoning.append(f"ADX {adx:.1f} weak_trend")
+    
+    # MACD
+    if macd > macd_signal and macd > 0:
+        if signal == "NEUTRAL":
+            signal = "BULLISH"
+        strength = min(strength + 1, 10)
+        reasoning.append("MACD_bullish_cross")
+    elif macd < macd_signal and macd < 0:
+        if signal == "NEUTRAL":
+            signal = "BEARISH"
+        strength = min(strength + 1, 10)
+        reasoning.append("MACD_bearish_cross")
+    
+    return {
+        "signal": signal,
+        "strength": strength,
+        "reasoning": " ".join(reasoning) if reasoning else "neutral"
+    }
+
+
+def consultant_c3_risk_warnings(df, symbol, warnings):
+    """
+    C3: Risk & Reversal Analysis
+    Focus: OBV, Warnings, Volume
+    """
+    if df is None or len(df) < 50:
+        return {"signal": "ACCEPTABLE", "strength": 5, "reasoning": "Insufficient data"}
+    
+    latest = df.iloc[-1]
+    obv = latest.get('obv', 0)
+    volume = latest.get('volume', 0)
+    
+    # Count active warnings
+    warning_count = 0
+    warning_types = []
+    
+    if warnings:
+        if warnings.get('news_warning'):
+            warning_count += 1
+            warning_types.append("news")
+        if warnings.get('price_warning'):
+            warning_count += 1
+            warning_types.append("price")
+        if warnings.get('volume_warning'):
+            warning_count += 1
+            warning_types.append("volume")
+        if warnings.get('momentum_warning'):
+            warning_count += 1
+            warning_types.append("momentum")
+    
+    # Risk assessment
+    if warning_count == 0:
+        signal = "ACCEPTABLE"
+        strength = 8
+        reasoning = "0 warnings"
+    elif warning_count == 1:
+        signal = "CAUTION"
+        strength = 6
+        reasoning = f"1 warning ({warning_types[0]})"
+    elif warning_count == 2:
+        signal = "HIGH_RISK"
+        strength = 3
+        reasoning = f"2 warnings ({','.join(warning_types)})"
+    else:
+        signal = "EXTREME_RISK"
+        strength = 1
+        reasoning = f"{warning_count} warnings - DO_NOT_TRADE"
+    
+    return {
+        "signal": signal,
+        "strength": strength,
+        "reasoning": reasoning
+    }
+
+
+def consultant_c4_news_sentiment(symbol, news_data=None):
+    """
+    C4: News & Sentiment Analysis
+    Focus: Critical and Major news only
+    """
+    if not news_data:
+        return {
+            "signal": "NO_NEWS",
+            "strength": 5,
+            "weight": 5,  # Low weight when no news
+            "reasoning": "No significant news"
+        }
+    
+    # Classify news importance
+    critical_keywords = ['sec lawsuit', 'government ban', 'exchange hack', 'bankruptcy', 'fraud', 'investigation']
+    major_keywords = ['partnership', 'listing', 'institutional', 'adoption', 'regulation approved']
+    
+    has_critical = any(keyword in str(news_data).lower() for keyword in critical_keywords)
+    has_major = any(keyword in str(news_data).lower() for keyword in major_keywords)
+    
+    if has_critical:
+        # Critical news - very high weight
+        sentiment = news_data.get('sentiment', 'neutral')
+        return {
+            "signal": "BULLISH" if sentiment == 'positive' else "BEARISH",
+            "strength": 9,
+            "weight": 70,  # Critical news gets 70% weight
+            "reasoning": "CRITICAL_NEWS_OVERRIDE"
+        }
+    elif has_major:
+        # Major news - moderate weight
+        sentiment = news_data.get('sentiment', 'neutral')
+        return {
+            "signal": "BULLISH" if sentiment == 'positive' else "BEARISH",
+            "strength": 7,
+            "weight": 40,  # Major news gets 40% weight
+            "reasoning": "MAJOR_NEWS_IMPACT"
+        }
+    else:
+        # Regular news - ignored
+        return {
+            "signal": "NO_NEWS",
+            "strength": 5,
+            "weight": 5,  # Regular news basically ignored
+            "reasoning": "Regular news (ignored)"
+        }
+
+
+def consultant_meeting_resolution(c1, c2, c3, c4, current_price):
+    """
+    Unified Consultant Meeting - All 4 consultants discuss and reach consensus
+    
+    Returns: ONE clear recommendation with entry, target, stop loss, hold duration
+    """
+    
+    # If C3 shows extreme risk (3+ warnings), DO NOT TRADE
+    if c3['strength'] <= 2:
+        return {
+            "position": "NEUTRAL",
+            "entry": current_price,
+            "target": current_price,
+            "stop_loss": current_price,
+            "hold_hours": 0,
+            "confidence": 0,
+            "reasoning": f"DO NOT TRADE - {c3['reasoning']}",
+            "risk_reward": 0
+        }
+    
+    # Weight consultants based on C4 news importance
+    news_weight = c4['weight']
+    technical_weight = 100 - news_weight
+    
+    # Calculate technical consensus (C1 + C2)
+    technical_signals = []
+    if c1['signal'] == 'BULLISH':
+        technical_signals.append(c1['strength'])
+    elif c1['signal'] == 'BEARISH':
+        technical_signals.append(-c1['strength'])
+    
+    if c2['signal'] == 'BULLISH':
+        technical_signals.append(c2['strength'])
+    elif c2['signal'] == 'BEARISH':
+        technical_signals.append(-c2['strength'])
+    
+    technical_score = sum(technical_signals) / len(technical_signals) if technical_signals else 0
+    
+    # Calculate news score
+    news_score = 0
+    if c4['signal'] == 'BULLISH':
+        news_score = c4['strength']
+    elif c4['signal'] == 'BEARISH':
+        news_score = -c4['strength']
+    
+    # Weighted final score
+    final_score = (technical_score * technical_weight + news_score * news_weight) / 100
+    
+    # Adjust for risk (C3)
+    risk_multiplier = c3['strength'] / 10.0
+    final_score *= risk_multiplier
+    
+    # Determine position
+    if final_score > 2:
+        position = "LONG"
+        confidence = min(abs(final_score) * 10, 90)
+        
+        # Calculate targets
+        target_pct = 0.05 + (confidence / 1000)  # 5-15% based on confidence
+        stop_pct = 0.02  # 2% stop loss
+        
+        entry = current_price
+        target = entry * (1 + target_pct)
+        stop_loss = entry * (1 - stop_pct)
+        
+    elif final_score < -2:
+        position = "SHORT"
+        confidence = min(abs(final_score) * 10, 90)
+        
+        # Calculate targets
+        target_pct = 0.05 + (confidence / 1000)
+        stop_pct = 0.02
+        
+        entry = current_price
+        target = entry * (1 - target_pct)
+        stop_loss = entry * (1 + stop_pct)
+        
+    else:
+        position = "NEUTRAL"
+        confidence = 0
+        entry = current_price
+        target = current_price
+        stop_loss = current_price
+    
+    # Calculate hold duration
+    if c4['weight'] >= 70:
+        hold_hours = 24  # Critical news - hold 24h
+    elif c4['weight'] >= 40:
+        hold_hours = 8   # Major news - hold 8h
+    else:
+        hold_hours = 4 + int(confidence / 15)  # 4-10h based on confidence
+    
+    # Calculate risk/reward
+    if position != "NEUTRAL":
+        risk = abs(entry - stop_loss)
+        reward = abs(target - entry)
+        risk_reward = reward / risk if risk > 0 else 0
+    else:
+        risk_reward = 0
+    
+    # Build reasoning
+    reasoning_parts = [
+        f"C1: {c1['signal']} {c1['strength']}/10 ({c1['reasoning']})",
+        f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
+        f"C3: {c3['signal']} ({c3['reasoning']})",
+        f"C4: {c4['signal']} (weight: {c4['weight']}%)"
+    ]
+    
+    return {
+        "position": position,
+        "entry": entry,
+        "target": target,
+        "stop_loss": stop_loss,
+        "hold_hours": hold_hours,
+        "confidence": int(confidence),
+        "reasoning": " | ".join(reasoning_parts),
+        "risk_reward": round(risk_reward, 1)
+    }
     # ==================== STREAMLIT PAGE CONFIGURATION ====================
 
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
@@ -2261,7 +2583,21 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
             gb_test_pred = gb_model.predict(X_test)
             ensemble_pred = 0.4 * rf_test_pred + 0.6 * gb_test_pred
             
-            mape = mean_absolute_percentage_error(y_test, ensemble_pred) * 100
+           # Calculate returns instead of raw prices for MAPE
+actual_returns = np.diff(y_test) / y_test[:-1]
+predicted_returns = np.diff(ensemble_pred) / ensemble_pred[:-1]
+
+# Remove any infinite or NaN values
+mask = np.isfinite(actual_returns) & np.isfinite(predicted_returns) & (np.abs(actual_returns) > 1e-6)
+actual_returns_clean = actual_returns[mask]
+predicted_returns_clean = predicted_returns[mask]
+
+# Calculate MAPE on returns (much more stable)
+if len(actual_returns_clean) > 0:
+    mape = np.mean(np.abs((actual_returns_clean - predicted_returns_clean) / (actual_returns_clean + 1e-8))) * 100
+    mape = min(mape, 100)  # Cap at 100%
+else:
+    mape = 50.0  # Default fallback
             base_confidence = max(0, min(100, 100 - mape))
         else:
             base_confidence = 65
@@ -2697,8 +3033,52 @@ if df is not None and len(df) > 0:
     sr_levels = calculate_support_resistance_levels(df, current_price)
     
     key_point = sr_levels[3]
+
+# ==================== RUN CONSULTANT MEETING ====================
+# Call all 4 consultants
+c1 = consultant_c1_pattern_structure(df, symbol)
+c2 = consultant_c2_trend_momentum(df, symbol)
+c3 = consultant_c3_risk_warnings(df, symbol, warning_details)
+c4 = consultant_c4_news_sentiment(symbol, news_data=None)
+
+# Get unified recommendation
+meeting_result = consultant_meeting_resolution(c1, c2, c3, c4, current_price)
+
+# Display consultant meeting result
+st.markdown("---")
+st.markdown("### 🏢 CONSULTANT MEETING RESULT")
+
+if meeting_result['position'] == 'LONG':
+    st.success(f"📈 LONG POSITION RECOMMENDED")
+elif meeting_result['position'] == 'SHORT':
+    st.error(f"📉 SHORT POSITION RECOMMENDED")
+else:
+    st.warning(f"⚪ NEUTRAL - DO NOT ENTER")
+
+if meeting_result['position'] != 'NEUTRAL':
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Entry Price", f"${meeting_result['entry']:.2f}")
+    with col2:
+        change_pct = ((meeting_result['target']/meeting_result['entry']-1)*100)
+        st.metric("Target Price", f"${meeting_result['target']:.2f}", 
+                 f"{change_pct:+.1f}%")
+    with col3:
+        stop_change = ((meeting_result['stop_loss']/meeting_result['entry']-1)*100)
+        st.metric("Stop Loss", f"${meeting_result['stop_loss']:.2f}",
+                 f"{stop_change:.1f}%")
     
-    if final_signal_strength >= 3:
+    st.info(f"⏰ Hold Duration: {meeting_result['hold_hours']} hours")
+    st.info(f"🎯 Confidence: {meeting_result['confidence']}%")
+    st.info(f"💰 Risk/Reward Ratio: 1:{meeting_result['risk_reward']}")
+
+st.markdown("**Detailed Consultant Analysis:**")
+st.text(meeting_result['reasoning'])
+
+st.markdown("---")
+# ==================== END CONSULTANT MEETING ====================
+
+if final_signal_strength >= 3:
         st.markdown("---")
         st.markdown("## 📊 Trading Central Signal Format")
         
