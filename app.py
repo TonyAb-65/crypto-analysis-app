@@ -1754,6 +1754,192 @@ def multi_timeframe_analysis(symbol, asset_type):
             'details': details,
             'note': f"⚠️ Timeframe conflict: 1h={signals.get('1h', 'N/A')}, 4h={signals.get('4h', 'N/A')}, 1d={signals.get('1d', 'N/A')}"
         }
+        # ==================== MULTI-TIMEFRAME ANALYSIS ====================
+
+def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
+    """
+    Fetch data for a specific timeframe (used by multi-timeframe analysis)
+    timeframe_hours: 1, 4, or 24 (for 1h, 4h, 1d)
+    """
+    
+    # Map hours to API intervals
+    if timeframe_hours == 1:
+        binance_interval = "1h"
+        okx_interval = "1H"
+    elif timeframe_hours == 4:
+        binance_interval = "4h"
+        okx_interval = "4H"
+    elif timeframe_hours == 24:
+        binance_interval = "1d"
+        okx_interval = "1D"
+    else:
+        binance_interval = "1h"
+        okx_interval = "1H"
+    
+    limit = 100
+    
+    # Try to fetch data (same logic as main fetch)
+    if asset_type_param == "💰 Cryptocurrency" or asset_type_param == "🔍 Custom Search":
+        # Try Binance
+        df, source = get_binance_data(symbol_param, binance_interval, limit)
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        # Try OKX
+        df, source = get_okx_data(symbol_param, okx_interval, limit)
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        # Try CryptoCompare
+        df, source = get_cryptocompare_data(symbol_param, limit)
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        return None, None
+    
+    elif asset_type_param == "💱 Forex" or asset_type_param == "🏆 Precious Metals":
+        df, source = get_forex_metals_data(symbol_param, binance_interval, limit)
+        return df, source
+    
+    return None, None
+
+
+def analyze_single_timeframe(df, symbol):
+    """
+    Analyze a single timeframe and return BULLISH/BEARISH/NEUTRAL
+    Simplified consultant meeting for multi-timeframe analysis
+    """
+    
+    if df is None or len(df) < 50:
+        return "NEUTRAL", 0, "Insufficient data"
+    
+    # Calculate indicators if not present
+    if 'rsi' not in df.columns:
+        df = calculate_technical_indicators(df)
+    
+    # Run consultants (simplified)
+    c1 = consultant_c1_pattern_structure(df, symbol)
+    c2 = consultant_c2_trend_momentum(df, symbol)
+    
+    # Simple vote
+    bullish_votes = 0
+    bearish_votes = 0
+    
+    if c1['signal'] == 'BULLISH':
+        bullish_votes += c1['strength']
+    elif c1['signal'] == 'BEARISH':
+        bearish_votes += c1['strength']
+    
+    if c2['signal'] == 'BULLISH':
+        bullish_votes += c2['strength']
+    elif c2['signal'] == 'BEARISH':
+        bearish_votes += c2['strength']
+    
+    # Determine direction
+    if bullish_votes > bearish_votes + 3:
+        return "BULLISH", bullish_votes, f"C1: {c1['signal']}, C2: {c2['signal']}"
+    elif bearish_votes > bullish_votes + 3:
+        return "BEARISH", bearish_votes, f"C1: {c1['signal']}, C2: {c2['signal']}"
+    else:
+        return "NEUTRAL", 0, f"C1: {c1['signal']}, C2: {c2['signal']}"
+
+
+def multi_timeframe_analysis(symbol, asset_type):
+    """
+    Check 3 timeframes (1h, 4h, 1d) for signal alignment
+    Returns confidence boost and alignment details
+    """
+    
+    timeframes = {
+        '1h': 1,
+        '4h': 4,
+        '1d': 24
+    }
+    
+    signals = {}
+    strengths = {}
+    details = {}
+    
+    # Analyze each timeframe
+    for tf_name, tf_hours in timeframes.items():
+        try:
+            df, source = fetch_data_for_timeframe(symbol, asset_type, tf_hours)
+            
+            if df is not None and len(df) > 0:
+                signal, strength, detail = analyze_single_timeframe(df, symbol)
+                signals[tf_name] = signal
+                strengths[tf_name] = strength
+                details[tf_name] = detail
+            else:
+                signals[tf_name] = "UNAVAILABLE"
+                strengths[tf_name] = 0
+                details[tf_name] = "No data"
+        except Exception as e:
+            signals[tf_name] = "ERROR"
+            strengths[tf_name] = 0
+            details[tf_name] = str(e)
+    
+    # Check alignment
+    available_signals = [s for s in signals.values() if s not in ['UNAVAILABLE', 'ERROR']]
+    
+    if len(available_signals) == 0:
+        return {
+            'aligned': False,
+            'direction': 'UNKNOWN',
+            'confidence_multiplier': 1.0,
+            'signals': signals,
+            'details': details,
+            'note': "⚠️ Multi-timeframe analysis unavailable"
+        }
+    
+    # Perfect alignment (all 3 agree)
+    if len(available_signals) >= 3 and len(set(available_signals)) == 1 and available_signals[0] != 'NEUTRAL':
+        return {
+            'aligned': True,
+            'direction': available_signals[0],
+            'confidence_multiplier': 1.5,
+            'signals': signals,
+            'details': details,
+            'note': f"🔥 ALL TIMEFRAMES {available_signals[0]} - VERY STRONG SIGNAL!"
+        }
+    
+    # Two timeframes agree (1h + 4h is most important)
+    elif signals.get('1h') == signals.get('4h') and signals.get('1h') != 'NEUTRAL':
+        return {
+            'aligned': True,
+            'direction': signals['1h'],
+            'confidence_multiplier': 1.3,
+            'signals': signals,
+            'details': details,
+            'note': f"✅ 1h & 4h both {signals['1h']} - Strong signal"
+        }
+    
+    # 4h + 1d agree (longer-term alignment)
+    elif signals.get('4h') == signals.get('1d') and signals.get('4h') != 'NEUTRAL':
+        return {
+            'aligned': True,
+            'direction': signals['4h'],
+            'confidence_multiplier': 1.2,
+            'signals': signals,
+            'details': details,
+            'note': f"✅ 4h & 1d both {signals['4h']} - Trend aligned"
+        }
+    
+    # Timeframe conflict
+    else:
+        return {
+            'aligned': False,
+            'direction': 'CONFLICT',
+            'confidence_multiplier': 0.7,
+            'signals': signals,
+            'details': details,
+            'note': f"⚠️ Timeframe conflict: 1h={signals.get('1h', 'N/A')}, 4h={signals.get('4h', 'N/A')}, 1d={signals.get('1d', 'N/A')}"
+        }
+
+# ==================== END MULTI-TIMEFRAME ANALYSIS ====================
+
+
+def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None):
 def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None):
     """
     Unified Consultant Meeting - All 4 consultants discuss and reach consensus
