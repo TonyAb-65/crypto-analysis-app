@@ -10,6 +10,7 @@ from plotly.subplots import make_subplots
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.preprocessing import RobustScaler
 from sklearn.metrics import mean_absolute_percentage_error
+from sklearn.model_selection import train_test_split, TimeSeriesSplit  # DEVELOPER FIX #10
 import warnings
 import time
 import sqlite3
@@ -1387,8 +1388,8 @@ else:
     symbol = custom_symbol
 
 TIMEFRAMES = {
+    TIMEFRAMES = {
     "5 Minutes": {"limit": 100, "binance": "5m", "okx": "5m"},
-    "10 Minutes": {"limit": 100, "binance": "10m", "okx": "10m"},
     "15 Minutes": {"limit": 100, "binance": "15m", "okx": "15m"},
     "30 Minutes": {"limit": 100, "binance": "30m", "okx": "30m"},
     "1 Hour": {"limit": 100, "binance": "1h", "okx": "1H"},
