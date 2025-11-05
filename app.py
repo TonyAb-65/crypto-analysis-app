@@ -3082,7 +3082,6 @@ st.markdown("---")
 if final_signal_strength >= 3:
     st.markdown("---")  # ← 4 spaces (CORRECT)
     st.markdown("## 📊 Trading Central Signal Format")  # ← 4 spaces (CORRECT)
-        
         st.markdown("### 🎯 Key Point")
         st.info(f"**${key_point:,.2f}**")
         
