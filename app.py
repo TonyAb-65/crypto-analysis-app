@@ -1396,8 +1396,6 @@ TIMEFRAMES = {
     "1 Day": {"limit": 100, "binance": "1d", "okx": "1D"}
 }
 
----
-
 timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=4)
 timeframe_config = TIMEFRAMES[timeframe_name]
 
