@@ -1257,7 +1257,6 @@ def calculate_support_resistance_levels(df, current_price):
     return all_levels
 
 # ==================== PROFESSIONAL S/R DETECTION ====================
-
 def find_support_resistance_zones(df, lookback=100):
     """
     Find S/R levels where price reversed multiple times
@@ -1345,7 +1344,9 @@ def find_support_resistance_zones(df, lookback=100):
         'resistance': resistance_strength,
         'support': support_strength
     }
-    def get_price_targets_based_on_sr(current_price, sr_zones):
+
+
+def get_price_targets_based_on_sr(current_price, sr_zones):
     """
     Trader logic: If price breaks level, next target is the next level
     Returns nearest S/R levels and price targets
@@ -1389,7 +1390,9 @@ def find_support_resistance_zones(df, lookback=100):
         'second_resistance': second_resistance,
         'second_support': second_support
     }
-    def check_at_key_level(current_price, sr_zones, tolerance=0.02):
+
+
+def check_at_key_level(current_price, sr_zones, tolerance=0.02):
     """
     Check if current price is AT a key S/R level right now
     Returns: (at_level, level_type, level_info)
