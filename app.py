@@ -2162,9 +2162,6 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     
     # Add multi-timeframe to reasoning
     if mtf_result:
-        reasoning_parts.append(f"MTF: {mtf_result['note']}")    
-    # Add multi-timeframe to reasoning
-    if mtf_result:
         reasoning_parts.append(f"MTF: {mtf_result['note']}")
     
     return {
@@ -3718,9 +3715,7 @@ if df is not None and len(df) > 0:
                 st.success(mtf_result['note'])
             else:
                 st.warning(mtf_result['note'])
-    # Display Multi-Timeframe Analysis
-    if mtf_result:
-        with st.expander("🔍 Multi-Timeframe Analysis", expanded=True):
+    
             col_mtf1, col_mtf2, col_mtf3 = st.columns(3)
             
             with col_mtf1:
