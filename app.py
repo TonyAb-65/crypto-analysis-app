@@ -1938,7 +1938,6 @@ def multi_timeframe_analysis(symbol, asset_type):
 
 # ==================== END MULTI-TIMEFRAME ANALYSIS ====================        
 def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None):
-def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None):
     """
     Unified Consultant Meeting - All 4 consultants discuss and reach consensus
     
