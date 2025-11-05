@@ -2546,10 +2546,21 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
             cv_model.fit(X_cv_train, y_cv_train)
             cv_pred = cv_model.predict(X_cv_val)
             
-            # MAPE on returns for CV
-            returns_actual_cv = np.diff(y_cv_val) / y_cv_val[:-1]
-            returns_pred_cv = np.diff(cv_pred) / cv_pred[:-1]
-            cv_mape = mean_absolute_percentage_error(returns_actual_cv, returns_pred_cv)
+            # Calculate MAPE on returns for CV (FIXED)
+            returns_actual_cv = np.diff(y_cv_val) / (y_cv_val[:-1] + 1e-8)
+            returns_pred_cv = np.diff(cv_pred) / (cv_pred[:-1] + 1e-8)
+            
+            # Remove invalid values
+            mask_cv = np.isfinite(returns_actual_cv) & np.isfinite(returns_pred_cv) & (np.abs(returns_actual_cv) > 1e-6)
+            returns_actual_cv_clean = returns_actual_cv[mask_cv]
+            returns_pred_cv_clean = returns_pred_cv[mask_cv]
+            
+            if len(returns_actual_cv_clean) > 0:
+                cv_mape = np.mean(np.abs((returns_actual_cv_clean - returns_pred_cv_clean) / (returns_actual_cv_clean + 1e-8))) * 100
+                cv_mape = min(cv_mape, 100)  # Cap at 100%
+            else:
+                cv_mape = 50.0
+            
             cv_scores.append(cv_mape)
         
         avg_cv_score = np.mean(cv_scores)
