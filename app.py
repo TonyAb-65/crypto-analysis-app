@@ -1663,8 +1663,98 @@ def consultant_c4_news_sentiment(symbol, news_data=None):
             "reasoning": "Regular news (ignored)"
         }
 
-
-def consultant_meeting_resolution(c1, c2, c3, c4, current_price):
+def multi_timeframe_analysis(symbol, asset_type):
+    """
+    Check 3 timeframes (1h, 4h, 1d) for signal alignment
+    Returns confidence boost and alignment details
+    """
+    
+    timeframes = {
+        '1h': 1,
+        '4h': 4,
+        '1d': 24
+    }
+    
+    signals = {}
+    strengths = {}
+    details = {}
+    
+    # Analyze each timeframe
+    for tf_name, tf_hours in timeframes.items():
+        try:
+            df, source = fetch_data_for_timeframe(symbol, asset_type, tf_hours)
+            
+            if df is not None and len(df) > 0:
+                signal, strength, detail = analyze_single_timeframe(df, symbol)
+                signals[tf_name] = signal
+                strengths[tf_name] = strength
+                details[tf_name] = detail
+            else:
+                signals[tf_name] = "UNAVAILABLE"
+                strengths[tf_name] = 0
+                details[tf_name] = "No data"
+        except Exception as e:
+            signals[tf_name] = "ERROR"
+            strengths[tf_name] = 0
+            details[tf_name] = str(e)
+    
+    # Check alignment
+    available_signals = [s for s in signals.values() if s not in ['UNAVAILABLE', 'ERROR']]
+    
+    if len(available_signals) == 0:
+        return {
+            'aligned': False,
+            'direction': 'UNKNOWN',
+            'confidence_multiplier': 1.0,
+            'signals': signals,
+            'details': details,
+            'note': "⚠️ Multi-timeframe analysis unavailable"
+        }
+    
+    # Perfect alignment (all 3 agree)
+    if len(available_signals) >= 3 and len(set(available_signals)) == 1 and available_signals[0] != 'NEUTRAL':
+        return {
+            'aligned': True,
+            'direction': available_signals[0],
+            'confidence_multiplier': 1.5,
+            'signals': signals,
+            'details': details,
+            'note': f"🔥 ALL TIMEFRAMES {available_signals[0]} - VERY STRONG SIGNAL!"
+        }
+    
+    # Two timeframes agree (1h + 4h is most important)
+    elif signals.get('1h') == signals.get('4h') and signals.get('1h') != 'NEUTRAL':
+        return {
+            'aligned': True,
+            'direction': signals['1h'],
+            'confidence_multiplier': 1.3,
+            'signals': signals,
+            'details': details,
+            'note': f"✅ 1h & 4h both {signals['1h']} - Strong signal"
+        }
+    
+    # 4h + 1d agree (longer-term alignment)
+    elif signals.get('4h') == signals.get('1d') and signals.get('4h') != 'NEUTRAL':
+        return {
+            'aligned': True,
+            'direction': signals['4h'],
+            'confidence_multiplier': 1.2,
+            'signals': signals,
+            'details': details,
+            'note': f"✅ 4h & 1d both {signals['4h']} - Trend aligned"
+        }
+    
+    # Timeframe conflict
+    else:
+        return {
+            'aligned': False,
+            'direction': 'CONFLICT',
+            'confidence_multiplier': 0.7,
+            'signals': signals,
+            'details': details,
+            'note': f"⚠️ Timeframe conflict: 1h={signals.get('1h', 'N/A')}, 4h={signals.get('4h', 'N/A')}, 1d={signals.get('1d', 'N/A')}"
+        }
+def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None):
     """
     Unified Consultant Meeting - All 4 consultants discuss and reach consensus
     
@@ -1743,6 +1833,25 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price):
     if final_score > 2:
         position = "LONG"
         confidence = min(abs(final_score) * 10, 90)
+        
+        # Apply multi-timeframe multiplier
+        if mtf_result and mtf_result['aligned']:
+            if mtf_result['direction'] == 'BULLISH':
+                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
+            elif mtf_result['direction'] == 'BEARISH':
+                # Timeframes disagree with position - reduce confidence
+                confidence = confidence * 0.6
+        
+        entry = current_price
+        
+        # Apply multi-timeframe multiplier
+        if mtf_result and mtf_result['aligned']:
+            if mtf_result['direction'] == 'BULLISH':
+                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
+            elif mtf_result['direction'] == 'BEARISH':
+                # Timeframes disagree with position - reduce confidence
+                confidence = confidence * 0.6
+        
         entry = current_price
         
         # Calculate timeframe-adjusted max move
@@ -1782,6 +1891,25 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price):
     elif final_score < -2:
         position = "SHORT"
         confidence = min(abs(final_score) * 10, 90)
+        
+        # Apply multi-timeframe multiplier
+        if mtf_result and mtf_result['aligned']:
+            if mtf_result['direction'] == 'BEARISH':
+                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
+            elif mtf_result['direction'] == 'BULLISH':
+                # Timeframes disagree with position - reduce confidence
+                confidence = confidence * 0.6
+        
+        entry = current_price
+        
+        # Apply multi-timeframe multiplier
+        if mtf_result and mtf_result['aligned']:
+            if mtf_result['direction'] == 'BEARISH':
+                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
+            elif mtf_result['direction'] == 'BULLISH':
+                # Timeframes disagree with position - reduce confidence
+                confidence = confidence * 0.6
+        
         entry = current_price
         
         # Calculate timeframe-adjusted max move
@@ -1840,7 +1968,20 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price):
         f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
         f"C3: {c3['signal']} ({c3['reasoning']})",
         f"C4: {c4['signal']} (weight: {c4['weight']}%)"
+    ]# Build reasoning
+    reasoning_parts = [
+        f"C1: {c1['signal']} {c1['strength']}/10 ({c1['reasoning']})",
+        f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
+        f"C3: {c3['signal']} ({c3['reasoning']})",
+        f"C4: {c4['signal']} (weight: {c4['weight']}%)"
     ]
+    
+    # Add multi-timeframe to reasoning
+    if mtf_result:
+        reasoning_parts.append(f"MTF: {mtf_result['note']}")    
+    # Add multi-timeframe to reasoning
+    if mtf_result:
+        reasoning_parts.append(f"MTF: {mtf_result['note']}")
     
     return {
         "position": position,
@@ -3330,13 +3471,17 @@ if df is not None and len(df) > 0:
     sr_levels = calculate_support_resistance_levels(df, current_price)
     key_point = sr_levels[3]
     
-    # ==================== RUN CONSULTANT MEETING ====================
+   # ==================== RUN CONSULTANT MEETING ====================
     c1 = consultant_c1_pattern_structure(df, symbol)
     c2 = consultant_c2_trend_momentum(df, symbol)
     c3 = consultant_c3_risk_warnings(df, symbol, warning_details)
     c4 = consultant_c4_news_sentiment(symbol, news_data=None)
     
-    meeting_result = consultant_meeting_resolution(c1, c2, c3, c4, current_price)
+    # NEW: Multi-Timeframe Analysis
+    st.info("🔄 Analyzing multiple timeframes for confirmation...")
+    mtf_result = multi_timeframe_analysis(symbol, asset_type)
+    
+    meeting_result = consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result)
     
     st.markdown("---")
     st.markdown("### 🏢 CONSULTANT MEETING RESULT")
@@ -3362,7 +3507,67 @@ if df is not None and len(df) > 0:
         st.info(f"⏰ Hold Duration: {meeting_result['hold_hours']} hours")
         st.info(f"🎯 Confidence: {meeting_result['confidence']}%")
         st.info(f"💰 Risk/Reward Ratio: 1:{meeting_result['risk_reward']}")
+    # Display Multi-Timeframe Analysis
+    if mtf_result:
+        with st.expander("🔍 Multi-Timeframe Analysis", expanded=True):
+            col_mtf1, col_mtf2, col_mtf3 = st.columns(3)
+            
+            with col_mtf1:
+                signal_1h = mtf_result['signals'].get('1h', 'N/A')
+                emoji_1h = "🟢" if signal_1h == 'BULLISH' else "🔴" if signal_1h == 'BEARISH' else "⚪"
+                st.metric("1-Hour", f"{emoji_1h} {signal_1h}")
+                st.caption(mtf_result['details'].get('1h', ''))
+            
+            with col_mtf2:
+                signal_4h = mtf_result['signals'].get('4h', 'N/A')
+                emoji_4h = "🟢" if signal_4h == 'BULLISH' else "🔴" if signal_4h == 'BEARISH' else "⚪"
+                st.metric("4-Hour", f"{emoji_4h} {signal_4h}")
+                st.caption(mtf_result['details'].get('4h', ''))
+            
+            with col_mtf3:
+                signal_1d = mtf_result['signals'].get('1d', 'N/A')
+                emoji_1d = "🟢" if signal_1d == 'BULLISH' else "🔴" if signal_1d == 'BEARISH' else "⚪"
+                st.metric("1-Day", f"{emoji_1d} {signal_1d}")
+                st.caption(mtf_result['details'].get('1d', ''))
+            
+            if mtf_result['aligned']:
+                st.success(mtf_result['note'])
+            else:
+                st.warning(mtf_result['note'])
+    # Display Multi-Timeframe Analysis
+    if mtf_result:
+        with st.expander("🔍 Multi-Timeframe Analysis", expanded=True):
+            col_mtf1, col_mtf2, col_mtf3 = st.columns(3)
+            
+            with col_mtf1:
+                signal_1h = mtf_result['signals'].get('1h', 'N/A')
+                emoji_1h = "🟢" if signal_1h == 'BULLISH' else "🔴" if signal_1h == 'BEARISH' else "⚪"
+                st.metric("1-Hour", f"{emoji_1h} {signal_1h}")
+                st.caption(mtf_result['details'].get('1h', ''))
+            
+            with col_mtf2:
+                signal_4h = mtf_result['signals'].get('4h', 'N/A')
+                emoji_4h = "🟢" if signal_4h == 'BULLISH' else "🔴" if signal_4h == 'BEARISH' else "⚪"
+                st.metric("4-Hour", f"{emoji_4h} {signal_4h}")
+                st.caption(mtf_result['details'].get('4h', ''))
+            
+            with col_mtf3:
+                signal_1d = mtf_result['signals'].get('1d', 'N/A')
+                emoji_1d = "🟢" if signal_1d == 'BULLISH' else "🔴" if signal_1d == 'BEARISH' else "⚪"
+                st.metric("1-Day", f"{emoji_1d} {signal_1d}")
+                st.caption(mtf_result['details'].get('1d', ''))
+            
+            if mtf_result['aligned']:
+                st.success(mtf_result['note'])
+            else:
+                st.warning(mtf_result['note'])
     
+    st.markdown("**Detailed Consultant Analysis:**")
+    st.text(meeting_result['reasoning'])
+    st.markdown("---")
+    st.markdown("**Detailed Consultant Analysis:**")
+    st.text(meeting_result['reasoning'])
+    st.markdown("---")
     st.markdown("**Detailed Consultant Analysis:**")
     st.text(meeting_result['reasoning'])
     st.markdown("---")
