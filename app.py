@@ -1255,55 +1255,257 @@ def calculate_support_resistance_levels(df, current_price):
     all_levels.sort(reverse=True)
     
     return all_levels
+
+# ==================== PROFESSIONAL S/R DETECTION ====================
+
+def find_support_resistance_zones(df, lookback=100):
+    """
+    Find S/R levels where price reversed multiple times
+    Similar to how traders draw horizontal lines on charts
+    """
     
+    if len(df) < lookback:
+        lookback = len(df)
+    
+    highs = df['high'].tail(lookback)
+    lows = df['low'].tail(lookback)
+    
+    # Find local peaks (resistance candidates)
+    resistance_zones = []
+    for i in range(5, len(highs) - 5):
+        if highs.iloc[i] == highs.iloc[i-5:i+5].max():
+            resistance_zones.append(highs.iloc[i])
+    
+    # Find local bottoms (support candidates)
+    support_zones = []
+    for i in range(5, len(lows) - 5):
+        if lows.iloc[i] == lows.iloc[i-5:i+5].min():
+            support_zones.append(lows.iloc[i])
+    
+    # Group nearby levels (within 2% = same zone)
+    def cluster_levels(levels, tolerance=0.02):
+        if not levels:
+            return []
+        
+        levels = sorted(levels)
+        clusters = []
+        current_cluster = [levels[0]]
+        
+        for level in levels[1:]:
+            if level <= current_cluster[-1] * (1 + tolerance):
+                current_cluster.append(level)
+            else:
+                clusters.append(np.mean(current_cluster))
+                current_cluster = [level]
+        
+        clusters.append(np.mean(current_cluster))
+        return clusters
+    
+    # Get strongest S/R levels (price tested multiple times)
+    strong_resistance = cluster_levels(resistance_zones)
+    strong_support = cluster_levels(support_zones)
+    
+    # Count how many times each level was tested
+    def count_touches(price_level, df, tolerance=0.02):
+        touches = 0
+        for i in range(len(df)):
+            high = df['high'].iloc[i]
+            low = df['low'].iloc[i]
+            if (abs(high - price_level) / price_level < tolerance or 
+                abs(low - price_level) / price_level < tolerance):
+                touches += 1
+        return touches
+    
+    # Rank S/R by strength (more touches = stronger)
+    resistance_strength = []
+    for level in strong_resistance:
+        touches = count_touches(level, df.tail(lookback))
+        if touches >= 2:  # Only keep levels tested at least twice
+            resistance_strength.append({
+                'price': level,
+                'touches': touches,
+                'strength': 'STRONG' if touches >= 3 else 'MEDIUM'
+            })
+    
+    support_strength = []
+    for level in strong_support:
+        touches = count_touches(level, df.tail(lookback))
+        if touches >= 2:
+            support_strength.append({
+                'price': level,
+                'touches': touches,
+                'strength': 'STRONG' if touches >= 3 else 'MEDIUM'
+            })
+    
+    # Sort by price
+    resistance_strength.sort(key=lambda x: x['price'], reverse=True)
+    support_strength.sort(key=lambda x: x['price'], reverse=True)
+    
+    return {
+        'resistance': resistance_strength,
+        'support': support_strength
+    }
+    def get_price_targets_based_on_sr(current_price, sr_zones):
+    """
+    Trader logic: If price breaks level, next target is the next level
+    Returns nearest S/R levels and price targets
+    """
+    
+    resistance = sr_zones['resistance']
+    support = sr_zones['support']
+    
+    # Find nearest resistance above current price
+    next_resistance = None
+    for r in resistance:
+        if r['price'] > current_price * 1.005:  # At least 0.5% above
+            next_resistance = r
+            break
+    
+    # Find nearest support below current price
+    next_support = None
+    for s in support:
+        if s['price'] < current_price * 0.995:  # At least 0.5% below
+            next_support = s
+            break
+    
+    # Find second level (target after breaking first level)
+    second_resistance = None
+    if next_resistance:
+        for r in resistance:
+            if r['price'] > next_resistance['price'] * 1.005:
+                second_resistance = r
+                break
+    
+    second_support = None
+    if next_support:
+        for s in support:
+            if s['price'] < next_support['price'] * 0.995:
+                second_support = s
+                break
+    
+    return {
+        'next_resistance': next_resistance,
+        'next_support': next_support,
+        'second_resistance': second_resistance,
+        'second_support': second_support
+    }
+    def check_at_key_level(current_price, sr_zones, tolerance=0.02):
+    """
+    Check if current price is AT a key S/R level right now
+    Returns: (at_level, level_type, level_info)
+    """
+    
+    # Check resistance levels
+    for r in sr_zones['resistance']:
+        if abs(current_price - r['price']) / current_price < tolerance:
+            return True, 'RESISTANCE', r
+    
+    # Check support levels
+    for s in sr_zones['support']:
+        if abs(current_price - s['price']) / current_price < tolerance:
+            return True, 'SUPPORT', s
+    
+    return False, None, None
 # ==================== CONSULTANT MEETING SYSTEM ====================
 
 def consultant_c1_pattern_structure(df, symbol):
     """
-    C1: Pattern & Structure Analysis
-    Focus: RSI, Support/Resistance, Price Action
+    C1: Pattern & Structure Analysis (ENHANCED WITH PROFESSIONAL S/R)
+    Focus: RSI, Support/Resistance Zones, Price Action
     """
     if df is None or len(df) < 50:
-        return {"signal": "NEUTRAL", "strength": 5, "reasoning": "Insufficient data"}
+        return {"signal": "NEUTRAL", "strength": 5, "reasoning": "Insufficient data", "targets": None}
     
     latest = df.iloc[-1]
     rsi = latest.get('rsi', 50)
     close = latest.get('close', 0)
     
-    # Calculate support/resistance
-    recent_high = df['high'].tail(20).max()
-    recent_low = df['low'].tail(20).min()
-    
     signal = "NEUTRAL"
     strength = 5
     reasoning = []
     
-    # RSI Analysis
-    if rsi < 30:
-        signal = "BULLISH"
-        strength = 8
-        reasoning.append(f"RSI {rsi:.1f} oversold_bounce_setup")
-    elif rsi > 70:
-        signal = "BEARISH"
-        strength = 8
-        reasoning.append(f"RSI {rsi:.1f} overbought_reversal_risk")
-    elif 40 <= rsi <= 60:
-        reasoning.append(f"RSI {rsi:.1f} neutral_zone")
+    # Professional S/R Analysis
+    sr_zones = find_support_resistance_zones(df, lookback=100)
+    targets = get_price_targets_based_on_sr(close, sr_zones)
+    at_level, level_type, level_info = check_at_key_level(close, sr_zones)
     
-    # Support/Resistance
-    if close <= recent_low * 1.02:
-        strength = min(strength + 2, 10)
-        reasoning.append("near_support")
-    elif close >= recent_high * 0.98:
-        strength = min(strength + 2, 10)
-        reasoning.append("near_resistance")
+    # Check if AT a key level
+    if at_level:
+        if level_type == 'RESISTANCE':
+            if level_info['strength'] == 'STRONG':
+                signal = "BEARISH"
+                strength = 9
+                reasoning.append(f"At STRONG resistance ${level_info['price']:,.0f} ({level_info['touches']} rejections)")
+            else:
+                signal = "BEARISH"
+                strength = 7
+                reasoning.append(f"At resistance ${level_info['price']:,.0f} ({level_info['touches']} tests)")
+        
+        elif level_type == 'SUPPORT':
+            if level_info['strength'] == 'STRONG':
+                signal = "BULLISH"
+                strength = 9
+                reasoning.append(f"At STRONG support ${level_info['price']:,.0f} ({level_info['touches']} bounces)")
+            else:
+                signal = "BULLISH"
+                strength = 7
+                reasoning.append(f"At support ${level_info['price']:,.0f} ({level_info['touches']} tests)")
+    
+    # If not at key level, check proximity
+    else:
+        if targets['next_resistance']:
+            next_r = targets['next_resistance']
+            distance_pct = ((next_r['price'] - close) / close) * 100
+            
+            if distance_pct < 3:  # Within 3% of resistance
+                reasoning.append(f"Near resistance ${next_r['price']:,.0f} ({next_r['strength']})")
+                if signal == "NEUTRAL":
+                    signal = "BEARISH"
+                    strength = 6
+        
+        if targets['next_support']:
+            next_s = targets['next_support']
+            distance_pct = ((close - next_s['price']) / close) * 100
+            
+            if distance_pct < 3:  # Within 3% of support
+                reasoning.append(f"Near support ${next_s['price']:,.0f} ({next_s['strength']})")
+                if signal == "NEUTRAL":
+                    signal = "BULLISH"
+                    strength = 6
+    
+    # RSI Analysis (secondary to S/R)
+    if rsi < 30:
+        if signal == "NEUTRAL":
+            signal = "BULLISH"
+            strength = 7
+        elif signal == "BULLISH":
+            strength = min(strength + 2, 10)
+        reasoning.append(f"RSI {rsi:.1f} oversold")
+    
+    elif rsi > 70:
+        if signal == "NEUTRAL":
+            signal = "BEARISH"
+            strength = 7
+        elif signal == "BEARISH":
+            strength = min(strength + 2, 10)
+        reasoning.append(f"RSI {rsi:.1f} overbought")
+    
+    # Build detailed reasoning with targets
+    reasoning_text = " ".join(reasoning) if reasoning else "neutral"
+    
+    # Add price targets to reasoning
+    if targets['next_resistance']:
+        reasoning_text += f" | Next R: ${targets['next_resistance']['price']:,.0f}"
+    if targets['next_support']:
+        reasoning_text += f" | Next S: ${targets['next_support']['price']:,.0f}"
     
     return {
         "signal": signal,
         "strength": strength,
-        "reasoning": " ".join(reasoning) if reasoning else "neutral"
+        "reasoning": reasoning_text,
+        "targets": targets,
+        "sr_zones": sr_zones
     }
-
 
 def consultant_c2_trend_momentum(df, symbol):
     """
