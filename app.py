@@ -3431,6 +3431,57 @@ if df is not None and len(df) > 0:
     chart_height = 400 + (len(all_indicators) * 150)
     
     fig.update_layout(height=chart_height, showlegend=True, xaxis_rangeslider_visible=False)
+    # ==================== ADD S/R LINES TO CHART ====================
+    try:
+        # Get S/R zones
+        sr_zones = find_support_resistance_zones(df, lookback=100)
+        
+        # Add resistance lines (RED)
+        for r in sr_zones['resistance'][:5]:  # Show top 5 resistance levels
+            line_color = 'rgba(255, 0, 0, 0.7)' if r['strength'] == 'STRONG' else 'rgba(255, 100, 100, 0.4)'
+            line_width = 2 if r['strength'] == 'STRONG' else 1
+            
+            fig.add_hline(
+                y=r['price'],
+                line_dash="dash",
+                line_color=line_color,
+                line_width=line_width,
+                row=1, col=1,
+                annotation_text=f"R ${r['price']:,.0f} ({r['touches']}x)",
+                annotation_position="right"
+            )
+        
+        # Add support lines (GREEN)
+        for s in sr_zones['support'][:5]:  # Show top 5 support levels
+            line_color = 'rgba(0, 255, 0, 0.7)' if s['strength'] == 'STRONG' else 'rgba(100, 255, 100, 0.4)'
+            line_width = 2 if s['strength'] == 'STRONG' else 1
+            
+            fig.add_hline(
+                y=s['price'],
+                line_dash="dash",
+                line_color=line_color,
+                line_width=line_width,
+                row=1, col=1,
+                annotation_text=f"S ${s['price']:,.0f} ({s['touches']}x)",
+                annotation_position="right"
+            )
+        
+        # Add current price line (YELLOW)
+        fig.add_hline(
+            y=current_price,
+            line_dash="solid",
+            line_color='rgba(255, 255, 0, 0.8)',
+            line_width=2,
+            row=1, col=1,
+            annotation_text=f"Current: ${current_price:,.2f}",
+            annotation_position="left"
+        )
+    
+    except Exception as e:
+        pass  # If S/R fails, chart still displays
+    # ==================== END S/R LINES ====================
+    
+    st.plotly_chart(fig, use_container_width=True)
     st.plotly_chart(fig, use_container_width=True)
     
     if any([use_obv, use_mfi, use_adx, use_stoch, use_cci]):
