@@ -1388,7 +1388,6 @@ else:
     symbol = custom_symbol
 
 TIMEFRAMES = {
-    TIMEFRAMES = {
     "5 Minutes": {"limit": 100, "binance": "5m", "okx": "5m"},
     "15 Minutes": {"limit": 100, "binance": "15m", "okx": "15m"},
     "30 Minutes": {"limit": 100, "binance": "30m", "okx": "30m"},
@@ -1396,6 +1395,9 @@ TIMEFRAMES = {
     "4 Hours": {"limit": 100, "binance": "4h", "okx": "4H"},
     "1 Day": {"limit": 100, "binance": "1d", "okx": "1D"}
 }
+```
+
+---
 
 timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=4)
 timeframe_config = TIMEFRAMES[timeframe_name]
