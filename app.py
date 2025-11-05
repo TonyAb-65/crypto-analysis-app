@@ -2556,7 +2556,7 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
             returns_pred_cv_clean = returns_pred_cv[mask_cv]
             
             if len(returns_actual_cv_clean) > 0:
-                cv_mape = np.mean(np.abs((returns_actual_cv_clean - returns_pred_cv_clean) / (returns_actual_cv_clean + 1e-8))) * 100
+                cv_mape = np.mean(np.abs((returns_actual_cv_clean - returns_pred_cv_clean) / (returns_actual_cv_clean + 1e-8)))
                 cv_mape = min(cv_mape, 100)  # Cap at 100%
             else:
                 cv_mape = 50.0
