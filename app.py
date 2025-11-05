@@ -1701,7 +1701,18 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price):
         technical_signals.append(-c2['strength'])
     
     technical_score = sum(technical_signals) / len(technical_signals) if technical_signals else 0
-    
+    # NEW FIX: Force NEUTRAL if high risk (2 warnings) + weak signals
+if c3['signal'] == 'HIGH_RISK' and abs(technical_score) < 4:
+    return {
+        "position": "NEUTRAL",
+        "entry": current_price,
+        "target": current_price,
+        "stop_loss": current_price,
+        "hold_hours": 0,
+        "confidence": 0,
+        "reasoning": f"NEUTRAL - High risk ({c3['reasoning']}) with weak technical signals",
+        "risk_reward": 0
+    }
     # Calculate news score
     news_score = 0
     if c4['signal'] == 'BULLISH':
@@ -1721,7 +1732,9 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price):
     elif c4['weight'] >= 40:
         hold_hours = 8   # Major news - hold 8h
     else:
-        hold_hours = 9  # Default 9h for intraday trades
+        # Calculate based on signal strength (4-13 hours)
+        signal_magnitude = min(abs(final_score), 9)
+        hold_hours = 4 + int(signal_magnitude)
     
     # Determine position with SMART TARGETS based on S/R and timeframe
     if final_score > 2:
