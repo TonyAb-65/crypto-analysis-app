@@ -1395,7 +1395,6 @@ TIMEFRAMES = {
     "4 Hours": {"limit": 100, "binance": "4h", "okx": "4H"},
     "1 Day": {"limit": 100, "binance": "1d", "okx": "1D"}
 }
-```
 
 ---
 
