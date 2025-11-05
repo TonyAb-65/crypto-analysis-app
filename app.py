@@ -1701,18 +1701,20 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price):
         technical_signals.append(-c2['strength'])
     
     technical_score = sum(technical_signals) / len(technical_signals) if technical_signals else 0
+    
     # NEW FIX: Force NEUTRAL if high risk (2 warnings) + weak signals
-if c3['signal'] == 'HIGH_RISK' and abs(technical_score) < 4:
-    return {
-        "position": "NEUTRAL",
-        "entry": current_price,
-        "target": current_price,
-        "stop_loss": current_price,
-        "hold_hours": 0,
-        "confidence": 0,
-        "reasoning": f"NEUTRAL - High risk ({c3['reasoning']}) with weak technical signals",
-        "risk_reward": 0
-    }
+    if c3['signal'] == 'HIGH_RISK' and abs(technical_score) < 4:
+        return {
+            "position": "NEUTRAL",
+            "entry": current_price,
+            "target": current_price,
+            "stop_loss": current_price,
+            "hold_hours": 0,
+            "confidence": 0,
+            "reasoning": f"NEUTRAL - High risk ({c3['reasoning']}) with weak technical signals",
+            "risk_reward": 0
+        }
+    
     # Calculate news score
     news_score = 0
     if c4['signal'] == 'BULLISH':
@@ -1726,6 +1728,7 @@ if c3['signal'] == 'HIGH_RISK' and abs(technical_score) < 4:
     # Adjust for risk (C3)
     risk_multiplier = c3['strength'] / 10.0
     final_score *= risk_multiplier
+    
     # Calculate hold duration
     if c4['weight'] >= 70:
         hold_hours = 24  # Critical news - hold 24h
@@ -1764,6 +1767,12 @@ if c3['signal'] == 'HIGH_RISK' and abs(technical_score) < 4:
             sr_target = entry * (1 + max_move_pct)
         
         target = sr_target
+        
+        # STRICT CAP: Never exceed max move
+        max_target = entry * (1 + max_move_pct)
+        if target > max_target:
+            target = max_target
+        
         stop_loss = entry * (1 - 0.02)  # 2% stop loss
         
         # Calculate secondary target
@@ -1797,6 +1806,12 @@ if c3['signal'] == 'HIGH_RISK' and abs(technical_score) < 4:
             sr_target = entry * (1 - max_move_pct)
         
         target = sr_target
+        
+        # STRICT CAP: Never exceed max move
+        min_target = entry * (1 - max_move_pct)
+        if target < min_target:
+            target = min_target
+        
         stop_loss = entry * (1 + 0.02)  # 2% stop loss
         
         # Calculate secondary target
@@ -1810,10 +1825,6 @@ if c3['signal'] == 'HIGH_RISK' and abs(technical_score) < 4:
         target = current_price
         stop_loss = current_price
         secondary_target = current_price
-        confidence = 0
-        entry = current_price
-        target = current_price
-        stop_loss = current_price
     
     # Calculate risk/reward
     if position != "NEUTRAL":
@@ -1840,8 +1851,7 @@ if c3['signal'] == 'HIGH_RISK' and abs(technical_score) < 4:
         "confidence": int(confidence),
         "reasoning": " | ".join(reasoning_parts),
         "risk_reward": round(risk_reward, 1)
-    }
-    # ==================== STREAMLIT PAGE CONFIGURATION ====================
+    }    # ==================== STREAMLIT PAGE CONFIGURATION ====================
 
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
