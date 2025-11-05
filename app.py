@@ -2583,21 +2583,22 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
             gb_test_pred = gb_model.predict(X_test)
             ensemble_pred = 0.4 * rf_test_pred + 0.6 * gb_test_pred
             
-           # Calculate returns instead of raw prices for MAPE
-actual_returns = np.diff(y_test) / y_test[:-1]
-predicted_returns = np.diff(ensemble_pred) / ensemble_pred[:-1]
-
-# Remove any infinite or NaN values
-mask = np.isfinite(actual_returns) & np.isfinite(predicted_returns) & (np.abs(actual_returns) > 1e-6)
-actual_returns_clean = actual_returns[mask]
-predicted_returns_clean = predicted_returns[mask]
-
-# Calculate MAPE on returns (much more stable)
-if len(actual_returns_clean) > 0:
-    mape = np.mean(np.abs((actual_returns_clean - predicted_returns_clean) / (actual_returns_clean + 1e-8))) * 100
-    mape = min(mape, 100)  # Cap at 100%
-else:
-    mape = 50.0  # Default fallback
+            # Calculate returns instead of raw prices for MAPE
+            actual_returns = np.diff(y_test) / y_test[:-1]
+            predicted_returns = np.diff(ensemble_pred) / ensemble_pred[:-1]
+            
+            # Remove any infinite or NaN values
+            mask = np.isfinite(actual_returns) & np.isfinite(predicted_returns) & (np.abs(actual_returns) > 1e-6)
+            actual_returns_clean = actual_returns[mask]
+            predicted_returns_clean = predicted_returns[mask]
+            
+            # Calculate MAPE on returns (much more stable)
+            if len(actual_returns_clean) > 0:
+                mape = np.mean(np.abs((actual_returns_clean - predicted_returns_clean) / (actual_returns_clean + 1e-8))) * 100
+                mape = min(mape, 100)  # Cap at 100%
+            else:
+                mape = 50.0  # Default fallback
+            
             base_confidence = max(0, min(100, 100 - mape))
         else:
             base_confidence = 65
