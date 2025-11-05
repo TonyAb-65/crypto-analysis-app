@@ -1716,33 +1716,80 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price):
     risk_multiplier = c3['strength'] / 10.0
     final_score *= risk_multiplier
     
-    # Determine position
+    # Determine position with SMART TARGETS based on S/R and timeframe
     if final_score > 2:
         position = "LONG"
         confidence = min(abs(final_score) * 10, 90)
-        
-        # Calculate targets
-        target_pct = 0.05 + (confidence / 1000)  # 5-15% based on confidence
-        stop_pct = 0.02  # 2% stop loss
-        
         entry = current_price
-        target = entry * (1 + target_pct)
-        stop_loss = entry * (1 - stop_pct)
+        
+        # Calculate timeframe-adjusted max move
+        if hold_hours <= 8:  # Intraday
+            max_move_pct = 0.03  # 3% max
+        elif hold_hours <= 24:  # Same day
+            max_move_pct = 0.05  # 5% max
+        else:  # Multi-day
+            max_move_pct = 0.10  # 10% max
+        
+        # Get S/R targets from C1
+        targets_sr = c1.get('targets', {})
+        next_resistance = targets_sr.get('next_resistance')
+        
+        # Calculate S/R-based target (if resistance exists)
+        if next_resistance and next_resistance['price'] > entry:
+            # Target 2% below resistance (safety margin)
+            sr_target = next_resistance['price'] * 0.98
+            # Don't go beyond max realistic move
+            sr_target = min(sr_target, entry * (1 + max_move_pct))
+        else:
+            sr_target = entry * (1 + max_move_pct)
+        
+        target = sr_target
+        stop_loss = entry * (1 - 0.02)  # 2% stop loss
+        
+        # Calculate secondary target
+        second_resistance = targets_sr.get('second_resistance')
+        secondary_target = second_resistance['price'] * 0.98 if second_resistance else target * 1.03
         
     elif final_score < -2:
         position = "SHORT"
         confidence = min(abs(final_score) * 10, 90)
-        
-        # Calculate targets
-        target_pct = 0.05 + (confidence / 1000)
-        stop_pct = 0.02
-        
         entry = current_price
-        target = entry * (1 - target_pct)
-        stop_loss = entry * (1 + stop_pct)
+        
+        # Calculate timeframe-adjusted max move
+        if hold_hours <= 8:  # Intraday
+            max_move_pct = 0.03  # 3% max
+        elif hold_hours <= 24:  # Same day
+            max_move_pct = 0.05  # 5% max
+        else:  # Multi-day
+            max_move_pct = 0.10  # 10% max
+        
+        # Get S/R targets from C1
+        targets_sr = c1.get('targets', {})
+        next_support = targets_sr.get('next_support')
+        
+        # Calculate S/R-based target (if support exists)
+        if next_support and next_support['price'] < entry:
+            # Target 2% above support (safety margin)
+            sr_target = next_support['price'] * 1.02
+            # Don't go beyond max realistic move
+            sr_target = max(sr_target, entry * (1 - max_move_pct))
+        else:
+            sr_target = entry * (1 - max_move_pct)
+        
+        target = sr_target
+        stop_loss = entry * (1 + 0.02)  # 2% stop loss
+        
+        # Calculate secondary target
+        second_support = targets_sr.get('second_support')
+        secondary_target = second_support['price'] * 1.02 if second_support else target * 0.97
         
     else:
         position = "NEUTRAL"
+        confidence = 0
+        entry = current_price
+        target = current_price
+        stop_loss = current_price
+        secondary_target = current_price
         confidence = 0
         entry = current_price
         target = current_price
