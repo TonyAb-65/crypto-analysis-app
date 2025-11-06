@@ -1797,8 +1797,7 @@ def fetch_data(symbol_param, asset_type_param):
     return None, None
 
 
-# Then your existing function continues:
- def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
+def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
     """
     Fetch data for a specific timeframe (used by multi-timeframe analysis)
     timeframe_hours: 1, 4, or 24 (for 1h, 4h, 1d)
