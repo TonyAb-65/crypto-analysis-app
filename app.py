@@ -2284,7 +2284,7 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         else:
             base_confidence = 65
         
-        # ==================== SURGICAL FIX #1 APPLICATION ====================
+       # ==================== SURGICAL FIX #1 APPLICATION ====================
         current_price_model = df_clean['close'].iloc[-1]
         predicted_price = predictions[0]
         pred_change_pct = ((predicted_price - current_price_model) / current_price_model) * 100
@@ -2301,7 +2301,7 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         
         return predictions, ['Pattern-based features'], adjusted_confidence, rsi_insights
         
-   except Exception as e:
+    except Exception as e:
         st.error(f"Prediction error: {str(e)}")
         import traceback
         st.error(f"Details: {traceback.format_exc()}")
