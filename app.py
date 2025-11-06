@@ -2301,14 +2301,15 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         
         return predictions, ['Pattern-based features'], adjusted_confidence, rsi_insights
         
-    except Exception as e:
+   except Exception as e:
         st.error(f"Prediction error: {str(e)}")
         import traceback
         st.error(f"Details: {traceback.format_exc()}")
         return None, None, 0, None
-        # ==================== MAIN DATA FETCHING & ANALYSIS ====================
 
-with st.spinner(f"🔄 Fetching {pair_display} data..."):
+# ==================== MAIN DATA FETCHING & ANALYSIS ====================
+
+with st.spinner(f"🔄 Fetching {symbol} data..."):
     df, data_source = fetch_data(symbol, asset_type)
 
 if df is not None and len(df) > 0:
