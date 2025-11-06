@@ -1942,21 +1942,21 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         targets_sr = c1.get('targets', {})
         next_resistance = targets_sr.get('next_resistance')
         
-        # Calculate S/R-based target (if resistance exists)
-        if next_resistance and next_resistance['price'] > entry:
+        # FIX: Calculate S/R-based target ONLY if resistance is ABOVE entry
+        if next_resistance and next_resistance['price'] > entry * 1.01:  # At least 1% above
             # Target 2% below resistance (safety margin)
             sr_target = next_resistance['price'] * 0.98
-            # Don't go beyond max realistic move
+            # Cap at max realistic move
             sr_target = min(sr_target, entry * (1 + max_move_pct))
         else:
+            # No valid resistance - use percentage target
             sr_target = entry * (1 + max_move_pct)
         
         target = sr_target
         
-        # STRICT CAP: Never exceed max move
-        max_target = entry * (1 + max_move_pct)
-        if target > max_target:
-            target = max_target
+        # SAFETY: Ensure target is ALWAYS above entry for LONG
+        if target <= entry:
+            target = entry * (1 + max_move_pct)
         
         stop_loss = entry * (1 - 0.02)  # 2% stop loss
         
@@ -1986,21 +1986,21 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         targets_sr = c1.get('targets', {})
         next_support = targets_sr.get('next_support')
         
-        # Calculate S/R-based target (if support exists)
-        if next_support and next_support['price'] < entry:
+        # FIX: Calculate S/R-based target ONLY if support is BELOW entry
+        if next_support and next_support['price'] < entry * 0.99:  # At least 1% below
             # Target 2% above support (safety margin)
             sr_target = next_support['price'] * 1.02
-            # Don't go beyond max realistic move
+            # Cap at max realistic move
             sr_target = max(sr_target, entry * (1 - max_move_pct))
         else:
+            # No valid support - use percentage target
             sr_target = entry * (1 - max_move_pct)
         
         target = sr_target
         
-        # STRICT CAP: Never exceed max move
-        min_target = entry * (1 - max_move_pct)
-        if target < min_target:
-            target = min_target
+        # SAFETY: Ensure target is ALWAYS below entry for SHORT
+        if target >= entry:
+            target = entry * (1 - max_move_pct)
         
         stop_loss = entry * (1 + 0.02)  # 2% stop loss
         
