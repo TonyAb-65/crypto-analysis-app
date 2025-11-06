@@ -1841,7 +1841,7 @@ def multi_timeframe_analysis(symbol, asset_type):
 
 # ==================== END MULTI-TIMEFRAME ANALYSIS ====================
 
-def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None):
+def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None, asset_type=None):
     """
     Unified Consultant Meeting - All 4 consultants discuss and reach consensus
     Returns: ONE clear recommendation with entry, target, stop loss, hold duration
@@ -1930,13 +1930,23 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         
         entry = current_price
         
-        # Calculate timeframe-adjusted max move
-        if hold_hours <= 8:  # Intraday
-            max_move_pct = 0.03  # 3% max
-        elif hold_hours <= 24:  # Same day
-            max_move_pct = 0.05  # 5% max
-        else:  # Multi-day
-            max_move_pct = 0.10  # 10% max
+        # ASSET-AWARE: Calculate timeframe-adjusted max move
+        if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
+            # Forex/Metals are less volatile
+            if hold_hours <= 8:  # Intraday
+                max_move_pct = 0.01  # 1% max for forex intraday
+            elif hold_hours <= 24:  # Same day
+                max_move_pct = 0.02  # 2% max for forex daily
+            else:  # Multi-day
+                max_move_pct = 0.05  # 5% max for forex multi-day
+        else:
+            # Crypto is more volatile
+            if hold_hours <= 8:  # Intraday
+                max_move_pct = 0.03  # 3% max for crypto intraday
+            elif hold_hours <= 24:  # Same day
+                max_move_pct = 0.05  # 5% max for crypto daily
+            else:  # Multi-day
+                max_move_pct = 0.10  # 10% max for crypto multi-day
         
         # Get S/R targets from C1
         targets_sr = c1.get('targets', {})
@@ -1974,13 +1984,23 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         
         entry = current_price
         
-        # Calculate timeframe-adjusted max move
-        if hold_hours <= 8:  # Intraday
-            max_move_pct = 0.03  # 3% max
-        elif hold_hours <= 24:  # Same day
-            max_move_pct = 0.05  # 5% max
-        else:  # Multi-day
-            max_move_pct = 0.10  # 10% max
+        # ASSET-AWARE: Calculate timeframe-adjusted max move
+        if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
+            # Forex/Metals are less volatile
+            if hold_hours <= 8:  # Intraday
+                max_move_pct = 0.01  # 1% max for forex intraday
+            elif hold_hours <= 24:  # Same day
+                max_move_pct = 0.02  # 2% max for forex daily
+            else:  # Multi-day
+                max_move_pct = 0.05  # 5% max for forex multi-day
+        else:
+            # Crypto is more volatile
+            if hold_hours <= 8:  # Intraday
+                max_move_pct = 0.03  # 3% max for crypto intraday
+            elif hold_hours <= 24:  # Same day
+                max_move_pct = 0.05  # 5% max for crypto daily
+            else:  # Multi-day
+                max_move_pct = 0.10  # 10% max for crypto multi-day
         
         # Get S/R targets from C1
         targets_sr = c1.get('targets', {})
