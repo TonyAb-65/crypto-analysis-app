@@ -1663,97 +1663,6 @@ def consultant_c4_news_sentiment(symbol, news_data=None):
             "reasoning": "Regular news (ignored)"
         }
 
-def multi_timeframe_analysis(symbol, asset_type):
-    """
-    Check 3 timeframes (1h, 4h, 1d) for signal alignment
-    Returns confidence boost and alignment details
-    """
-    
-    timeframes = {
-        '1h': 1,
-        '4h': 4,
-        '1d': 24
-    }
-    
-    signals = {}
-    strengths = {}
-    details = {}
-    
-    # Analyze each timeframe
-    for tf_name, tf_hours in timeframes.items():
-        try:
-            df, source = fetch_data_for_timeframe(symbol, asset_type, tf_hours)
-            
-            if df is not None and len(df) > 0:
-                signal, strength, detail = analyze_single_timeframe(df, symbol)
-                signals[tf_name] = signal
-                strengths[tf_name] = strength
-                details[tf_name] = detail
-            else:
-                signals[tf_name] = "UNAVAILABLE"
-                strengths[tf_name] = 0
-                details[tf_name] = "No data"
-        except Exception as e:
-            signals[tf_name] = "ERROR"
-            strengths[tf_name] = 0
-            details[tf_name] = str(e)
-    
-    # Check alignment
-    available_signals = [s for s in signals.values() if s not in ['UNAVAILABLE', 'ERROR']]
-    
-    if len(available_signals) == 0:
-        return {
-            'aligned': False,
-            'direction': 'UNKNOWN',
-            'confidence_multiplier': 1.0,
-            'signals': signals,
-            'details': details,
-            'note': "⚠️ Multi-timeframe analysis unavailable"
-        }
-    
-    # Perfect alignment (all 3 agree)
-    if len(available_signals) >= 3 and len(set(available_signals)) == 1 and available_signals[0] != 'NEUTRAL':
-        return {
-            'aligned': True,
-            'direction': available_signals[0],
-            'confidence_multiplier': 1.5,
-            'signals': signals,
-            'details': details,
-            'note': f"🔥 ALL TIMEFRAMES {available_signals[0]} - VERY STRONG SIGNAL!"
-        }
-    
-    # Two timeframes agree (1h + 4h is most important)
-    elif signals.get('1h') == signals.get('4h') and signals.get('1h') != 'NEUTRAL':
-        return {
-            'aligned': True,
-            'direction': signals['1h'],
-            'confidence_multiplier': 1.3,
-            'signals': signals,
-            'details': details,
-            'note': f"✅ 1h & 4h both {signals['1h']} - Strong signal"
-        }
-    
-    # 4h + 1d agree (longer-term alignment)
-    elif signals.get('4h') == signals.get('1d') and signals.get('4h') != 'NEUTRAL':
-        return {
-            'aligned': True,
-            'direction': signals['4h'],
-            'confidence_multiplier': 1.2,
-            'signals': signals,
-            'details': details,
-            'note': f"✅ 4h & 1d both {signals['4h']} - Trend aligned"
-        }
-    
-    # Timeframe conflict
-    else:
-        return {
-            'aligned': False,
-            'direction': 'CONFLICT',
-            'confidence_multiplier': 0.7,
-            'signals': signals,
-            'details': details,
-            'note': f"⚠️ Timeframe conflict: 1h={signals.get('1h', 'N/A')}, 4h={signals.get('4h', 'N/A')}, 1d={signals.get('1d', 'N/A')}"
-        }
 # ==================== MULTI-TIMEFRAME ANALYSIS ====================
 
 def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
@@ -1764,27 +1673,18 @@ def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
     
     # Map hours to API intervals
     if timeframe_hours == 1:
-        binance_interval = "1h"
         okx_interval = "1H"
     elif timeframe_hours == 4:
-        binance_interval = "4h"
         okx_interval = "4H"
     elif timeframe_hours == 24:
-        binance_interval = "1d"
         okx_interval = "1D"
     else:
-        binance_interval = "1h"
         okx_interval = "1H"
     
     limit = 100
     
-    # Try to fetch data (same logic as main fetch)
+    # Try to fetch data (Binance removed - OKX only)
     if asset_type_param == "💰 Cryptocurrency" or asset_type_param == "🔍 Custom Search":
-        # Try Binance
-        df, source = get_binance_data(symbol_param, binance_interval, limit)
-        if df is not None and len(df) > 0:
-            return df, source
-        
         # Try OKX
         df, source = get_okx_data(symbol_param, okx_interval, limit)
         if df is not None and len(df) > 0:
@@ -1798,7 +1698,10 @@ def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
         return None, None
     
     elif asset_type_param == "💱 Forex" or asset_type_param == "🏆 Precious Metals":
-        df, source = get_forex_metals_data(symbol_param, binance_interval, limit)
+        # For forex/metals, convert okx_interval to standard format
+        interval_map = {"1H": "1h", "4H": "4h", "1D": "1d"}
+        standard_interval = interval_map.get(okx_interval, "1h")
+        df, source = get_forex_metals_data(symbol_param, standard_interval, limit)
         return df, source
     
     return None, None
@@ -1936,12 +1839,11 @@ def multi_timeframe_analysis(symbol, asset_type):
             'note': f"⚠️ Timeframe conflict: 1h={signals.get('1h', 'N/A')}, 4h={signals.get('4h', 'N/A')}, 1d={signals.get('1d', 'N/A')}"
         }
 
-# ==================== END MULTI-TIMEFRAME ANALYSIS ====================        
+# ==================== END MULTI-TIMEFRAME ANALYSIS ====================
+
 def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None):
     """
-    
     Unified Consultant Meeting - All 4 consultants discuss and reach consensus
-    
     Returns: ONE clear recommendation with entry, target, stop loss, hold duration
     """
     
@@ -2028,16 +1930,6 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         
         entry = current_price
         
-        # Apply multi-timeframe multiplier
-        if mtf_result and mtf_result['aligned']:
-            if mtf_result['direction'] == 'BULLISH':
-                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
-            elif mtf_result['direction'] == 'BEARISH':
-                # Timeframes disagree with position - reduce confidence
-                confidence = confidence * 0.6
-        
-        entry = current_price
-        
         # Calculate timeframe-adjusted max move
         if hold_hours <= 8:  # Intraday
             max_move_pct = 0.03  # 3% max
@@ -2068,23 +1960,9 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         
         stop_loss = entry * (1 - 0.02)  # 2% stop loss
         
-        # Calculate secondary target
-        second_resistance = targets_sr.get('second_resistance')
-        secondary_target = second_resistance['price'] * 0.98 if second_resistance else target * 1.03
-        
     elif final_score < -2:
         position = "SHORT"
         confidence = min(abs(final_score) * 10, 90)
-        
-        # Apply multi-timeframe multiplier
-        if mtf_result and mtf_result['aligned']:
-            if mtf_result['direction'] == 'BEARISH':
-                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
-            elif mtf_result['direction'] == 'BULLISH':
-                # Timeframes disagree with position - reduce confidence
-                confidence = confidence * 0.6
-        
-        entry = current_price
         
         # Apply multi-timeframe multiplier
         if mtf_result and mtf_result['aligned']:
@@ -2126,17 +2004,12 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         
         stop_loss = entry * (1 + 0.02)  # 2% stop loss
         
-        # Calculate secondary target
-        second_support = targets_sr.get('second_support')
-        secondary_target = second_support['price'] * 1.02 if second_support else target * 0.97
-        
     else:
         position = "NEUTRAL"
         confidence = 0
         entry = current_price
         target = current_price
         stop_loss = current_price
-        secondary_target = current_price
     
     # Calculate risk/reward
     if position != "NEUTRAL":
@@ -2147,12 +2020,6 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         risk_reward = 0
     
     # Build reasoning
-    reasoning_parts = [
-        f"C1: {c1['signal']} {c1['strength']}/10 ({c1['reasoning']})",
-        f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
-        f"C3: {c3['signal']} ({c3['reasoning']})",
-        f"C4: {c4['signal']} (weight: {c4['weight']}%)"
-    ]# Build reasoning
     reasoning_parts = [
         f"C1: {c1['signal']} {c1['strength']}/10 ({c1['reasoning']})",
         f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
@@ -2173,8 +2040,9 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         "confidence": int(confidence),
         "reasoning": " | ".join(reasoning_parts),
         "risk_reward": round(risk_reward, 1)
-    }    # ==================== STREAMLIT PAGE CONFIGURATION ====================
+    }
 
+# ==================== STREAMLIT PAGE CONFIGURATION ====================
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
 st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH SURGICAL FIXES")
@@ -2592,43 +2460,6 @@ def get_okx_data(symbol_param, interval="1H", limit=100):
         return None, None
 
 @st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
-def get_binance_data(symbol_param, interval="1h", limit=100):
-    """Fetch data from Binance API"""
-    url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": f"{symbol_param}USDT", "interval": interval, "limit": limit}
-    
-    try:
-        response = get_retry_session().get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        if isinstance(data, dict) and 'code' in data:
-            st.warning(f"⚠️ Binance error: {data.get('msg', 'Unknown')}")
-            return None, None
-        
-        if not data or len(data) == 0:
-            st.warning("⚠️ Binance returned no data")
-            return None, None
-        
-        df = pd.DataFrame(data, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_asset_volume', 'number_of_trades',
-            'taker_buy_base', 'taker_buy_quote', 'ignore'
-        ])
-        
-        df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            df[col] = df[col].astype(float)
-        
-        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        df = df.sort_values('timestamp').reset_index(drop=True)
-        st.success(f"✅ Loaded {len(df)} data points from Binance")
-        return df, "Binance"
-    except Exception as e:
-        st.warning(f"⚠️ Binance API failed: {str(e)}")
-        return None, None
-
-@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
 def get_cryptocompare_data(symbol_param, limit=100):
     """Fetch data from CryptoCompare API"""
     url = "https://min-api.cryptocompare.com/data/v2/histohour"
@@ -2821,17 +2652,13 @@ def get_forex_metals_data(symbol_param, interval="60min", limit=100):
         return None, None
 
 def fetch_data(symbol_param, asset_type_param):
-    """Main function to fetch data with multiple fallbacks"""
+    """Main function to fetch data - OKX primary (Binance removed)"""
     if asset_type_param == "💰 Cryptocurrency" or asset_type_param == "🔍 Custom Search":
         interval_map = timeframe_config
         
-        st.info(f"🔄 Trying to fetch {symbol_param} data...")
+        st.info("🔄 Fetching data from OKX...")
         
-        df, source = get_binance_data(symbol_param, interval_map['binance'], interval_map['limit'])
-        if df is not None and len(df) > 0:
-            return df, source
-        
-        st.info("🔄 Trying backup API (OKX)...")
+        # OKX is now primary
         df, source = get_okx_data(symbol_param, interval_map['okx'], interval_map['limit'])
         if df is not None and len(df) > 0:
             return df, source
@@ -2852,7 +2679,7 @@ def fetch_data(symbol_param, asset_type_param):
     elif asset_type_param == "💱 Forex" or asset_type_param == "🏆 Precious Metals":
         interval_map = timeframe_config
         
-        st.info(f"🔄 Fetching {symbol_param} data...")
+        st.info("🔄 Fetching forex/metals data...")
         
         interval = interval_map['binance']
         df, source = get_forex_metals_data(symbol_param, interval, interval_map['limit'])
@@ -2865,109 +2692,7 @@ def fetch_data(symbol_param, asset_type_param):
     
     return None, None
 
-# ==================== TECHNICAL INDICATORS ====================
-
-def calculate_obv(df):
-    """Calculate On-Balance Volume"""
-    obv = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
-    return obv
-
-def calculate_mfi(df, period=14):
-    """Calculate Money Flow Index"""
-    typical_price = (df['high'] + df['low'] + df['close']) / 3
-    money_flow = typical_price * df['volume']
-    
-    positive_flow = pd.Series(0.0, index=df.index)
-    negative_flow = pd.Series(0.0, index=df.index)
-    
-    positive_flow[df['close'] > df['close'].shift(1)] = money_flow[df['close'] > df['close'].shift(1)]
-    negative_flow[df['close'] < df['close'].shift(1)] = money_flow[df['close'] < df['close'].shift(1)]
-    
-    positive_mf = positive_flow.rolling(window=period).sum()
-    negative_mf = negative_flow.rolling(window=period).sum()
-    
-    mfi = 100 - (100 / (1 + positive_mf / (negative_mf + 1e-10)))
-    return mfi.fillna(50)
-
-def calculate_adx(df, period=14):
-    """Calculate Average Directional Index"""
-    high_diff = df['high'].diff()
-    low_diff = -df['low'].diff()
-    
-    pos_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0)
-    neg_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0)
-    
-    high_low = df['high'] - df['low']
-    high_close = np.abs(df['high'] - df['close'].shift())
-    low_close = np.abs(df['low'] - df['close'].shift())
-    ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    true_range = ranges.max(axis=1)
-    atr = true_range.rolling(window=period).mean()
-    
-    pos_di = 100 * (pos_dm.rolling(window=period).mean() / (atr + 1e-10))
-    neg_di = 100 * (neg_dm.rolling(window=period).mean() / (atr + 1e-10))
-    
-    dx = 100 * np.abs(pos_di - neg_di) / (pos_di + neg_di + 1e-10)
-    adx = dx.rolling(window=period).mean()
-    
-    return adx.fillna(0), pos_di.fillna(0), neg_di.fillna(0)
-
-def calculate_stochastic(df, k_period=14, d_period=3):
-    """Calculate Stochastic Oscillator"""
-    low_min = df['low'].rolling(window=k_period).min()
-    high_max = df['high'].rolling(window=k_period).max()
-    
-    k = 100 * (df['close'] - low_min) / (high_max - low_min + 1e-10)
-    d = k.rolling(window=d_period).mean()
-    
-    return k.fillna(50), d.fillna(50)
-
-def calculate_cci(df, period=20):
-    """Calculate Commodity Channel Index"""
-    typical_price = (df['high'] + df['low'] + df['close']) / 3
-    sma = typical_price.rolling(window=period).mean()
-    mean_deviation = typical_price.rolling(window=period).apply(lambda x: np.abs(x - x.mean()).mean())
-    
-    cci = (typical_price - sma) / (0.015 * mean_deviation + 1e-10)
-    return cci.fillna(0)
-
-def calculate_technical_indicators(df):
-    """Calculate all technical indicators"""
-    try:
-        df['sma_20'] = df['close'].rolling(window=20).mean()
-        df['sma_50'] = df['close'].rolling(window=50).mean()
-        
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / (loss + 1e-10)
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
-        exp1 = df['close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['close'].ewm(span=26, adjust=False).mean()
-        df['macd'] = exp1 - exp2
-        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
-        df['macd_hist'] = df['macd'] - df['macd_signal']
-        
-        df['bb_middle'] = df['close'].rolling(window=20).mean()
-        bb_std = df['close'].rolling(window=20).std()
-        df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
-        df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
-        
-        df['volatility'] = df['close'].pct_change().rolling(window=20).std()
-        
-        df['obv'] = calculate_obv(df)
-        df['mfi'] = calculate_mfi(df, 14)
-        df['adx'], df['plus_di'], df['minus_di'] = calculate_adx(df, 14)
-        df['stoch_k'], df['stoch_d'] = calculate_stochastic(df, 14, 3)
-        df['cci'] = calculate_cci(df, 20)
-        
-        return df
-    except Exception as e:
-        st.error(f"Error calculating indicators: {str(e)}")
-        return df
-
-# ==================== AI MODEL TRAINING ====================
+#==================== AI MODEL TRAINING ====================
 
 def analyze_rsi_bounce_patterns(df):
     """Analyze historical RSI bounce patterns"""
