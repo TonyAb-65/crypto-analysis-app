@@ -2063,7 +2063,6 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     }
 
 # ==================== STREAMLIT PAGE CONFIGURATION ====================
-```
 
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
