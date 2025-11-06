@@ -2673,7 +2673,7 @@ def fetch_data(symbol_param, asset_type_param):
         if df is not None and len(df) > 0:
             return df, source
         
-        st.error(f"❌ Could not fetch data for {symbol_param}")
+       st.error(f"❌ Could not fetch data for {symbol_param}")
         return None, None
     
     elif asset_type_param == "💱 Forex" or asset_type_param == "🏆 Precious Metals":
@@ -2688,8 +2688,9 @@ def fetch_data(symbol_param, asset_type_param):
             return df, source
         
         st.error(f"❌ Could not fetch data for {symbol_param}")
-        
-return None, None
+        return None, None
+    
+    return None, None
 
 # ==================== TECHNICAL INDICATORS ====================
 
@@ -2698,8 +2699,7 @@ def calculate_obv(df):
     obv = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
     return obv
 
-def calculate_mfi(df, period=14):
-    """Calculate Money Flow Index"""
+def calculate_mfi(df, period=14):    """Calculate Money Flow Index"""
     typical_price = (df['high'] + df['low'] + df['close']) / 3
     money_flow = typical_price * df['volume']
     
