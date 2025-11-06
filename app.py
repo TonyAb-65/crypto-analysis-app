@@ -1933,12 +1933,12 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         # ASSET-AWARE: Calculate timeframe-adjusted max move
         if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
             # Forex/Metals are less volatile
-            if hold_hours <= 8:  # Intraday
-                max_move_pct = 0.01  # 1% max for forex intraday
-            elif hold_hours <= 24:  # Same day
-                max_move_pct = 0.02  # 2% max for forex daily
+            if hold_hours <= 12:  # Short-term (up to half day)
+                max_move_pct = 0.01  # 1% max for forex short-term
+            elif hold_hours <= 24:  # Full day
+                max_move_pct = 0.015  # 1.5% max for forex daily
             else:  # Multi-day
-                max_move_pct = 0.05  # 5% max for forex multi-day
+                max_move_pct = 0.03  # 3% max for forex multi-day
         else:
             # Crypto is more volatile
             if hold_hours <= 8:  # Intraday
@@ -1987,12 +1987,12 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         # ASSET-AWARE: Calculate timeframe-adjusted max move
         if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
             # Forex/Metals are less volatile
-            if hold_hours <= 8:  # Intraday
-                max_move_pct = 0.01  # 1% max for forex intraday
-            elif hold_hours <= 24:  # Same day
-                max_move_pct = 0.02  # 2% max for forex daily
+            if hold_hours <= 12:  # Short-term (up to half day)
+                max_move_pct = 0.01  # 1% max for forex short-term
+            elif hold_hours <= 24:  # Full day
+                max_move_pct = 0.015  # 1.5% max for forex daily
             else:  # Multi-day
-                max_move_pct = 0.05  # 5% max for forex multi-day
+                max_move_pct = 0.03  # 3% max for forex multi-day
         else:
             # Crypto is more volatile
             if hold_hours <= 8:  # Intraday
@@ -2063,6 +2063,14 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     }
 
 # ==================== STREAMLIT PAGE CONFIGURATION ====================
+```
+
+---
+
+## 📊 **Expected After Fix:**
+```
+Hold: 9 hours
+Target: +1.0% ✅ (instead of +2.0%)
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
 st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH SURGICAL FIXES")
