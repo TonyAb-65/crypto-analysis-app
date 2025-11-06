@@ -1755,48 +1755,6 @@ def multi_timeframe_analysis(symbol, asset_type):
         }
 # ==================== MULTI-TIMEFRAME ANALYSIS ====================
 
-def fetch_data(symbol_param, asset_type_param):
-    """Main function to fetch data - OKX primary (Binance removed)"""
-    if asset_type_param == "💰 Cryptocurrency" or asset_type_param == "🔍 Custom Search":
-        interval_map = timeframe_config
-        
-        st.info("🔄 Fetching data from OKX...")
-        
-        # OKX is now primary
-        df, source = get_okx_data(symbol_param, interval_map['okx'], interval_map['limit'])
-        if df is not None and len(df) > 0:
-            return df, source
-        
-        st.info("🔄 Trying backup API (CryptoCompare)...")
-        df, source = get_cryptocompare_data(symbol_param, interval_map['limit'])
-        if df is not None and len(df) > 0:
-            return df, source
-        
-        st.info("🔄 Trying backup API (CoinGecko)...")
-        df, source = get_coingecko_data(symbol_param, interval_map['limit'])
-        if df is not None and len(df) > 0:
-            return df, source
-        
-        st.error(f"❌ Could not fetch data for {symbol_param}")
-        return None, None
-    
-    elif asset_type_param == "💱 Forex" or asset_type_param == "🏆 Precious Metals":
-        interval_map = timeframe_config
-        
-        st.info("🔄 Fetching forex/metals data...")
-        
-        interval = interval_map['binance']
-        df, source = get_forex_metals_data(symbol_param, interval, interval_map['limit'])
-        
-        if df is not None and len(df) > 0:
-            return df, source
-        
-        st.error(f"❌ Could not fetch data for {symbol_param}")
-        return None, None
-    
-    return None, None
-
-
 def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
     """
     Fetch data for a specific timeframe (used by multi-timeframe analysis)
@@ -1972,90 +1930,6 @@ def multi_timeframe_analysis(symbol, asset_type):
         }
 
 # ==================== END MULTI-TIMEFRAME ANALYSIS ====================
-# ==================== END MULTI-TIMEFRAME ANALYSIS ====================
-
-
-# ==================== STREAMLIT PAGE CONFIGURATION ====================
-st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
-
-st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH SURGICAL FIXES")
-st.markdown("*Crypto, Forex, Metals + AI ML Predictions + Trading Central Format + AI Learning + News Sentiment*")
-
-current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-st.markdown(f"**🕐 Last Updated:** {current_time}")
-
-st.markdown("---")
-
-# ==================== SIDEBAR CONFIGURATION ====================
-st.sidebar.header("⚙️ Configuration")
-
-# ==================== ASSET SELECTION ====================
-asset_type = st.sidebar.selectbox(
-    "📊 Select Asset Type",
-    ["💰 Cryptocurrency", "🏆 Precious Metals", "💱 Forex", "🔍 Custom Search"],
-    index=0
-)
-
-CRYPTO_SYMBOLS = {
-    "Bitcoin (BTC)": "BTC",
-    "Ethereum (ETH)": "ETH",
-    "Binance Coin (BNB)": "BNB",
-    "XRP": "XRP",
-    "Cardano (ADA)": "ADA",
-    "Solana (SOL)": "SOL",
-    "Dogecoin (DOGE)": "DOGE",
-    "Polygon (MATIC)": "MATIC",
-    "Polkadot (DOT)": "DOT",
-    "Avalanche (AVAX)": "AVAX"
-}
-
-PRECIOUS_METALS = {
-    "Gold (XAU/USD)": "XAU/USD",
-    "Silver (XAG/USD)": "XAG/USD"
-}
-
-FOREX_PAIRS = {
-    "EUR/USD": "EUR/USD",
-    "GBP/USD": "GBP/USD",
-    "USD/JPY": "USD/JPY",
-    "USD/CHF": "USD/CHF",
-    "AUD/USD": "AUD/USD",
-    "USD/CAD": "USD/CAD",
-    "NZD/USD": "NZD/USD"
-}
-
-if asset_type == "💰 Cryptocurrency":
-    pair_display = st.sidebar.selectbox("Select Cryptocurrency", list(CRYPTO_SYMBOLS.keys()), index=0)
-    symbol = CRYPTO_SYMBOLS[pair_display]
-elif asset_type == "🏆 Precious Metals":
-    pair_display = st.sidebar.selectbox("Select Metal", list(PRECIOUS_METALS.keys()), index=0)
-    symbol = PRECIOUS_METALS[pair_display]
-elif asset_type == "💱 Forex":
-    pair_display = st.sidebar.selectbox("Select Forex Pair", list(FOREX_PAIRS.keys()), index=0)
-    symbol = FOREX_PAIRS[pair_display]
-else:
-    custom_symbol = st.sidebar.text_input("Enter Symbol:", "BTC").upper()
-    pair_display = f"Custom: {custom_symbol}"
-    symbol = custom_symbol
-
-TIMEFRAMES = {
-    "5 Minutes": {"limit": 100, "binance": "5m", "okx": "5m"},
-    "15 Minutes": {"limit": 100, "binance": "15m", "okx": "15m"},
-    "30 Minutes": {"limit": 100, "binance": "30m", "okx": "30m"},
-    "1 Hour": {"limit": 100, "binance": "1h", "okx": "1H"},
-    "4 Hours": {"limit": 100, "binance": "4h", "okx": "4H"},
-    "1 Day": {"limit": 100, "binance": "1d", "okx": "1D"}
-}
-
-timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=4)
-timeframe_config = TIMEFRAMES[timeframe_name]
-
-st.sidebar.markdown("---")
-
-# ==================== MAIN DATA FETCHING & ANALYSIS ====================
-
-with st.spinner("🔄 Fetching data..."):
-    df, data_source = fetch_data(symbol, asset_type)
 def calculate_obv(df):
     """Calculate On-Balance Volume"""
     obv = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
@@ -2435,6 +2309,7 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
 
 # ==================== MAIN DATA FETCHING & ANALYSIS ====================
 
+with st.spinner(f"🔄 Fetching {symbol} data..."):
     df, data_source = fetch_data(symbol, asset_type)
 
 if df is not None and len(df) > 0:
