@@ -2284,7 +2284,7 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         else:
             base_confidence = 65
         
-       # ==================== SURGICAL FIX #1 APPLICATION ====================
+        # ==================== SURGICAL FIX #1 APPLICATION ====================
         current_price_model = df_clean['close'].iloc[-1]
         predicted_price = predictions[0]
         pred_change_pct = ((predicted_price - current_price_model) / current_price_model) * 100
@@ -2306,10 +2306,9 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         import traceback
         st.error(f"Details: {traceback.format_exc()}")
         return None, None, 0, None
+        # ==================== MAIN DATA FETCHING & ANALYSIS ====================
 
-# ==================== MAIN DATA FETCHING & ANALYSIS ====================
-
-with st.spinner(f"🔄 Fetching {symbol} data..."):
+with st.spinner(f"🔄 Fetching {pair_display} data..."):
     df, data_source = fetch_data(symbol, asset_type)
 
 if df is not None and len(df) > 0:
