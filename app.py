@@ -2065,12 +2065,6 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
 # ==================== STREAMLIT PAGE CONFIGURATION ====================
 ```
 
----
-
-## 📊 **Expected After Fix:**
-```
-Hold: 9 hours
-Target: +1.0% ✅ (instead of +2.0%)
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
 st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH SURGICAL FIXES")
