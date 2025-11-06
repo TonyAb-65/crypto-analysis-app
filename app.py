@@ -1946,16 +1946,89 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     
     # If C3 shows extreme risk (3+ warnings), DO NOT TRADE
     if c3['strength'] <= 2:
-        return {
-            "position": "NEUTRAL",
-            "entry": current_price,
-            "target": current_price,
-            "stop_loss": current_price,
-            "hold_hours": 0,
-            "confidence": 0,
-            "reasoning": f"DO NOT TRADE - {c3['reasoning']}",
-            "risk_reward": 0
-        }
+        # CRITICAL SAFETY: Check for dangerous hold duration vs timeframe conflict
+    if position != "NEUTRAL" and mtf_result and not mtf_result['aligned']:
+        # Check if we'd be holding into opposing 4h trend
+        signals_4h = mtf_result['signals'].get('4h', 'NEUTRAL')
+        
+        # DANGER: Holding LONG but 4h is BEARISH
+        if position == "LONG" and signals_4h == 'BEARISH' and hold_hours > 4:
+            return {
+                "position": "NEUTRAL",
+                "entry": current_price,
+                "target": current_price,
+                "stop_loss": current_price,
+                "hold_hours": 0,
+                "confidence": 0,
+                "reasoning": f"🚫 DANGEROUS CONFLICT: 1h shows LONG setup but 4h trend is BEARISH. Holding {hold_hours}h would put you IN the bearish trend. DO NOT TRADE. | " + " | ".join(reasoning_parts),
+                "risk_reward": 0
+            }
+        
+        # DANGER: Holding SHORT but 4h is BULLISH
+        elif position == "SHORT" and signals_4h == 'BULLISH' and hold_hours > 4:
+            return {
+                "position": "NEUTRAL",
+                "entry": current_price,
+                "target": current_price,
+                "stop_loss": current_price,
+                "hold_hours": 0,
+                "confidence": 0,
+                "reasoning": f"🚫 DANGEROUS CONFLICT: 1h shows SHORT setup but 4h trend is BULLISH. Holding {hold_hours}h would put you IN the bullish trend. DO NOT TRADE. | " + " | ".join(reasoning_parts),
+                "risk_reward": 0
+            }
+        
+        # CONFLICT exists but not immediately dangerous - reduce hold time
+        elif hold_hours > 4:
+            hold_hours = 3  # Short scalp only
+            confidence = int(confidence * 0.6)  # Reduce confidence
+            reasoning_parts.insert(0, f"⚠️ TIMEFRAME CONFLICT: Reduced hold to {hold_hours}h for safety")
+    
+    return {
+        "position": position,
+        "entry": entry,
+        "target": target,
+        "stop_loss": stop_loss,
+        "hold_hours": hold_hours,
+        "confidence": int(confidence),
+        "reasoning": " | ".join(reasoning_parts),
+        "risk_reward": round(risk_reward, 1)
+    }
+```
+
+---
+
+## 🎯 **What This Does:**
+
+### **Scenario 1: Your Example**
+```
+1h: BULLISH
+4h: BEARISH
+Hold: 10 hours
+Position: LONG
+
+Result: FORCED TO NEUTRAL ✅
+Reason: "Don't hold LONG for 10h when 4h is BEARISH"
+```
+
+### **Scenario 2: Safe Scalp**
+```
+1h: BULLISH
+4h: BEARISH
+Hold: 6 hours (calculated)
+
+Result: Reduced to 3 hours ✅
+Reason: "Quick scalp only - exit before 4h bearish takes over"
+Confidence: Reduced from 68% to 41%
+```
+
+### **Scenario 3: Aligned Timeframes**
+```
+1h: BULLISH
+4h: BULLISH
+Hold: 10 hours
+
+Result: No change ✅
+Reason: "All timeframes aligned - safe to hold"
     
     # Weight consultants based on C4 news importance
     news_weight = c4['weight']
