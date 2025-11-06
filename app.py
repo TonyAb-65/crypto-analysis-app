@@ -2309,7 +2309,7 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
 
 # ==================== MAIN DATA FETCHING & ANALYSIS ====================
 
-with st.spinner(f"🔄 Fetching {symbol} data..."):
+with st.spinner("🔄 Fetching data..."):
     df, data_source = fetch_data(symbol, asset_type)
 
 if df is not None and len(df) > 0:
