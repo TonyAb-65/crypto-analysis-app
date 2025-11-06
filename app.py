@@ -19,6 +19,7 @@ from pathlib import Path
 import shutil
 warnings.filterwarnings('ignore')
 
+
 # DEVELOPER FIX #6: HTTP retry logic with exponential backoff
 def get_retry_session(retries=3, backoff_factor=0.3):
     """Create requests session with retry logic"""
@@ -1763,18 +1764,27 @@ def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
     
     # Map hours to API intervals
     if timeframe_hours == 1:
+        binance_interval = "1h"
         okx_interval = "1H"
     elif timeframe_hours == 4:
+        binance_interval = "4h"
         okx_interval = "4H"
     elif timeframe_hours == 24:
+        binance_interval = "1d"
         okx_interval = "1D"
     else:
+        binance_interval = "1h"
         okx_interval = "1H"
     
     limit = 100
     
-    # Try to fetch data (Binance removed - OKX only)
+    # Try to fetch data (same logic as main fetch)
     if asset_type_param == "💰 Cryptocurrency" or asset_type_param == "🔍 Custom Search":
+        # Try Binance
+        df, source = get_binance_data(symbol_param, binance_interval, limit)
+        if df is not None and len(df) > 0:
+            return df, source
+        
         # Try OKX
         df, source = get_okx_data(symbol_param, okx_interval, limit)
         if df is not None and len(df) > 0:
@@ -1788,10 +1798,7 @@ def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
         return None, None
     
     elif asset_type_param == "💱 Forex" or asset_type_param == "🏆 Precious Metals":
-        # For forex/metals, convert okx_interval to standard format
-        interval_map = {"1H": "1h", "4H": "4h", "1D": "1d"}
-        standard_interval = interval_map.get(okx_interval, "1h")
-        df, source = get_forex_metals_data(symbol_param, standard_interval, limit)
+        df, source = get_forex_metals_data(symbol_param, binance_interval, limit)
         return df, source
     
     return None, None
@@ -1929,7 +1936,937 @@ def multi_timeframe_analysis(symbol, asset_type):
             'note': f"⚠️ Timeframe conflict: 1h={signals.get('1h', 'N/A')}, 4h={signals.get('4h', 'N/A')}, 1d={signals.get('1d', 'N/A')}"
         }
 
-# ==================== END MULTI-TIMEFRAME ANALYSIS ====================
+# ==================== END MULTI-TIMEFRAME ANALYSIS ====================        
+def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None):
+    """
+    
+    Unified Consultant Meeting - All 4 consultants discuss and reach consensus
+    
+    Returns: ONE clear recommendation with entry, target, stop loss, hold duration
+    """
+    
+    # If C3 shows extreme risk (3+ warnings), DO NOT TRADE
+    if c3['strength'] <= 2:
+        return {
+            "position": "NEUTRAL",
+            "entry": current_price,
+            "target": current_price,
+            "stop_loss": current_price,
+            "hold_hours": 0,
+            "confidence": 0,
+            "reasoning": f"DO NOT TRADE - {c3['reasoning']}",
+            "risk_reward": 0
+        }
+    
+    # Weight consultants based on C4 news importance
+    news_weight = c4['weight']
+    technical_weight = 100 - news_weight
+    
+    # Calculate technical consensus (C1 + C2)
+    technical_signals = []
+    if c1['signal'] == 'BULLISH':
+        technical_signals.append(c1['strength'])
+    elif c1['signal'] == 'BEARISH':
+        technical_signals.append(-c1['strength'])
+    
+    if c2['signal'] == 'BULLISH':
+        technical_signals.append(c2['strength'])
+    elif c2['signal'] == 'BEARISH':
+        technical_signals.append(-c2['strength'])
+    
+    technical_score = sum(technical_signals) / len(technical_signals) if technical_signals else 0
+    
+    # NEW FIX: Force NEUTRAL if high risk (2 warnings) + weak signals
+    if c3['signal'] == 'HIGH_RISK' and abs(technical_score) < 4:
+        return {
+            "position": "NEUTRAL",
+            "entry": current_price,
+            "target": current_price,
+            "stop_loss": current_price,
+            "hold_hours": 0,
+            "confidence": 0,
+            "reasoning": f"NEUTRAL - High risk ({c3['reasoning']}) with weak technical signals",
+            "risk_reward": 0
+        }
+    
+    # Calculate news score
+    news_score = 0
+    if c4['signal'] == 'BULLISH':
+        news_score = c4['strength']
+    elif c4['signal'] == 'BEARISH':
+        news_score = -c4['strength']
+    
+    # Weighted final score
+    final_score = (technical_score * technical_weight + news_score * news_weight) / 100
+    
+    # Adjust for risk (C3)
+    risk_multiplier = c3['strength'] / 10.0
+    final_score *= risk_multiplier
+    
+    # Calculate hold duration
+    if c4['weight'] >= 70:
+        hold_hours = 24  # Critical news - hold 24h
+    elif c4['weight'] >= 40:
+        hold_hours = 8   # Major news - hold 8h
+    else:
+        # Calculate based on signal strength (4-13 hours)
+        signal_magnitude = min(abs(final_score), 9)
+        hold_hours = 4 + int(signal_magnitude)
+    
+    # Determine position with SMART TARGETS based on S/R and timeframe
+    if final_score > 2:
+        position = "LONG"
+        confidence = min(abs(final_score) * 10, 90)
+        
+        # Apply multi-timeframe multiplier
+        if mtf_result and mtf_result['aligned']:
+            if mtf_result['direction'] == 'BULLISH':
+                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
+            elif mtf_result['direction'] == 'BEARISH':
+                # Timeframes disagree with position - reduce confidence
+                confidence = confidence * 0.6
+        
+        entry = current_price
+        
+        # Apply multi-timeframe multiplier
+        if mtf_result and mtf_result['aligned']:
+            if mtf_result['direction'] == 'BULLISH':
+                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
+            elif mtf_result['direction'] == 'BEARISH':
+                # Timeframes disagree with position - reduce confidence
+                confidence = confidence * 0.6
+        
+        entry = current_price
+        
+        # Calculate timeframe-adjusted max move
+        if hold_hours <= 8:  # Intraday
+            max_move_pct = 0.03  # 3% max
+        elif hold_hours <= 24:  # Same day
+            max_move_pct = 0.05  # 5% max
+        else:  # Multi-day
+            max_move_pct = 0.10  # 10% max
+        
+        # Get S/R targets from C1
+        targets_sr = c1.get('targets', {})
+        next_resistance = targets_sr.get('next_resistance')
+        
+        # Calculate S/R-based target (if resistance exists)
+        if next_resistance and next_resistance['price'] > entry:
+            # Target 2% below resistance (safety margin)
+            sr_target = next_resistance['price'] * 0.98
+            # Don't go beyond max realistic move
+            sr_target = min(sr_target, entry * (1 + max_move_pct))
+        else:
+            sr_target = entry * (1 + max_move_pct)
+        
+        target = sr_target
+        
+        # STRICT CAP: Never exceed max move
+        max_target = entry * (1 + max_move_pct)
+        if target > max_target:
+            target = max_target
+        
+        stop_loss = entry * (1 - 0.02)  # 2% stop loss
+        
+        # Calculate secondary target
+        second_resistance = targets_sr.get('second_resistance')
+        secondary_target = second_resistance['price'] * 0.98 if second_resistance else target * 1.03
+        
+    elif final_score < -2:
+        position = "SHORT"
+        confidence = min(abs(final_score) * 10, 90)
+        
+        # Apply multi-timeframe multiplier
+        if mtf_result and mtf_result['aligned']:
+            if mtf_result['direction'] == 'BEARISH':
+                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
+            elif mtf_result['direction'] == 'BULLISH':
+                # Timeframes disagree with position - reduce confidence
+                confidence = confidence * 0.6
+        
+        entry = current_price
+        
+        # Apply multi-timeframe multiplier
+        if mtf_result and mtf_result['aligned']:
+            if mtf_result['direction'] == 'BEARISH':
+                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
+            elif mtf_result['direction'] == 'BULLISH':
+                # Timeframes disagree with position - reduce confidence
+                confidence = confidence * 0.6
+        
+        entry = current_price
+        
+        # Calculate timeframe-adjusted max move
+        if hold_hours <= 8:  # Intraday
+            max_move_pct = 0.03  # 3% max
+        elif hold_hours <= 24:  # Same day
+            max_move_pct = 0.05  # 5% max
+        else:  # Multi-day
+            max_move_pct = 0.10  # 10% max
+        
+        # Get S/R targets from C1
+        targets_sr = c1.get('targets', {})
+        next_support = targets_sr.get('next_support')
+        
+        # Calculate S/R-based target (if support exists)
+        if next_support and next_support['price'] < entry:
+            # Target 2% above support (safety margin)
+            sr_target = next_support['price'] * 1.02
+            # Don't go beyond max realistic move
+            sr_target = max(sr_target, entry * (1 - max_move_pct))
+        else:
+            sr_target = entry * (1 - max_move_pct)
+        
+        target = sr_target
+        
+        # STRICT CAP: Never exceed max move
+        min_target = entry * (1 - max_move_pct)
+        if target < min_target:
+            target = min_target
+        
+        stop_loss = entry * (1 + 0.02)  # 2% stop loss
+        
+        # Calculate secondary target
+        second_support = targets_sr.get('second_support')
+        secondary_target = second_support['price'] * 1.02 if second_support else target * 0.97
+        
+    else:
+        position = "NEUTRAL"
+        confidence = 0
+        entry = current_price
+        target = current_price
+        stop_loss = current_price
+        secondary_target = current_price
+    
+    # Calculate risk/reward
+    if position != "NEUTRAL":
+        risk = abs(entry - stop_loss)
+        reward = abs(target - entry)
+        risk_reward = reward / risk if risk > 0 else 0
+    else:
+        risk_reward = 0
+    
+    # Build reasoning
+    reasoning_parts = [
+        f"C1: {c1['signal']} {c1['strength']}/10 ({c1['reasoning']})",
+        f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
+        f"C3: {c3['signal']} ({c3['reasoning']})",
+        f"C4: {c4['signal']} (weight: {c4['weight']}%)"
+    ]# Build reasoning
+    reasoning_parts = [
+        f"C1: {c1['signal']} {c1['strength']}/10 ({c1['reasoning']})",
+        f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
+        f"C3: {c3['signal']} ({c3['reasoning']})",
+        f"C4: {c4['signal']} (weight: {c4['weight']}%)"
+    ]
+    
+    # Add multi-timeframe to reasoning
+    if mtf_result:
+        reasoning_parts.append(f"MTF: {mtf_result['note']}")
+    
+    return {
+        "position": position,
+        "entry": entry,
+        "target": target,
+        "stop_loss": stop_loss,
+        "hold_hours": hold_hours,
+        "confidence": int(confidence),
+        "reasoning": " | ".join(reasoning_parts),
+        "risk_reward": round(risk_reward, 1)
+    }    # ==================== STREAMLIT PAGE CONFIGURATION ====================
+
+st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
+
+st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH SURGICAL FIXES")
+st.markdown("*Crypto, Forex, Metals + AI ML Predictions + Trading Central Format + AI Learning + News Sentiment*")
+
+if 'binance_blocked' not in st.session_state:
+    st.session_state.binance_blocked = False
+
+if st.session_state.binance_blocked:
+    st.info("ℹ️ **Note:** Binance API is blocked in your region. Using OKX and backup APIs instead.")
+
+current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+st.markdown(f"**🕐 Last Updated:** {current_time}")
+
+with st.expander("💾 Database Information", expanded=False):
+    st.info(f"""
+    **Database Location:** `{DB_PATH}`
+    
+    **File Exists:** {'✅ Yes' if DB_PATH.exists() else '❌ No'}
+    
+    **Note:** All your trade history and predictions are saved to this database file.
+    """)
+
+st.markdown("---")
+
+# ==================== SIDEBAR CONFIGURATION ====================
+st.sidebar.header("⚙️ Configuration")
+
+debug_mode = st.sidebar.checkbox("🔧 Debug Mode", value=False, help="Show detailed API information")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 💾 Database Status")
+try:
+    db_exists = DB_PATH.exists()
+    if db_exists:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM predictions")
+        pred_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM trade_results")
+        trade_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT MAX(timestamp) FROM predictions")
+        last_pred = cursor.fetchone()[0]
+        cursor.execute("SELECT MAX(trade_date) FROM trade_results")
+        last_trade = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        st.sidebar.success(f"✅ Connected")
+        st.sidebar.caption(f"📍 `{DB_PATH.name}`")
+        st.sidebar.caption(f"📊 Predictions: {pred_count}")
+        st.sidebar.caption(f"💰 Trades: {trade_count}")
+        if last_pred:
+            st.sidebar.caption(f"🕐 Last prediction: {last_pred[:16]}")
+        if last_trade:
+            st.sidebar.caption(f"🕐 Last trade: {last_trade[:16]}")
+        
+        with st.sidebar.expander("🔍 Full Path", expanded=False):
+            st.code(str(DB_PATH))
+            if st.button("📋 Copy Path"):
+                st.info("Path shown above - copy manually")
+    else:
+        st.sidebar.warning(f"⚠️ Database not found")
+        st.sidebar.caption(f"Creating at: `{DB_PATH}`")
+        init_database()
+except Exception as e:
+    st.sidebar.error(f"❌ Error")
+    with st.sidebar.expander("Details", expanded=False):
+        st.code(str(e))
+
+st.sidebar.markdown("---")
+
+# ==================== ASSET SELECTION ====================
+asset_type = st.sidebar.selectbox(
+    "📊 Select Asset Type",
+    ["💰 Cryptocurrency", "🏆 Precious Metals", "💱 Forex", "🔍 Custom Search"],
+    index=0
+)
+
+CRYPTO_SYMBOLS = {
+    "Bitcoin (BTC)": "BTC",
+    "Ethereum (ETH)": "ETH",
+    "Binance Coin (BNB)": "BNB",
+    "XRP": "XRP",
+    "Cardano (ADA)": "ADA",
+    "Solana (SOL)": "SOL",
+    "Dogecoin (DOGE)": "DOGE",
+    "Polygon (MATIC)": "MATIC",
+    "Polkadot (DOT)": "DOT",
+    "Avalanche (AVAX)": "AVAX"
+}
+
+PRECIOUS_METALS = {
+    "Gold (XAU/USD)": "XAU/USD",
+    "Silver (XAG/USD)": "XAG/USD"
+}
+
+FOREX_PAIRS = {
+    "EUR/USD": "EUR/USD",
+    "GBP/USD": "GBP/USD",
+    "USD/JPY": "USD/JPY",
+    "USD/CHF": "USD/CHF",
+    "AUD/USD": "AUD/USD",
+    "USD/CAD": "USD/CAD",
+    "NZD/USD": "NZD/USD",
+    "EUR/GBP": "EUR/GBP",
+    "EUR/JPY": "EUR/JPY",
+    "GBP/JPY": "GBP/JPY",
+    "AUD/JPY": "AUD/JPY",
+    "EUR/CHF": "EUR/CHF",
+    "AUD/CAD": "AUD/CAD",
+    "AUD/NZD": "AUD/NZD",
+    "CAD/JPY": "CAD/JPY"
+}
+
+if asset_type == "💰 Cryptocurrency":
+    pair_display = st.sidebar.selectbox("Select Cryptocurrency", list(CRYPTO_SYMBOLS.keys()), index=0)
+    symbol = CRYPTO_SYMBOLS[pair_display]
+elif asset_type == "🏆 Precious Metals":
+    pair_display = st.sidebar.selectbox("Select Metal", list(PRECIOUS_METALS.keys()), index=0)
+    symbol = PRECIOUS_METALS[pair_display]
+elif asset_type == "💱 Forex":
+    pair_display = st.sidebar.selectbox("Select Forex Pair", list(FOREX_PAIRS.keys()), index=0)
+    symbol = FOREX_PAIRS[pair_display]
+else:
+    custom_symbol = st.sidebar.text_input("Enter Symbol:", "BTC").upper()
+    pair_display = f"Custom: {custom_symbol}"
+    symbol = custom_symbol
+
+TIMEFRAMES = {
+    "5 Minutes": {"limit": 100, "binance": "5m", "okx": "5m"},
+    "15 Minutes": {"limit": 100, "binance": "15m", "okx": "15m"},
+    "30 Minutes": {"limit": 100, "binance": "30m", "okx": "30m"},
+    "1 Hour": {"limit": 100, "binance": "1h", "okx": "1H"},
+    "4 Hours": {"limit": 100, "binance": "4h", "okx": "4H"},
+    "1 Day": {"limit": 100, "binance": "1d", "okx": "1D"}
+}
+
+timeframe_name = st.sidebar.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), index=4)
+timeframe_config = TIMEFRAMES[timeframe_name]
+
+auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (60s)", value=False, 
+                                   help="Automatically refresh data every 60 seconds")
+
+if auto_refresh:
+    if 'last_refresh_time' not in st.session_state:
+        st.session_state.last_refresh_time = time.time()
+    
+    elapsed = time.time() - st.session_state.last_refresh_time
+    
+    if elapsed >= 60:
+        st.session_state.last_refresh_time = time.time()
+        st.rerun()
+    else:
+        remaining = int(60 - elapsed)
+        st.sidebar.info(f"⏱️ Next refresh in {remaining}s")
+        time.sleep(1)
+        st.rerun()
+
+st.sidebar.markdown("### 🤖 AI Configuration")
+prediction_periods = st.sidebar.slider("Prediction Periods", 1, 10, 5)
+lookback_hours = st.sidebar.slider("Context Window (hours)", 4, 12, 6, 
+                                   help="How many hours to look back for pattern analysis")
+
+st.sidebar.markdown("### 📊 Technical Indicators")
+use_sma = st.sidebar.checkbox("SMA (20, 50)", value=True)
+use_rsi = st.sidebar.checkbox("RSI (14)", value=True)
+use_macd = st.sidebar.checkbox("MACD", value=True)
+use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
+
+st.sidebar.markdown("#### 🆕 Advanced Indicators")
+use_obv = st.sidebar.checkbox("OBV (Volume)", value=False, help="On-Balance Volume - tracks volume flow")
+use_mfi = st.sidebar.checkbox("MFI (14)", value=False, help="Money Flow Index - volume-weighted RSI")
+use_adx = st.sidebar.checkbox("ADX (14)", value=False, help="Average Directional Index - trend strength")
+use_stoch = st.sidebar.checkbox("Stochastic", value=False, help="Stochastic Oscillator - momentum indicator")
+use_cci = st.sidebar.checkbox("CCI (20)", value=False, help="Commodity Channel Index - cyclical trends")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🎓 AI Learning System")
+show_learning_dashboard = st.sidebar.checkbox("📊 Show Trades Table on Page", value=False,
+                                              help="✅ Enable to see your tracked trades table")
+# ==================== AI LEARNING DASHBOARD (Sidebar) ====================
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🧠 AI Learning Progress")
+
+try:
+    conn_learn = sqlite3.connect(str(DB_PATH))
+    cursor_learn = conn_learn.cursor()
+    
+    cursor_learn.execute("SELECT COUNT(*) FROM trade_results")
+    total_closed = cursor_learn.fetchone()[0]
+    
+    if total_closed > 0:
+        cursor_learn.execute("""
+            SELECT 
+                COUNT(CASE WHEN profit_loss > 0 THEN 1 END) as wins,
+                AVG(profit_loss_pct) as avg_return,
+                SUM(profit_loss) as total_pl
+            FROM trade_results
+        """)
+        wins, avg_return, total_pl = cursor_learn.fetchone()
+        win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
+        
+        st.sidebar.metric("📊 Closed Trades", total_closed)
+        st.sidebar.metric("🎯 Win Rate", f"{win_rate:.1f}%", 
+                         delta="Good" if win_rate >= 55 else "Review" if win_rate >= 45 else "Poor")
+        st.sidebar.metric("💰 Total P/L", f"${total_pl:.2f}",
+                         delta=f"{avg_return:.2f}% avg")
+        
+        st.sidebar.markdown("**🏆 Top Indicators:**")
+        cursor_learn.execute("""
+            SELECT indicator_name, accuracy_rate, weight_multiplier
+            FROM indicator_accuracy
+            WHERE correct_count + wrong_count > 0
+            ORDER BY accuracy_rate DESC
+            LIMIT 3
+        """)
+        
+        top_indicators = cursor_learn.fetchall()
+        if top_indicators:
+            for ind_name, accuracy, weight in top_indicators:
+                emoji = "🟢" if accuracy > 0.6 else "🟡" if accuracy > 0.5 else "🔴"
+                st.sidebar.caption(f"{emoji} {ind_name}: {accuracy*100:.0f}% ({weight:.1f}x)")
+        else:
+            st.sidebar.caption("⚪ No indicator data yet")
+        
+        st.sidebar.markdown("**📈 Learning Progress:**")
+        if total_closed < 20:
+            progress = total_closed / 20
+            st.sidebar.progress(progress)
+            st.sidebar.caption(f"⚠️ {20-total_closed} more trades for basic learning")
+        elif total_closed < 50:
+            progress = min(1.0, total_closed / 50)
+            st.sidebar.progress(progress)
+            st.sidebar.caption(f"✅ Good! {50-total_closed} more for strong learning")
+        else:
+            st.sidebar.progress(1.0)
+            st.sidebar.success(f"🎯 AI well-trained!")
+        
+        with st.sidebar.expander("📊 Detailed Stats", expanded=False):
+            cursor_learn.execute("""
+                SELECT indicator_name, correct_count, wrong_count, 
+                       accuracy_rate, weight_multiplier
+                FROM indicator_accuracy
+                WHERE correct_count + wrong_count > 0
+                ORDER BY accuracy_rate DESC
+            """)
+            
+            all_indicators = cursor_learn.fetchall()
+            if all_indicators:
+                st.markdown("**All Indicators:**")
+                for ind_name, correct, wrong, accuracy, weight in all_indicators:
+                    emoji = "🟢" if accuracy > 0.6 else "🟡" if accuracy > 0.5 else "🔴"
+                    weight_arrow = "⬆️" if weight > 1.0 else "⬇️" if weight < 1.0 else "➡️"
+                    st.caption(f"{emoji} **{ind_name}**")
+                    st.caption(f"   ✅ {correct} | ❌ {wrong} | {accuracy*100:.1f}% | {weight:.2f}x {weight_arrow}")
+            
+            st.markdown("**📋 Last 3 Trades:**")
+            cursor_learn.execute("""
+                SELECT t.trade_date, p.pair, t.profit_loss_pct
+                FROM trade_results t
+                JOIN predictions p ON t.prediction_id = p.id
+                ORDER BY t.trade_date DESC
+                LIMIT 3
+            """)
+            
+            recent = cursor_learn.fetchall()
+            for date, pair, pl_pct in recent:
+                emoji = "✅" if pl_pct > 0 else "❌"
+                try:
+                    date_str = datetime.fromisoformat(date).strftime('%m/%d %H:%M')
+                except:
+                    date_str = date[:10]
+                st.caption(f"{emoji} {pair}: {pl_pct:+.2f}% ({date_str})")
+    
+    else:
+        st.sidebar.info("ℹ️ No closed trades yet")
+        st.sidebar.caption("Close trades to see AI learning!")
+    
+    conn_learn.close()
+
+except Exception as e:
+    st.sidebar.error("❌ Error loading learning stats")
+    if debug_mode:
+        st.sidebar.code(str(e))
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🔥 Market Movers")
+show_market_movers = st.sidebar.checkbox("📈 Show Top Movers", value=False,
+                                        help="Display today's top gainers and losers")
+
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
+def get_market_movers():
+    """Get top movers from popular cryptocurrencies"""
+    popular_symbols = ['BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'MATIC', 'DOT', 'AVAX']
+    movers = []
+    
+    binance_failed = False
+    for symbol_temp in popular_symbols:
+        try:
+            url = "https://api.binance.com/api/v3/ticker/24hr"
+            params = {"symbol": f"{symbol_temp}USDT"}
+            response = get_retry_session().get(url, params=params, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                price_change_pct = float(data['priceChangePercent'])
+                current_price_temp = float(data['lastPrice'])
+                volume_temp = float(data['volume'])
+                
+                movers.append({
+                    'Symbol': symbol_temp,
+                    'Price': current_price_temp,
+                    'Change %': price_change_pct,
+                    'Volume': volume_temp
+                })
+            else:
+                binance_failed = True
+                break
+        except:
+            binance_failed = True
+            break
+    
+    if binance_failed or len(movers) == 0:
+        movers = []
+        for symbol_temp in popular_symbols:
+            try:
+                url = "https://www.okx.com/api/v5/market/ticker"
+                params = {"instId": f"{symbol_temp}-USDT"}
+                response = get_retry_session().get(url, params=params, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('code') == '0' and len(data.get('data', [])) > 0:
+                        ticker = data['data'][0]
+                        current_price_temp = float(ticker['last'])
+                        open_24h = float(ticker['open24h'])
+                        price_change_pct = ((current_price_temp - open_24h) / open_24h) * 100
+                        volume_temp = float(ticker['vol24h'])
+                        
+                        movers.append({
+                            'Symbol': symbol_temp,
+                            'Price': current_price_temp,
+                            'Change %': price_change_pct,
+                            'Volume': volume_temp
+                        })
+            except:
+                continue
+    
+    if movers:
+        df_movers = pd.DataFrame(movers)
+        df_movers = df_movers.sort_values('Change %', ascending=False)
+        return df_movers
+    return None
+
+if show_market_movers:
+    with st.sidebar:
+        movers_df = get_market_movers()
+        
+        if movers_df is not None and len(movers_df) > 0:
+            st.markdown("#### 📈 Top Gainers")
+            top_gainers = movers_df.head(3)
+            for _, row in top_gainers.iterrows():
+                delta = f"+{row['Change %']:.2f}%"
+                st.metric(row['Symbol'], f"${row['Price']:,.2f}", delta)
+            
+            st.markdown("#### 📉 Top Losers")
+            top_losers = movers_df.tail(3).sort_values('Change %')
+            for _, row in top_losers.iterrows():
+                delta = f"{row['Change %']:.2f}%"
+                st.metric(row['Symbol'], f"${row['Price']:,.2f}", delta)
+        else:
+            st.warning("Unable to load market movers")
+
+# ==================== DATA FETCHING FUNCTIONS ====================
+
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
+def get_okx_data(symbol_param, interval="1H", limit=100):
+    """Fetch data from OKX API"""
+    url = "https://www.okx.com/api/v5/market/candles"
+    limit = min(limit, 300)
+    params = {"instId": f"{symbol_param}-USDT", "bar": interval, "limit": str(limit)}
+    
+    try:
+        response = get_retry_session().get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('code') != '0':
+            error_msg = data.get('msg', 'Unknown error')
+            st.warning(f"⚠️ OKX error: {error_msg}")
+            return None, None
+        
+        candles = data.get('data', [])
+        if not candles or len(candles) == 0:
+            st.warning(f"⚠️ OKX returned no data")
+            return None, None
+        
+        df = pd.DataFrame(candles, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume', 
+            'volCcy', 'volCcyQuote', 'confirm'
+        ])
+        df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
+        
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        st.success(f"✅ Loaded {len(df)} data points from OKX")
+        return df, "OKX"
+    except Exception as e:
+        st.warning(f"⚠️ OKX API failed: {str(e)}")
+        return None, None
+
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
+def get_binance_data(symbol_param, interval="1h", limit=100):
+    """Fetch data from Binance API"""
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": f"{symbol_param}USDT", "interval": interval, "limit": limit}
+    
+    try:
+        response = get_retry_session().get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if isinstance(data, dict) and 'code' in data:
+            st.warning(f"⚠️ Binance error: {data.get('msg', 'Unknown')}")
+            return None, None
+        
+        if not data or len(data) == 0:
+            st.warning("⚠️ Binance returned no data")
+            return None, None
+        
+        df = pd.DataFrame(data, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'number_of_trades',
+            'taker_buy_base', 'taker_buy_quote', 'ignore'
+        ])
+        
+        df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        st.success(f"✅ Loaded {len(df)} data points from Binance")
+        return df, "Binance"
+    except Exception as e:
+        st.warning(f"⚠️ Binance API failed: {str(e)}")
+        return None, None
+
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
+def get_cryptocompare_data(symbol_param, limit=100):
+    """Fetch data from CryptoCompare API"""
+    url = "https://min-api.cryptocompare.com/data/v2/histohour"
+    params = {"fsym": symbol_param, "tsym": "USD", "limit": limit}
+    
+    try:
+        response = get_retry_session().get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('Response') != 'Success':
+            st.warning(f"⚠️ CryptoCompare error: {data.get('Message', 'Unknown')}")
+            return None, None
+        
+        hist_data = data.get('Data', {}).get('Data', [])
+        if not hist_data:
+            st.warning("⚠️ CryptoCompare returned no data")
+            return None, None
+        
+        df = pd.DataFrame(hist_data)
+        df['timestamp'] = pd.to_datetime(df['time'], unit='s')
+        df = df.rename(columns={
+            'open': 'open', 
+            'high': 'high', 
+            'low': 'low', 
+            'close': 'close', 
+            'volumefrom': 'volume'
+        })
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        st.success(f"✅ Loaded {len(df)} data points from CryptoCompare")
+        return df, "CryptoCompare"
+    except Exception as e:
+        st.warning(f"⚠️ CryptoCompare API failed: {str(e)}")
+        return None, None
+
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
+def get_coingecko_data(symbol_param, limit=100):
+    """Fetch data from CoinGecko API"""
+    symbol_map = {
+        'BTC': 'bitcoin',
+        'ETH': 'ethereum',
+        'BNB': 'binancecoin',
+        'XRP': 'ripple',
+        'ADA': 'cardano',
+        'SOL': 'solana',
+        'DOGE': 'dogecoin',
+        'MATIC': 'matic-network',
+        'DOT': 'polkadot',
+        'AVAX': 'avalanche-2'
+    }
+    
+    coin_id = symbol_map.get(symbol_param, symbol_param.lower())
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+    params = {"vs_currency": "usd", "days": "7", "interval": "hourly"}
+    
+    try:
+        response = get_retry_session().get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'prices' not in data:
+            st.warning("⚠️ CoinGecko: No price data")
+            return None, None
+        
+        prices = data['prices']
+        volumes = data.get('total_volumes', [[p[0], 1000000] for p in prices])
+        
+        df = pd.DataFrame({
+            'timestamp': [pd.to_datetime(p[0], unit='ms') for p in prices],
+            'close': [p[1] for p in prices],
+            'volume': [v[1] for v in volumes]
+        })
+        
+        df['open'] = df['close']
+        df['high'] = df['close'] * 1.001
+        df['low'] = df['close'] * 0.999
+        
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.tail(limit).reset_index(drop=True)
+        st.success(f"✅ Loaded {len(df)} data points from CoinGecko")
+        return df, "CoinGecko"
+    except Exception as e:
+        st.warning(f"⚠️ CoinGecko API failed: {str(e)}")
+        return None, None
+
+@st.cache_data(ttl=300, show_spinner=False)  # DEVELOPER FIX #7
+def get_forex_metals_data(symbol_param, interval="60min", limit=100):
+    """Fetch forex and precious metals data using Twelve Data API"""
+    interval_map = {
+        "5m": "5min",
+        "10m": "15min",
+        "15m": "15min",
+        "30m": "30min",
+        "1h": "1h",
+        "4h": "4h",
+        "1d": "1day"
+    }
+    
+    mapped_interval = interval_map.get(interval, "1h")
+    
+    try:
+        api_key = st.secrets.get("TWELVE_DATA_API_KEY", None)
+    except:
+        api_key = None
+    
+    url = "https://api.twelvedata.com/time_series"
+    params = {
+        "symbol": symbol_param,
+        "interval": mapped_interval,
+        "outputsize": min(limit, 100),
+        "format": "JSON"
+    }
+    
+    if api_key:
+        params["apikey"] = api_key
+    
+    try:
+        response = get_retry_session().get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'status' in data and data['status'] == 'error':
+            st.warning(f"⚠️ Twelve Data error: {data.get('message', 'Unknown error')}")
+            return None, None
+        
+        if 'values' not in data or not data['values']:
+            st.warning(f"⚠️ No data returned for {symbol_param}")
+            return None, None
+        
+        values = data['values']
+        df = pd.DataFrame(values)
+        
+        df = df.rename(columns={
+            'datetime': 'timestamp',
+            'open': 'open',
+            'high': 'high',
+            'low': 'low',
+            'close': 'close',
+            'volume': 'volume'
+        })
+        
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        
+        for col in ['open', 'high', 'low', 'close']:
+            df[col] = df[col].astype(float)
+        
+        if 'volume' in df.columns:
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
+        else:
+            df['volume'] = 0
+        
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        
+        api_status = "Twelve Data (API Key)" if api_key else "Twelve Data (Free)"
+        st.success(f"✅ Loaded {len(df)} data points from {api_status}")
+        return df, api_status
+        
+    except Exception as e:
+        st.warning(f"⚠️ Twelve Data API failed: {str(e)}")
+        
+    try:
+        st.info("📊 Using sample data for demonstration...")
+        dates = pd.date_range(end=datetime.now(), periods=limit, freq='H')
+        
+        base_price = 1.0900 if 'EUR' in symbol_param else 110.50 if 'JPY' in symbol_param else 1800 if 'XAU' in symbol_param else 1.2500
+        
+        prices = []
+        current_price_calc = base_price
+        for i in range(limit):
+            change = np.random.normal(0, base_price * 0.002)
+            current_price_calc += change
+            prices.append(current_price_calc)
+        
+        df = pd.DataFrame({
+            'timestamp': dates,
+            'open': prices,
+            'high': [p * (1 + abs(np.random.normal(0, 0.001))) for p in prices],
+            'low': [p * (1 - abs(np.random.normal(0, 0.001))) for p in prices],
+            'close': [p + np.random.normal(0, p * 0.001) for p in prices],
+            'volume': [np.random.randint(1000, 10000) for _ in range(limit)]
+        })
+        
+        st.warning("⚠️ Using sample data. Real data unavailable.")
+        return df, "Sample Data"
+        
+    except Exception as e:
+        st.error(f"❌ Error generating sample data: {str(e)}")
+        return None, None
+
+def fetch_data(symbol_param, asset_type_param):
+    """Main function to fetch data with multiple fallbacks"""
+    if asset_type_param == "💰 Cryptocurrency" or asset_type_param == "🔍 Custom Search":
+        interval_map = timeframe_config
+        
+        st.info(f"🔄 Trying to fetch {symbol_param} data...")
+        
+        df, source = get_binance_data(symbol_param, interval_map['binance'], interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.info("🔄 Trying backup API (OKX)...")
+        df, source = get_okx_data(symbol_param, interval_map['okx'], interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.info("🔄 Trying backup API (CryptoCompare)...")
+        df, source = get_cryptocompare_data(symbol_param, interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.info("🔄 Trying backup API (CoinGecko)...")
+        df, source = get_coingecko_data(symbol_param, interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.error(f"❌ Could not fetch data for {symbol_param}")
+        return None, None
+    
+    elif asset_type_param == "💱 Forex" or asset_type_param == "🏆 Precious Metals":
+        interval_map = timeframe_config
+        
+        st.info(f"🔄 Fetching {symbol_param} data...")
+        
+        interval = interval_map['binance']
+        df, source = get_forex_metals_data(symbol_param, interval, interval_map['limit'])
+        
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.error(f"❌ Could not fetch data for {symbol_param}")
+        return None, None
+    
+    return None, None
+
+# ==================== TECHNICAL INDICATORS ====================
+
 def calculate_obv(df):
     """Calculate On-Balance Volume"""
     obv = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
