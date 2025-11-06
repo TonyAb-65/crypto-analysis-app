@@ -1260,12 +1260,13 @@ def calculate_support_resistance_levels(df, current_price):
 def find_support_resistance_zones(df, lookback=100):
     """
     Find S/R levels where price reversed multiple times
-    Similar to how traders draw horizontal lines on charts
+    DYNAMIC: Updates when levels are broken (support becomes resistance and vice versa)
     """
     
     if len(df) < lookback:
         lookback = len(df)
     
+    current_price = df['close'].iloc[-1]
     highs = df['high'].tail(lookback)
     lows = df['low'].tail(lookback)
     
@@ -1315,34 +1316,101 @@ def find_support_resistance_zones(df, lookback=100):
                 touches += 1
         return touches
     
-    # Rank S/R by strength (more touches = stronger)
+    # NEW: Check if level was broken (role reversal)
+    def is_level_broken(price_level, df, current_price):
+        """
+        Detect if price broke through a level
+        - If price is now ABOVE old support → support became resistance
+        - If price is now BELOW old resistance → resistance became support
+        """
+        # Check recent price action (last 20 candles)
+        recent_lows = df['low'].tail(20)
+        recent_highs = df['high'].tail(20)
+        
+        # Level was support, but price broke below it
+        if current_price < price_level * 0.98:  # 2% below
+            if any(recent_lows > price_level * 0.98):  # Was above recently
+                return 'SUPPORT_BROKEN'
+        
+        # Level was resistance, but price broke above it
+        if current_price > price_level * 1.02:  # 2% above
+            if any(recent_highs < price_level * 1.02):  # Was below recently
+                return 'RESISTANCE_BROKEN'
+        
+        return 'INTACT'
+    
+    # Build resistance list with role reversal logic
     resistance_strength = []
     for level in strong_resistance:
         touches = count_touches(level, df.tail(lookback))
-        if touches >= 2:  # Only keep levels tested at least twice
+        status = is_level_broken(level, df, current_price)
+        
+        # If resistance was broken, it becomes support
+        if status == 'RESISTANCE_BROKEN':
+            continue  # Skip, will add to support instead
+        
+        if touches >= 2:
             resistance_strength.append({
                 'price': level,
                 'touches': touches,
-                'strength': 'STRONG' if touches >= 3 else 'MEDIUM'
+                'strength': 'STRONG' if touches >= 3 else 'MEDIUM',
+                'status': status
             })
     
+    # Build support list with role reversal logic
     support_strength = []
     for level in strong_support:
         touches = count_touches(level, df.tail(lookback))
+        status = is_level_broken(level, df, current_price)
+        
+        # If support was broken, it becomes resistance
+        if status == 'SUPPORT_BROKEN':
+            continue  # Skip, will add to resistance instead
+        
         if touches >= 2:
             support_strength.append({
                 'price': level,
                 'touches': touches,
-                'strength': 'STRONG' if touches >= 3 else 'MEDIUM'
+                'strength': 'STRONG' if touches >= 3 else 'MEDIUM',
+                'status': status
             })
     
+    # NEW: Add broken levels to opposite list (role reversal)
+    for level in strong_resistance:
+        status = is_level_broken(level, df, current_price)
+        if status == 'RESISTANCE_BROKEN':
+            touches = count_touches(level, df.tail(lookback))
+            if touches >= 2:
+                support_strength.append({
+                    'price': level,
+                    'touches': touches,
+                    'strength': 'FLIPPED',  # Was resistance, now support
+                    'status': 'FLIPPED'
+                })
+    
+    for level in strong_support:
+        status = is_level_broken(level, df, current_price)
+        if status == 'SUPPORT_BROKEN':
+            touches = count_touches(level, df.tail(lookback))
+            if touches >= 2:
+                resistance_strength.append({
+                    'price': level,
+                    'touches': touches,
+                    'strength': 'FLIPPED',  # Was support, now resistance
+                    'status': 'FLIPPED'
+                })
+    
+    # NEW: Filter to only show RELEVANT levels (within 10% of current price)
+    relevant_resistance = [r for r in resistance_strength if r['price'] < current_price * 1.10]
+    relevant_support = [s for s in support_strength if s['price'] > current_price * 0.90]
+    
     # Sort by price
-    resistance_strength.sort(key=lambda x: x['price'], reverse=True)
-    support_strength.sort(key=lambda x: x['price'], reverse=True)
+    relevant_resistance.sort(key=lambda x: x['price'], reverse=True)
+    relevant_support.sort(key=lambda x: x['price'], reverse=True)
     
     return {
-        'resistance': resistance_strength,
-        'support': support_strength
+        'resistance': relevant_resistance,
+        'support': relevant_support
     }
 
 
@@ -1409,6 +1477,7 @@ def check_at_key_level(current_price, sr_zones, tolerance=0.01):
             return True, 'SUPPORT', s
     
     return False, None, None
+
 # ==================== CONSULTANT MEETING SYSTEM ====================
 
 def consultant_c1_pattern_structure(df, symbol):
