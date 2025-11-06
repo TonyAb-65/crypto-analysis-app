@@ -1938,7 +1938,6 @@ def multi_timeframe_analysis(symbol, asset_type):
 # ==================== END MULTI-TIMEFRAME ANALYSIS ====================        
 def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None):
     """
-    
     Unified Consultant Meeting - All 4 consultants discuss and reach consensus
     
     Returns: ONE clear recommendation with entry, target, stop loss, hold duration
@@ -1946,89 +1945,16 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     
     # If C3 shows extreme risk (3+ warnings), DO NOT TRADE
     if c3['strength'] <= 2:
-        # CRITICAL SAFETY: Check for dangerous hold duration vs timeframe conflict
-    if position != "NEUTRAL" and mtf_result and not mtf_result['aligned']:
-        # Check if we'd be holding into opposing 4h trend
-        signals_4h = mtf_result['signals'].get('4h', 'NEUTRAL')
-        
-        # DANGER: Holding LONG but 4h is BEARISH
-        if position == "LONG" and signals_4h == 'BEARISH' and hold_hours > 4:
-            return {
-                "position": "NEUTRAL",
-                "entry": current_price,
-                "target": current_price,
-                "stop_loss": current_price,
-                "hold_hours": 0,
-                "confidence": 0,
-                "reasoning": f"🚫 DANGEROUS CONFLICT: 1h shows LONG setup but 4h trend is BEARISH. Holding {hold_hours}h would put you IN the bearish trend. DO NOT TRADE. | " + " | ".join(reasoning_parts),
-                "risk_reward": 0
-            }
-        
-        # DANGER: Holding SHORT but 4h is BULLISH
-        elif position == "SHORT" and signals_4h == 'BULLISH' and hold_hours > 4:
-            return {
-                "position": "NEUTRAL",
-                "entry": current_price,
-                "target": current_price,
-                "stop_loss": current_price,
-                "hold_hours": 0,
-                "confidence": 0,
-                "reasoning": f"🚫 DANGEROUS CONFLICT: 1h shows SHORT setup but 4h trend is BULLISH. Holding {hold_hours}h would put you IN the bullish trend. DO NOT TRADE. | " + " | ".join(reasoning_parts),
-                "risk_reward": 0
-            }
-        
-        # CONFLICT exists but not immediately dangerous - reduce hold time
-        elif hold_hours > 4:
-            hold_hours = 3  # Short scalp only
-            confidence = int(confidence * 0.6)  # Reduce confidence
-            reasoning_parts.insert(0, f"⚠️ TIMEFRAME CONFLICT: Reduced hold to {hold_hours}h for safety")
-    
-    return {
-        "position": position,
-        "entry": entry,
-        "target": target,
-        "stop_loss": stop_loss,
-        "hold_hours": hold_hours,
-        "confidence": int(confidence),
-        "reasoning": " | ".join(reasoning_parts),
-        "risk_reward": round(risk_reward, 1)
-    }
-```
-
----
-
-## 🎯 **What This Does:**
-
-### **Scenario 1: Your Example**
-```
-1h: BULLISH
-4h: BEARISH
-Hold: 10 hours
-Position: LONG
-
-Result: FORCED TO NEUTRAL ✅
-Reason: "Don't hold LONG for 10h when 4h is BEARISH"
-```
-
-### **Scenario 2: Safe Scalp**
-```
-1h: BULLISH
-4h: BEARISH
-Hold: 6 hours (calculated)
-
-Result: Reduced to 3 hours ✅
-Reason: "Quick scalp only - exit before 4h bearish takes over"
-Confidence: Reduced from 68% to 41%
-```
-
-### **Scenario 3: Aligned Timeframes**
-```
-1h: BULLISH
-4h: BULLISH
-Hold: 10 hours
-
-Result: No change ✅
-Reason: "All timeframes aligned - safe to hold"
+        return {
+            "position": "NEUTRAL",
+            "entry": current_price,
+            "target": current_price,
+            "stop_loss": current_price,
+            "hold_hours": 0,
+            "confidence": 0,
+            "reasoning": f"DO NOT TRADE - {c3['reasoning']}",
+            "risk_reward": 0
+        }
     
     # Weight consultants based on C4 news importance
     news_weight = c4['weight']
@@ -2100,16 +2026,6 @@ Reason: "All timeframes aligned - safe to hold"
         
         entry = current_price
         
-        # Apply multi-timeframe multiplier
-        if mtf_result and mtf_result['aligned']:
-            if mtf_result['direction'] == 'BULLISH':
-                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
-            elif mtf_result['direction'] == 'BEARISH':
-                # Timeframes disagree with position - reduce confidence
-                confidence = confidence * 0.6
-        
-        entry = current_price
-        
         # Calculate timeframe-adjusted max move
         if hold_hours <= 8:  # Intraday
             max_move_pct = 0.03  # 3% max
@@ -2147,16 +2063,6 @@ Reason: "All timeframes aligned - safe to hold"
     elif final_score < -2:
         position = "SHORT"
         confidence = min(abs(final_score) * 10, 90)
-        
-        # Apply multi-timeframe multiplier
-        if mtf_result and mtf_result['aligned']:
-            if mtf_result['direction'] == 'BEARISH':
-                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
-            elif mtf_result['direction'] == 'BULLISH':
-                # Timeframes disagree with position - reduce confidence
-                confidence = confidence * 0.6
-        
-        entry = current_price
         
         # Apply multi-timeframe multiplier
         if mtf_result and mtf_result['aligned']:
@@ -2224,17 +2130,48 @@ Reason: "All timeframes aligned - safe to hold"
         f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
         f"C3: {c3['signal']} ({c3['reasoning']})",
         f"C4: {c4['signal']} (weight: {c4['weight']}%)"
-    ]# Build reasoning
-    reasoning_parts = [
-        f"C1: {c1['signal']} {c1['strength']}/10 ({c1['reasoning']})",
-        f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
-        f"C3: {c3['signal']} ({c3['reasoning']})",
-        f"C4: {c4['signal']} (weight: {c4['weight']}%)"
     ]
     
     # Add multi-timeframe to reasoning
     if mtf_result:
         reasoning_parts.append(f"MTF: {mtf_result['note']}")
+    
+    # CRITICAL SAFETY: Check for dangerous hold duration vs timeframe conflict
+    if position != "NEUTRAL" and mtf_result and not mtf_result['aligned']:
+        # Check if we'd be holding into opposing 4h trend
+        signals_4h = mtf_result['signals'].get('4h', 'NEUTRAL')
+        
+        # DANGER: Holding LONG but 4h is BEARISH
+        if position == "LONG" and signals_4h == 'BEARISH' and hold_hours > 4:
+            return {
+                "position": "NEUTRAL",
+                "entry": current_price,
+                "target": current_price,
+                "stop_loss": current_price,
+                "hold_hours": 0,
+                "confidence": 0,
+                "reasoning": f"DANGEROUS CONFLICT: Short-term LONG setup but 4h trend is BEARISH. Holding {hold_hours}h would enter bearish zone. DO NOT TRADE.",
+                "risk_reward": 0
+            }
+        
+        # DANGER: Holding SHORT but 4h is BULLISH
+        elif position == "SHORT" and signals_4h == 'BULLISH' and hold_hours > 4:
+            return {
+                "position": "NEUTRAL",
+                "entry": current_price,
+                "target": current_price,
+                "stop_loss": current_price,
+                "hold_hours": 0,
+                "confidence": 0,
+                "reasoning": f"DANGEROUS CONFLICT: Short-term SHORT setup but 4h trend is BULLISH. Holding {hold_hours}h would enter bullish zone. DO NOT TRADE.",
+                "risk_reward": 0
+            }
+        
+        # CONFLICT exists but not immediately dangerous - reduce hold time
+        elif hold_hours > 4:
+            hold_hours = 3
+            confidence = int(confidence * 0.6)
+            reasoning_parts.insert(0, f"TIMEFRAME CONFLICT: Reduced hold to {hold_hours}h for safety")
     
     return {
         "position": position,
@@ -2245,7 +2182,7 @@ Reason: "All timeframes aligned - safe to hold"
         "confidence": int(confidence),
         "reasoning": " | ".join(reasoning_parts),
         "risk_reward": round(risk_reward, 1)
-    }    
+    }
     # ==================== STREAMLIT PAGE CONFIGURATION ====================
 
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
