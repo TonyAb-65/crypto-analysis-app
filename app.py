@@ -2688,9 +2688,110 @@ def fetch_data(symbol_param, asset_type_param):
             return df, source
         
         st.error(f"❌ Could not fetch data for {symbol_param}")
-        return None, None
+        
+return None, None
+
+# ==================== TECHNICAL INDICATORS ====================
+
+def calculate_obv(df):
+    """Calculate On-Balance Volume"""
+    obv = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
+    return obv
+
+def calculate_mfi(df, period=14):
+    """Calculate Money Flow Index"""
+    typical_price = (df['high'] + df['low'] + df['close']) / 3
+    money_flow = typical_price * df['volume']
     
-    return None, None
+    positive_flow = pd.Series(0.0, index=df.index)
+    negative_flow = pd.Series(0.0, index=df.index)
+    
+    positive_flow[df['close'] > df['close'].shift(1)] = money_flow[df['close'] > df['close'].shift(1)]
+    negative_flow[df['close'] < df['close'].shift(1)] = money_flow[df['close'] < df['close'].shift(1)]
+    
+    positive_mf = positive_flow.rolling(window=period).sum()
+    negative_mf = negative_flow.rolling(window=period).sum()
+    
+    mfi = 100 - (100 / (1 + positive_mf / (negative_mf + 1e-10)))
+    return mfi.fillna(50)
+
+def calculate_adx(df, period=14):
+    """Calculate Average Directional Index"""
+    high_diff = df['high'].diff()
+    low_diff = -df['low'].diff()
+    
+    pos_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0)
+    neg_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0)
+    
+    high_low = df['high'] - df['low']
+    high_close = np.abs(df['high'] - df['close'].shift())
+    low_close = np.abs(df['low'] - df['close'].shift())
+    ranges = pd.concat([high_low, high_close, low_close], axis=1)
+    true_range = ranges.max(axis=1)
+    atr = true_range.rolling(window=period).mean()
+    
+    pos_di = 100 * (pos_dm.rolling(window=period).mean() / (atr + 1e-10))
+    neg_di = 100 * (neg_dm.rolling(window=period).mean() / (atr + 1e-10))
+    
+    dx = 100 * np.abs(pos_di - neg_di) / (pos_di + neg_di + 1e-10)
+    adx = dx.rolling(window=period).mean()
+    
+    return adx.fillna(0), pos_di.fillna(0), neg_di.fillna(0)
+
+def calculate_stochastic(df, k_period=14, d_period=3):
+    """Calculate Stochastic Oscillator"""
+    low_min = df['low'].rolling(window=k_period).min()
+    high_max = df['high'].rolling(window=k_period).max()
+    
+    k = 100 * (df['close'] - low_min) / (high_max - low_min + 1e-10)
+    d = k.rolling(window=d_period).mean()
+    
+    return k.fillna(50), d.fillna(50)
+
+def calculate_cci(df, period=20):
+    """Calculate Commodity Channel Index"""
+    typical_price = (df['high'] + df['low'] + df['close']) / 3
+    sma = typical_price.rolling(window=period).mean()
+    mean_deviation = typical_price.rolling(window=period).apply(lambda x: np.abs(x - x.mean()).mean())
+    
+    cci = (typical_price - sma) / (0.015 * mean_deviation + 1e-10)
+    return cci.fillna(0)
+
+def calculate_technical_indicators(df):
+    """Calculate all technical indicators"""
+    try:
+        df['sma_20'] = df['close'].rolling(window=20).mean()
+        df['sma_50'] = df['close'].rolling(window=50).mean()
+        
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / (loss + 1e-10)
+        df['rsi'] = 100 - (100 / (1 + rs))
+        
+        exp1 = df['close'].ewm(span=12, adjust=False).mean()
+        exp2 = df['close'].ewm(span=26, adjust=False).mean()
+        df['macd'] = exp1 - exp2
+        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+        df['macd_hist'] = df['macd'] - df['macd_signal']
+        
+        df['bb_middle'] = df['close'].rolling(window=20).mean()
+        bb_std = df['close'].rolling(window=20).std()
+        df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
+        df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
+        
+        df['volatility'] = df['close'].pct_change().rolling(window=20).std()
+        
+        df['obv'] = calculate_obv(df)
+        df['mfi'] = calculate_mfi(df, 14)
+        df['adx'], df['plus_di'], df['minus_di'] = calculate_adx(df, 14)
+        df['stoch_k'], df['stoch_d'] = calculate_stochastic(df, 14, 3)
+        df['cci'] = calculate_cci(df, 20)
+        
+        return df
+    except Exception as e:
+        st.error(f"Error calculating indicators: {str(e)}")
+        return df
 
 #==================== AI MODEL TRAINING ====================
 
