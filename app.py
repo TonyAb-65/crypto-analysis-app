@@ -3514,34 +3514,9 @@ if df is not None and len(df) > 0:
         st.info(f"⏰ Hold Duration: {meeting_result['hold_hours']} hours")
         st.info(f"🎯 Confidence: {meeting_result['confidence']}%")
         st.info(f"💰 Risk/Reward Ratio: 1:{meeting_result['risk_reward']}")
-    # Display Multi-Timeframe Analysis
+   # Display Multi-Timeframe Analysis
     if mtf_result:
         with st.expander("🔍 Multi-Timeframe Analysis", expanded=True):
-            col_mtf1, col_mtf2, col_mtf3 = st.columns(3)
-            
-            with col_mtf1:
-                signal_1h = mtf_result['signals'].get('1h', 'N/A')
-                emoji_1h = "🟢" if signal_1h == 'BULLISH' else "🔴" if signal_1h == 'BEARISH' else "⚪"
-                st.metric("1-Hour", f"{emoji_1h} {signal_1h}")
-                st.caption(mtf_result['details'].get('1h', ''))
-            
-            with col_mtf2:
-                signal_4h = mtf_result['signals'].get('4h', 'N/A')
-                emoji_4h = "🟢" if signal_4h == 'BULLISH' else "🔴" if signal_4h == 'BEARISH' else "⚪"
-                st.metric("4-Hour", f"{emoji_4h} {signal_4h}")
-                st.caption(mtf_result['details'].get('4h', ''))
-            
-            with col_mtf3:
-                signal_1d = mtf_result['signals'].get('1d', 'N/A')
-                emoji_1d = "🟢" if signal_1d == 'BULLISH' else "🔴" if signal_1d == 'BEARISH' else "⚪"
-                st.metric("1-Day", f"{emoji_1d} {signal_1d}")
-                st.caption(mtf_result['details'].get('1d', ''))
-            
-            if mtf_result['aligned']:
-                st.success(mtf_result['note'])
-            else:
-                st.warning(mtf_result['note'])
-    
             col_mtf1, col_mtf2, col_mtf3 = st.columns(3)
             
             with col_mtf1:
@@ -3571,8 +3546,7 @@ if df is not None and len(df) > 0:
     st.text(meeting_result['reasoning'])
     st.markdown("---")
     
-    # ==================== END CONSULTANT MEETING ====================
-    
+    # ==================== END CONSULTANT MEETING ====================    
     st.warning("⚠️ **Risk Warning:** Use stop-losses. Never risk more than 1-2% per trade. Not financial advice.")
     
     st.markdown("---")
