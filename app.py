@@ -1755,7 +1755,50 @@ def multi_timeframe_analysis(symbol, asset_type):
         }
 # ==================== MULTI-TIMEFRAME ANALYSIS ====================
 
-def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
+def fetch_data(symbol_param, asset_type_param):
+    """Main function to fetch data - OKX primary (Binance removed)"""
+    if asset_type_param == "💰 Cryptocurrency" or asset_type_param == "🔍 Custom Search":
+        interval_map = timeframe_config
+        
+        st.info("🔄 Fetching data from OKX...")
+        
+        # OKX is now primary
+        df, source = get_okx_data(symbol_param, interval_map['okx'], interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.info("🔄 Trying backup API (CryptoCompare)...")
+        df, source = get_cryptocompare_data(symbol_param, interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.info("🔄 Trying backup API (CoinGecko)...")
+        df, source = get_coingecko_data(symbol_param, interval_map['limit'])
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.error(f"❌ Could not fetch data for {symbol_param}")
+        return None, None
+    
+    elif asset_type_param == "💱 Forex" or asset_type_param == "🏆 Precious Metals":
+        interval_map = timeframe_config
+        
+        st.info("🔄 Fetching forex/metals data...")
+        
+        interval = interval_map['binance']
+        df, source = get_forex_metals_data(symbol_param, interval, interval_map['limit'])
+        
+        if df is not None and len(df) > 0:
+            return df, source
+        
+        st.error(f"❌ Could not fetch data for {symbol_param}")
+        return None, None
+    
+    return None, None
+
+
+# Then your existing function continues:
+ def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
     """
     Fetch data for a specific timeframe (used by multi-timeframe analysis)
     timeframe_hours: 1, 4, or 24 (for 1h, 4h, 1d)
