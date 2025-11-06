@@ -3744,12 +3744,7 @@ if df is not None and len(df) > 0:
     st.markdown("**Detailed Consultant Analysis:**")
     st.text(meeting_result['reasoning'])
     st.markdown("---")
-    st.markdown("**Detailed Consultant Analysis:**")
-    st.text(meeting_result['reasoning'])
-    st.markdown("---")
-    st.markdown("**Detailed Consultant Analysis:**")
-    st.text(meeting_result['reasoning'])
-    st.markdown("---")
+    
     # ==================== END CONSULTANT MEETING ====================
     
     st.warning("⚠️ **Risk Warning:** Use stop-losses. Never risk more than 1-2% per trade. Not financial advice.")
