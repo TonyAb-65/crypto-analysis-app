@@ -3488,7 +3488,7 @@ if df is not None and len(df) > 0:
     st.info("🔄 Analyzing multiple timeframes for confirmation...")
     mtf_result = multi_timeframe_analysis(symbol, asset_type)
     
-    meeting_result = consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result)
+    meeting_result = consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result, asset_type)
     
     st.markdown("---")
     st.markdown("### 🏢 CONSULTANT MEETING RESULT")
