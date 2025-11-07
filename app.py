@@ -1910,10 +1910,12 @@ def multi_timeframe_analysis(symbol, asset_type):
 
 # ==================== END MULTI-TIMEFRAME ANALYSIS ====================
 
-def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None, asset_type=None):
+def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None, asset_type=None, timeframe_hours=4):
     """
     Unified Consultant Meeting - All 4 consultants discuss and reach consensus
     Returns: ONE clear recommendation with entry, target, stop loss, hold duration
+    
+    NEW: timeframe_hours parameter for 1-candle prediction
     """
     
     # If C3 shows extreme risk (3+ warnings), DO NOT TRADE
@@ -1974,15 +1976,24 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     risk_multiplier = c3['strength'] / 10.0
     final_score *= risk_multiplier
     
-    # Calculate hold duration
+    # ==================== NEW: 1-CANDLE PREDICTION LOGIC ====================
+    # Calculate hold duration - MATCH TIMEFRAME (predict only next candle)
     if c4['weight'] >= 70:
-        hold_hours = 24  # Critical news - hold 24h
+        # Critical news - can hold 2-3 candles max
+        if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
+            hold_hours = timeframe_hours * 2  # Forex: 2 candles
+        else:
+            hold_hours = timeframe_hours * 3  # Crypto: 3 candles (more volatile, bigger moves)
     elif c4['weight'] >= 40:
-        hold_hours = 8   # Major news - hold 8h
+        # Major news - hold 1-2 candles
+        if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
+            hold_hours = timeframe_hours * 1  # Forex: 1 candle
+        else:
+            hold_hours = timeframe_hours * 2  # Crypto: 2 candles
     else:
-        # Calculate based on signal strength (4-13 hours)
-        signal_magnitude = min(abs(final_score), 9)
-        hold_hours = 4 + int(signal_magnitude)
+        # NORMAL: Predict ONLY next candle (most common case)
+        hold_hours = timeframe_hours  # 1 candle prediction ✅
+    # ==================== END 1-CANDLE PREDICTION ====================
     
     # Determine position with SMART TARGETS based on S/R and timeframe
     if final_score > 2:
@@ -1999,7 +2010,7 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         
         entry = current_price
         
-        # ASSET-AWARE: Calculate timeframe-adjusted max move
+        # ASSET-AWARE: Calculate timeframe-adjusted max move (based on actual hold time)
         if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
             # Forex/Metals are less volatile
             if hold_hours <= 12:  # Short-term (up to half day)
@@ -2053,7 +2064,7 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         
         entry = current_price
         
-        # ASSET-AWARE: Calculate timeframe-adjusted max move
+        # ASSET-AWARE: Calculate timeframe-adjusted max move (based on actual hold time)
         if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
             # Forex/Metals are less volatile
             if hold_hours <= 12:  # Short-term (up to half day)
@@ -2132,7 +2143,6 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     }
 
 # ==================== STREAMLIT PAGE CONFIGURATION ====================
-
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
 st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH SURGICAL FIXES")
