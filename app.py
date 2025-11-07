@@ -2150,43 +2150,7 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     }
 
 # ==================== STREAMLIT PAGE CONFIGURATION ====================
-```
 
----
-
-## 🎯 **KEY CHANGES MADE:**
-
-### **1. Line 41:** REMOVED the aggressive "high risk + weak signals" check
-- This was blocking trades with C1=6/10, C2=6/10 (score=6 > 4)
-
-### **2. Lines 53-58:** Less harsh risk penalty
-- OLD: Cut score in HALF for high risk
-- NEW: Only reduce by 30% (minimum 70% of original)
-
-### **3. Lines 97 & 152:** Less harsh MTF conflict penalty
-- OLD: 0.6 multiplier (40% cut)
-- NEW: 0.8 multiplier (20% cut)
-
----
-
-## ✅ **EXPECTED RESULTS:**
-
-Your example (C1: BULLISH 6/10, C2: BULLISH 6/10, HIGH_RISK):
-
-**BEFORE:**
-```
-Score: (6+6)/2 = 6
-× 0.5 risk = 3
-Confidence: 30%
-Result: NEUTRAL (blocked by weak signal check)
-```
-
-**AFTER:**
-```
-Score: (6+6)/2 = 6
-× 0.7 risk = 4.2
-Confidence: 42%
-Result: LONG ✅
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
 st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH SURGICAL FIXES")
