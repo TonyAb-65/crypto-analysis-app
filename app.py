@@ -3216,7 +3216,7 @@ if df is not None and len(df) > 0:
                 st.caption(f"{i}. {headline}")
     
     st.markdown("---")
-    # ==================== END NEWS INTEGRATION ====================
+   # ==================== END NEWS INTEGRATION ====================
     
     st.markdown("### 🤖 Improved AI Predictions with Learning")
     st.info(f"""
@@ -3230,6 +3230,7 @@ if df is not None and len(df) > 0:
     - 🆕 RSI duration-weighted signals
     - 🆕 Equal indicator weights (Fair signal calculation)
     - 🆕 **News sentiment integrated as 4th warning type!**
+    - 🆕 **NOW TRACKS COMMITTEE RECOMMENDATIONS (not ML model)!**
     """)
     
     with st.spinner("🧠 Training AI models..."):
@@ -3243,28 +3244,6 @@ if df is not None and len(df) > 0:
         pred_change = ((predictions[-1] - current_price) / current_price) * 100
         
         indicator_snapshot = create_indicator_snapshot(df)
-        
-        page_key = f"{symbol}_{current_price:.2f}_{timeframe_name}"
-
-        if 'current_page_key' not in st.session_state or st.session_state.current_page_key != page_key:
-            prediction_id = save_prediction(
-                asset_type=asset_type.replace("💰 ", "").replace("🏆 ", "").replace("💱 ", "").replace("🔍 ", ""),
-                pair=symbol,
-                timeframe=timeframe_name,
-                current_price=current_price,
-                predicted_price=predictions[-1],
-                prediction_horizon=prediction_periods,
-                confidence=confidence,
-                signal_strength=0,  # Will be calculated below with consultant meeting
-                features=features if features else {},
-                indicator_snapshot=indicator_snapshot
-            )
-            
-            st.session_state.current_page_key = page_key
-            st.session_state.current_prediction_id = prediction_id
-            st.session_state.last_prediction_id = prediction_id
-        else:
-            prediction_id = st.session_state.current_prediction_id
         
         # ==================== SURGICAL FIX #5: CONSULTANT MEETING ====================
         # Step 1: Calculate raw signal (without warnings)
@@ -3297,6 +3276,13 @@ if df is not None and len(df) > 0:
             adjusted_confidence = max(adjusted_confidence, 30.0)
         # ==================== END CONSULTANT MEETING ====================
         
+        # ==================== NEW: STORE COMMITTEE RESULT IN SESSION STATE ====================
+        # This will be used when saving trades
+        if 'committee_recommendation' not in st.session_state:
+            st.session_state.committee_recommendation = {}
+        # We'll populate this after running the consultant meeting below
+        # ==================== END NEW ====================
+        
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -3314,29 +3300,53 @@ if df is not None and len(df) > 0:
         
         st.markdown("---")
         
+        # ==================== MODIFIED: CHECK IF COMMITTEE RECOMMENDATION EXISTS ====================
+        # Note: We'll save prediction AFTER running consultant meeting, not before
+        page_key = f"{symbol}_{current_price:.2f}_{timeframe_name}"
+        
+        # Temporary prediction_id (will be updated after consultant meeting)
+        if 'current_page_key' not in st.session_state or st.session_state.current_page_key != page_key:
+            st.session_state.current_page_key = page_key
+            st.session_state.needs_new_prediction = True
+        # ==================== END MODIFIED ====================
+        
         conn_check = sqlite3.connect(str(DB_PATH))
         cursor_check = conn_check.cursor()
-        cursor_check.execute("SELECT status, actual_entry_price FROM predictions WHERE id = ?", (prediction_id,))
-        result = cursor_check.fetchone()
+        
+        # Check if we have a saved prediction for this page
+        if 'current_prediction_id' in st.session_state:
+            cursor_check.execute("SELECT status, actual_entry_price FROM predictions WHERE id = ?", 
+                               (st.session_state.current_prediction_id,))
+            result = cursor_check.fetchone()
+        else:
+            result = None
+        
         conn_check.close()
         
         is_tracked = result and result[0] == 'will_trade'
         
-        if not is_tracked:
+        if not is_tracked and 'current_prediction_id' in st.session_state:
             st.info("💡 **Want to track this trade for AI learning?** Enter your actual entry price and click 'Save Trade Entry'. The AI will learn from every trade you complete!")
             
-            with st.form(key=f"track_form_{prediction_id}"):
+            # Get committee recommendation from session state
+            committee_rec = st.session_state.get('committee_recommendation', {})
+            
+            with st.form(key=f"track_form_{st.session_state.current_prediction_id}"):
                 st.markdown(f"### 📊 Save Trade: {asset_type}")
                 
-                st.caption(f"🔢 Prediction ID: {prediction_id}")
+                st.caption(f"🔢 Prediction ID: {st.session_state.current_prediction_id}")
                 
                 col_info1, col_info2 = st.columns(2)
                 with col_info1:
-                    st.metric("AI Suggested Entry", f"${current_price:,.2f}")
-                    st.caption("(Current market price)")
+                    # CHANGED: Show Committee entry instead of ML
+                    committee_entry = committee_rec.get('entry', current_price)
+                    st.metric("Committee Suggested Entry", f"${committee_entry:,.2f}")
+                    st.caption("(Committee recommendation)")
                 with col_info2:
-                    st.metric("AI Predicted Exit", f"${predictions[0]:,.2f}")
-                    st.caption("(Target price)")
+                    # CHANGED: Show Committee target instead of ML
+                    committee_target = committee_rec.get('target', predictions[0])
+                    st.metric("Committee Target", f"${committee_target:,.2f}")
+                    st.caption("(Committee target)")
                 
                 st.markdown("---")
                 st.warning("⚠️ **Important:** Enter YOUR actual entry price below (can be different from suggested price)")
@@ -3344,11 +3354,11 @@ if df is not None and len(df) > 0:
                 actual_entry_price = st.number_input(
                     "💵 Your ACTUAL Entry Price (from your exchange):",
                     min_value=0.0,
-                    value=float(current_price),
+                    value=float(committee_entry),  # CHANGED: Default to committee entry
                     step=0.01,
                     format="%.2f",
                     help="This is the price YOU actually bought/entered at - it may differ from the suggested price above",
-                    key=f"entry_input_{prediction_id}"
+                    key=f"entry_input_{st.session_state.current_prediction_id}"
                 )
                 
                 st.info(f"📝 **Will save:** Entry Price = ${actual_entry_price:,.2f}")
@@ -3361,9 +3371,9 @@ if df is not None and len(df) > 0:
                 
                 if submit_track:
                     if actual_entry_price > 0:
-                        st.info(f"🔍 DEBUG: Saving entry price: ${actual_entry_price:,.2f} for prediction ID: {prediction_id}")
+                        st.info(f"🔍 DEBUG: Saving entry price: ${actual_entry_price:,.2f} for prediction ID: {st.session_state.current_prediction_id}")
                         
-                        success = mark_prediction_for_trading(prediction_id, actual_entry_price)
+                        success = mark_prediction_for_trading(st.session_state.current_prediction_id, actual_entry_price)
                         
                         if success:
                             st.success(f"""
@@ -3371,7 +3381,8 @@ if df is not None and len(df) > 0:
                             
                             **Pair:** {symbol}  
                             **Your Actual Entry:** ${actual_entry_price:,.2f}  
-                            **AI Predicted Exit:** ${predictions[0]:,.2f}  
+                            **Committee Target:** ${committee_target:,.2f}  
+                            **Committee Confidence:** {committee_rec.get('confidence', 0)}%
                             
                             🧠 **AI will learn from this trade when you close it!**
                             """)
@@ -3381,10 +3392,12 @@ if df is not None and len(df) > 0:
                             st.error("❌ Failed to save trade!")
                     else:
                         st.error("⚠️ Please enter a valid entry price greater than 0")
-        else:
+        elif is_tracked:
             actual_entry = result[1] if result and result[1] else current_price
+            committee_rec = st.session_state.get('committee_recommendation', {})
+            committee_entry = committee_rec.get('entry', current_price)
             st.success(f"✅ **Trade Tracked** - Your Entry: ${actual_entry:,.2f}")
-            st.caption(f"AI suggested entry was: ${current_price:,.2f}")
+            st.caption(f"Committee suggested entry was: ${committee_entry:,.2f}")
         
         st.markdown("---")
         
@@ -3436,6 +3449,9 @@ if df is not None and len(df) > 0:
                             exit_val = f"{result[0]:,.2f}"
                             pl_val = f"{result[1]:,.2f}"
                             pl_pct_val = f"{result[2]:+.2f}%"
+                            # CHANGED: Calculate error against Committee target, not ML
+                            # Note: We'd need to store committee_target in DB to calculate this properly
+                            # For now, using predicted_price as placeholder
                             ai_error = ((row['predicted_price'] - result[0]) / result[0]) * 100
                             ai_error_val = f"{ai_error:+.2f}%"
                         else:
@@ -3568,7 +3584,7 @@ if df is not None and len(df) > 0:
     sr_levels = calculate_support_resistance_levels(df, current_price)
     key_point = sr_levels[3]
     
-   # ==================== RUN CONSULTANT MEETING ====================
+  # ==================== RUN CONSULTANT MEETING ====================
     c1 = consultant_c1_pattern_structure(df, symbol)
     c2 = consultant_c2_trend_momentum(df, symbol)
     c3 = consultant_c3_risk_warnings(df, symbol, warning_details)
@@ -3579,6 +3595,40 @@ if df is not None and len(df) > 0:
     mtf_result = multi_timeframe_analysis(symbol, asset_type)
     
     meeting_result = consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result, asset_type)
+    
+    # ==================== NEW: STORE COMMITTEE RESULT & SAVE PREDICTION ====================
+    # Store committee recommendation in session state for trade tracking
+    st.session_state.committee_recommendation = {
+        'entry': meeting_result['entry'],
+        'target': meeting_result['target'],
+        'stop_loss': meeting_result['stop_loss'],
+        'confidence': meeting_result['confidence'],
+        'position': meeting_result['position'],
+        'hold_hours': meeting_result['hold_hours'],
+        'risk_reward': meeting_result['risk_reward']
+    }
+    
+    # Now save prediction with COMMITTEE data (not ML model)
+    page_key = f"{symbol}_{current_price:.2f}_{timeframe_name}"
+    
+    if 'current_page_key' not in st.session_state or st.session_state.current_page_key != page_key:
+        prediction_id = save_prediction(
+            asset_type=asset_type.replace("💰 ", "").replace("🏆 ", "").replace("💱 ", "").replace("🔍 ", ""),
+            pair=symbol,
+            timeframe=timeframe_name,
+            current_price=meeting_result['entry'],  # CHANGED: Use Committee entry
+            predicted_price=meeting_result['target'],  # CHANGED: Use Committee target
+            prediction_horizon=meeting_result['hold_hours'],  # CHANGED: Use Committee hold time
+            confidence=meeting_result['confidence'],  # CHANGED: Use Committee confidence
+            signal_strength=final_signal_strength,
+            features={'committee_position': meeting_result['position'], 'risk_reward': meeting_result['risk_reward']},
+            indicator_snapshot=indicator_snapshot
+        )
+        
+        st.session_state.current_page_key = page_key
+        st.session_state.current_prediction_id = prediction_id
+        st.session_state.last_prediction_id = prediction_id
+    # ==================== END NEW ====================
     
     st.markdown("---")
     st.markdown("### 🏢 CONSULTANT MEETING RESULT")
@@ -3918,7 +3968,7 @@ else:
 st.markdown("---")
 st.markdown(f"""
 <div style='text-align: center;'>
-    <p><b>🚀 AI TRADING PLATFORM - ENHANCED WITH ALL 6 SURGICAL FIXES</b></p>
+    <p><b>🚀 AI TRADING PLATFORM - ENHANCED WITH ALL 6 SURGICAL FIXES + COMMITTEE TRACKING</b></p>
     <p><b>🧠 AI/ML Hybrid:</b> Machine Learning + Trading Central + Surgical Enhancements</p>
     <p><b>✅ FIX #1:</b> Support/Resistance & Timeframe Volatility Analysis</p>
     <p><b>✅ FIX #2:</b> RSI Duration-Weighted Signal Calculation</p>
@@ -3926,8 +3976,9 @@ st.markdown(f"""
     <p><b>✅ FIX #4:</b> News/Sentiment API Integration (Fear & Greed Index + News Headlines)</p>
     <p><b>✅ FIX #5:</b> Consultant Meeting Pattern (Warnings influence signals)</p>
     <p><b>✅ FIX #6:</b> 4-Part Behavioral Analysis (Price, Volume, Momentum, News)</p>
-    <p><b>🎓 AI Learning:</b> System learns from every trade automatically!</p>
-    <p><b>📡 Data Source:</b> Multi-API with fallbacks (Binance, OKX, CryptoCompare, etc.)</p>
+    <p><b>🆕 FIX #7:</b> AI Learning Tracks Committee (not ML model)!</p>
+    <p><b>🎓 AI Learning:</b> System learns from every COMMITTEE trade automatically!</p>
+    <p><b>📡 Data Source:</b> Multi-API with fallbacks (OKX, CryptoCompare, CoinGecko, etc.)</p>
     <p><b>🔄 Last Update:</b> {current_time}</p>
     <p style='color: #888;'>⚠️ Educational purposes only. Not financial advice.</p>
 </div>
