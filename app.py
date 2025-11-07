@@ -2113,6 +2113,19 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     
     # Calculate risk/reward
     if position != "NEUTRAL":
+        # NEW: Minimum confidence threshold - don't trade if confidence < 20%
+        if confidence < 20:
+            return {
+                "position": "NEUTRAL",
+                "entry": current_price,
+                "target": current_price,
+                "stop_loss": current_price,
+                "hold_hours": 0,
+                "confidence": 0,
+                "reasoning": f"⚠️ NEUTRAL - Very low confidence ({confidence}%). DO NOT TRADE.",
+                "risk_reward": 0
+            }
+        
         risk = abs(entry - stop_loss)
         reward = abs(target - entry)
         risk_reward = reward / risk if risk > 0 else 0
