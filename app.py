@@ -3560,9 +3560,8 @@ if df is not None and len(df) > 0:
     timeframe_hours = timeframe_map.get(timeframe_name, 4)  # Default 4h
     
     meeting_result = consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result, asset_type, timeframe_hours)
-    
     # ==================== NEW: STORE COMMITTEE RESULT & SAVE PREDICTION ====================
-            # Store committee recommendation in session state for trade tracking
+    # Store committee recommendation in session state for trade tracking
     st.session_state.committee_recommendation = {
         'entry': meeting_result['entry'],
         'target': meeting_result['target'],
@@ -3577,22 +3576,29 @@ if df is not None and len(df) > 0:
     page_key = f"{symbol}_{current_price:.2f}_{timeframe_name}"
     
     if 'current_page_key' not in st.session_state or st.session_state.current_page_key != page_key:
-        prediction_id = save_prediction(
-            asset_type=asset_type.replace("💰 ", "").replace("🏆 ", "").replace("💱 ", "").replace("🔍 ", ""),
-            pair=symbol,
-            timeframe=timeframe_name,
-            current_price=meeting_result['entry'],  # CHANGED: Use Committee entry
-            predicted_price=meeting_result['target'],  # CHANGED: Use Committee target
-            prediction_horizon=meeting_result['hold_hours'],  # CHANGED: Use Committee hold time
-            confidence=meeting_result['confidence'],  # CHANGED: Use Committee confidence
-            signal_strength=final_signal_strength,
-            features={'committee_position': meeting_result['position'], 'risk_reward': meeting_result['risk_reward']},
-            indicator_snapshot=indicator_snapshot
-        )
-        
-        st.session_state.current_page_key = page_key
-        st.session_state.current_prediction_id = prediction_id
-        st.session_state.last_prediction_id = prediction_id
+        try:
+            prediction_id = save_prediction(
+                asset_type=asset_type.replace("💰 ", "").replace("🏆 ", "").replace("💱 ", "").replace("🔍 ", ""),
+                pair=symbol,
+                timeframe=timeframe_name,
+                current_price=meeting_result['entry'],
+                predicted_price=meeting_result['target'],
+                prediction_horizon=meeting_result['hold_hours'],
+                confidence=meeting_result['confidence'],
+                signal_strength=final_signal_strength if 'final_signal_strength' in locals() else 0,
+                features={'committee_position': meeting_result['position'], 'risk_reward': meeting_result['risk_reward']},
+                indicator_snapshot=indicator_snapshot if 'indicator_snapshot' in locals() else {}
+            )
+            
+            st.session_state.current_page_key = page_key
+            st.session_state.current_prediction_id = prediction_id
+            st.session_state.last_prediction_id = prediction_id
+        except Exception as e:
+            st.warning(f"⚠️ Prediction save issue: {str(e)} - Form will still work")
+            # Create temporary ID so form can still show
+            if 'current_prediction_id' not in st.session_state:
+                st.session_state.current_prediction_id = 999
+            st.session_state.current_page_key = page_key
     # ==================== END NEW ====================
     
     st.markdown("---")
@@ -3650,81 +3656,82 @@ if df is not None and len(df) > 0:
     st.markdown("**Detailed Consultant Analysis:**")
     st.text(meeting_result['reasoning'])
     st.markdown("---")
+    
     # ==================== TRADE ENTRY FORM (AFTER COMMITTEE) ====================
-st.markdown("---")
-
-# Re-check if tracked
-conn_check2 = sqlite3.connect(str(DB_PATH))
-cursor_check2 = conn_check2.cursor()
-
-if 'current_prediction_id' in st.session_state:
-    cursor_check2.execute("SELECT status, actual_entry_price FROM predictions WHERE id = ?", 
-                       (st.session_state.current_prediction_id,))
-    result2 = cursor_check2.fetchone()
-else:
-    result2 = None
-
-conn_check2.close()
-
-is_tracked_now = result2 and result2[0] == 'will_trade'
-
-if not is_tracked_now and 'current_prediction_id' in st.session_state and meeting_result['position'] != 'NEUTRAL':
-    st.info("💡 **Want to track this trade for AI learning?** Enter your actual entry price and click 'Save Trade Entry'. The AI will learn from every trade you complete!")
+    st.markdown("---")
     
-    committee_rec = st.session_state.get('committee_recommendation', {})
+    # Re-check if tracked
+    conn_check2 = sqlite3.connect(str(DB_PATH))
+    cursor_check2 = conn_check2.cursor()
     
-    with st.form(key=f"track_form_{st.session_state.current_prediction_id}"):
-        st.markdown(f"### 📊 Save Trade: {asset_type}")
+    if 'current_prediction_id' in st.session_state:
+        cursor_check2.execute("SELECT status, actual_entry_price FROM predictions WHERE id = ?", 
+                           (st.session_state.current_prediction_id,))
+        result2 = cursor_check2.fetchone()
+    else:
+        result2 = None
+    
+    conn_check2.close()
+    
+    is_tracked_now = result2 and result2[0] == 'will_trade'
+    
+    if not is_tracked_now and 'current_prediction_id' in st.session_state and meeting_result['position'] != 'NEUTRAL':
+        st.info("💡 **Want to track this trade for AI learning?** Enter your actual entry price and click 'Save Trade Entry'. The AI will learn from every trade you complete!")
         
-        st.caption(f"🔢 Prediction ID: {st.session_state.current_prediction_id}")
+        committee_rec = st.session_state.get('committee_recommendation', {})
         
-        col_info1, col_info2 = st.columns(2)
-        with col_info1:
-            committee_entry = committee_rec.get('entry', current_price)
-            st.metric("Committee Suggested Entry", f"${committee_entry:,.2f}")
-            st.caption("(Committee recommendation)")
-        with col_info2:
-            committee_target = committee_rec.get('target', current_price)
-            st.metric("Committee Target", f"${committee_target:,.2f}")
-            st.caption("(Committee target)")
-        
-        st.markdown("---")
-        st.warning("⚠️ **Important:** Enter YOUR actual entry price below")
-        
-        actual_entry_price = st.number_input(
-            "💵 Your ACTUAL Entry Price:",
-            min_value=0.0,
-            value=float(committee_entry),
-            step=0.01,
-            format="%.2f",
-            key=f"entry_input_{st.session_state.current_prediction_id}"
-        )
-        
-        st.info(f"📝 **Will save:** Entry Price = ${actual_entry_price:,.2f}")
-        
-        submit_track = st.form_submit_button("✅ Save Trade Entry", type="primary", use_container_width=True)
-        
-        if submit_track and actual_entry_price > 0:
-            success = mark_prediction_for_trading(st.session_state.current_prediction_id, actual_entry_price)
+        with st.form(key=f"track_form_{st.session_state.current_prediction_id}"):
+            st.markdown(f"### 📊 Save Trade: {asset_type}")
             
-            if success:
-                st.success(f"""
-                ✅ **Trade Saved Successfully!**
+            st.caption(f"🔢 Prediction ID: {st.session_state.current_prediction_id}")
+            
+            col_info1, col_info2 = st.columns(2)
+            with col_info1:
+                committee_entry = committee_rec.get('entry', current_price)
+                st.metric("Committee Suggested Entry", f"${committee_entry:,.2f}")
+                st.caption("(Committee recommendation)")
+            with col_info2:
+                committee_target = committee_rec.get('target', current_price)
+                st.metric("Committee Target", f"${committee_target:,.2f}")
+                st.caption("(Committee target)")
+            
+            st.markdown("---")
+            st.warning("⚠️ **Important:** Enter YOUR actual entry price below")
+            
+            actual_entry_price = st.number_input(
+                "💵 Your ACTUAL Entry Price:",
+                min_value=0.0,
+                value=float(committee_entry),
+                step=0.01,
+                format="%.2f",
+                key=f"entry_input_{st.session_state.current_prediction_id}"
+            )
+            
+            st.info(f"📝 **Will save:** Entry Price = ${actual_entry_price:,.2f}")
+            
+            submit_track = st.form_submit_button("✅ Save Trade Entry", type="primary", use_container_width=True)
+            
+            if submit_track and actual_entry_price > 0:
+                success = mark_prediction_for_trading(st.session_state.current_prediction_id, actual_entry_price)
                 
-                **Pair:** {symbol}  
-                **Your Entry:** ${actual_entry_price:,.2f}  
-                **Target:** ${committee_target:,.2f}  
-                **Confidence:** {committee_rec.get('confidence', 0)}%
-                """)
-                time.sleep(2)
-                st.rerun()
-            else:
-                st.error("❌ Failed to save trade!")
-
-elif is_tracked_now:
-    actual_entry = result2[1] if result2 and result2[1] else current_price
-    st.success(f"✅ **Trade Tracked** - Your Entry: ${actual_entry:,.2f}")
-# ==================== END TRADE ENTRY FORM ====================
+                if success:
+                    st.success(f"""
+                    ✅ **Trade Saved Successfully!**
+                    
+                    **Pair:** {symbol}  
+                    **Your Entry:** ${actual_entry_price:,.2f}  
+                    **Target:** ${committee_target:,.2f}  
+                    **Confidence:** {committee_rec.get('confidence', 0)}%
+                    """)
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to save trade!")
+    
+    elif is_tracked_now:
+        actual_entry = result2[1] if result2 and result2[1] else current_price
+        st.success(f"✅ **Trade Tracked** - Your Entry: ${actual_entry:,.2f}")
+    # ==================== END TRADE ENTRY FORM ====================
     # ==================== END CONSULTANT MEETING ====================    
     st.warning("⚠️ **Risk Warning:** Use stop-losses. Never risk more than 1-2% per trade. Not financial advice.")
     
