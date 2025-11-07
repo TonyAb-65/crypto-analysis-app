@@ -3658,6 +3658,12 @@ if df is not None and len(df) > 0:
     # ==================== TRADE ENTRY FORM (AFTER COMMITTEE) ====================
     st.markdown("---")
     
+    # DEBUG: Check what we have in session state
+    st.info(f"🔍 DEBUG: current_prediction_id exists? {'current_prediction_id' in st.session_state}")
+    if 'current_prediction_id' in st.session_state:
+        st.info(f"🔍 DEBUG: current_prediction_id = {st.session_state.current_prediction_id}")
+    st.info(f"🔍 DEBUG: meeting_result position = {meeting_result.get('position', 'MISSING')}")
+    
     # Re-check if tracked
     conn_check2 = sqlite3.connect(str(DB_PATH))
     cursor_check2 = conn_check2.cursor()
@@ -3666,14 +3672,26 @@ if df is not None and len(df) > 0:
         cursor_check2.execute("SELECT status, actual_entry_price FROM predictions WHERE id = ?", 
                            (st.session_state.current_prediction_id,))
         result2 = cursor_check2.fetchone()
+        st.info(f"🔍 DEBUG: Database query result = {result2}")
     else:
         result2 = None
+        st.warning("⚠️ DEBUG: No current_prediction_id in session state!")
     
     conn_check2.close()
     
     is_tracked_now = result2 and result2[0] == 'will_trade'
+    st.info(f"🔍 DEBUG: is_tracked_now = {is_tracked_now}")
+    
+    # Show all conditions status
+    st.info(f"""
+    🔍 DEBUG: Form Display Conditions:
+    - is_tracked_now = {is_tracked_now} (should be False)
+    - current_prediction_id exists = {'current_prediction_id' in st.session_state} (should be True)
+    - position != NEUTRAL = {meeting_result.get('position') != 'NEUTRAL'} (should be True)
+    """)
     
     if not is_tracked_now and 'current_prediction_id' in st.session_state and meeting_result['position'] != 'NEUTRAL':
+        st.success("✅ DEBUG: All conditions met! Showing form...")
         st.info("💡 **Want to track this trade for AI learning?** Enter your actual entry price and click 'Save Trade Entry'. The AI will learn from every trade you complete!")
         
         committee_rec = st.session_state.get('committee_recommendation', {})
@@ -3710,6 +3728,7 @@ if df is not None and len(df) > 0:
             submit_track = st.form_submit_button("✅ Save Trade Entry", type="primary", use_container_width=True)
             
             if submit_track and actual_entry_price > 0:
+                st.info(f"🔍 DEBUG: Form submitted! Calling mark_prediction_for_trading...")
                 success = mark_prediction_for_trading(st.session_state.current_prediction_id, actual_entry_price)
                 
                 if success:
@@ -3729,6 +3748,8 @@ if df is not None and len(df) > 0:
     elif is_tracked_now:
         actual_entry = result2[1] if result2 and result2[1] else current_price
         st.success(f"✅ **Trade Tracked** - Your Entry: ${actual_entry:,.2f}")
+    else:
+        st.error("❌ DEBUG: Form NOT showing - one or more conditions failed (see above)")
     # ==================== END TRADE ENTRY FORM ====================
     # ==================== END CONSULTANT MEETING ====================    
     st.warning("⚠️ **Risk Warning:** Use stop-losses. Never risk more than 1-2% per trade. Not financial advice.")
