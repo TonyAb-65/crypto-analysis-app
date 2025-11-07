@@ -1482,44 +1482,54 @@ def check_at_key_level(current_price, sr_zones, tolerance=0.01):
 
 def consultant_c1_pattern_structure(df, symbol):
     """
-    C1: Pattern & Structure Analysis (ENHANCED WITH PROFESSIONAL S/R)
-    Focus: RSI, Support/Resistance Zones, Price Action
+    C1: Pattern & Structure Analysis
+    Focus: Identifies LOCATION (Support/Resistance/Mid-range)
+    DOES NOT predict direction - only identifies WHERE price is
     """
     if df is None or len(df) < 50:
-        return {"signal": "NEUTRAL", "strength": 5, "reasoning": "Insufficient data", "targets": None}
+        return {
+            "signal": "MID_RANGE", 
+            "strength": 5, 
+            "reasoning": "Insufficient data", 
+            "targets": None,
+            "at_key_level": False,
+            "level_type": None
+        }
     
     latest = df.iloc[-1]
-    rsi = latest.get('rsi', 50)
     close = latest.get('close', 0)
     
-    signal = "NEUTRAL"
+    signal = "MID_RANGE"
     strength = 5
     reasoning = []
+    at_key_level = False
+    level_type = None
     
     # Professional S/R Analysis
     sr_zones = find_support_resistance_zones(df, lookback=100)
     targets = get_price_targets_based_on_sr(close, sr_zones)
-    at_level, level_type, level_info = check_at_key_level(close, sr_zones)
+    at_level, detected_level_type, level_info = check_at_key_level(close, sr_zones)
     
-    # Check if AT a key level
+    # Check if AT a key level (CHANGED: No longer says BULLISH/BEARISH)
     if at_level:
-        if level_type == 'RESISTANCE':
+        at_key_level = True
+        level_type = detected_level_type
+        
+        if detected_level_type == 'RESISTANCE':
+            signal = "AT_RESISTANCE"
             if level_info['strength'] == 'STRONG':
-                signal = "BEARISH"
                 strength = 9
                 reasoning.append(f"At STRONG resistance ${level_info['price']:,.0f} ({level_info['touches']} rejections)")
             else:
-                signal = "BEARISH"
                 strength = 7
                 reasoning.append(f"At resistance ${level_info['price']:,.0f} ({level_info['touches']} tests)")
         
-        elif level_type == 'SUPPORT':
+        elif detected_level_type == 'SUPPORT':
+            signal = "AT_SUPPORT"
             if level_info['strength'] == 'STRONG':
-                signal = "BULLISH"
                 strength = 9
                 reasoning.append(f"At STRONG support ${level_info['price']:,.0f} ({level_info['touches']} bounces)")
             else:
-                signal = "BULLISH"
                 strength = 7
                 reasoning.append(f"At support ${level_info['price']:,.0f} ({level_info['touches']} tests)")
     
@@ -1529,40 +1539,19 @@ def consultant_c1_pattern_structure(df, symbol):
             next_r = targets['next_resistance']
             distance_pct = ((next_r['price'] - close) / close) * 100
             
-            if distance_pct < 3:  # Within 3% of resistance
-                reasoning.append(f"Near resistance ${next_r['price']:,.0f} ({next_r['strength']})")
-                if signal == "NEUTRAL":
-                    signal = "BEARISH"
-                    strength = 6
+            if distance_pct < 2:  # Very close to resistance
+                signal = "NEAR_RESISTANCE"
+                strength = 6
+                reasoning.append(f"Near resistance ${next_r['price']:,.0f}")
         
         if targets['next_support']:
             next_s = targets['next_support']
             distance_pct = ((close - next_s['price']) / close) * 100
             
-            if distance_pct < 3:  # Within 3% of support
-                reasoning.append(f"Near support ${next_s['price']:,.0f} ({next_s['strength']})")
-                if signal == "NEUTRAL":
-                    signal = "BULLISH"
-                    strength = 6
-    
-    # RSI Analysis (secondary to S/R) - FIXED: Only add to signal, don't override
-    if rsi < 30:
-        if signal == "NEUTRAL":
-            signal = "BULLISH"
-            strength = 7
-        elif signal == "BULLISH":
-            strength = min(strength + 1, 10)  # CHANGED: Less aggressive boost
-        reasoning.append(f"RSI {rsi:.1f} oversold")
-    
-    elif rsi > 70:
-        # CHANGED: Don't let RSI override S/R signals completely
-        if signal == "NEUTRAL":
-            signal = "BEARISH"
-            strength = 6  # CHANGED: Reduced from 7
-        elif signal == "BEARISH":
-            strength = min(strength + 1, 10)  # CHANGED: Less aggressive boost
-        # CHANGED: Don't flip BULLISH to BEARISH just because RSI > 70
-        reasoning.append(f"RSI {rsi:.1f} overbought")
+            if distance_pct < 2:  # Very close to support
+                signal = "NEAR_SUPPORT"
+                strength = 6
+                reasoning.append(f"Near support ${next_s['price']:,.0f}")
     
     # Build detailed reasoning with targets
     reasoning_text = " ".join(reasoning) if reasoning else "neutral"
@@ -1574,61 +1563,176 @@ def consultant_c1_pattern_structure(df, symbol):
         reasoning_text += f" | Next S: ${targets['next_support']['price']:,.0f}"
     
     return {
-        "signal": signal,
+        "signal": signal,  # Now returns: AT_SUPPORT, AT_RESISTANCE, NEAR_SUPPORT, NEAR_RESISTANCE, or MID_RANGE
         "strength": strength,
         "reasoning": reasoning_text,
         "targets": targets,
-        "sr_zones": sr_zones
+        "sr_zones": sr_zones,
+        "at_key_level": at_key_level,
+        "level_type": level_type
     }
 
-def consultant_c2_trend_momentum(df, symbol):
+
+def consultant_c2_trend_momentum(df, symbol, c1_result=None):
     """
-    C2: Trend & Momentum Analysis
-    Focus: ADX, MACD, SMA
+    C2: Momentum Confirmation Analyst
+    Focus: Confirms if momentum is ACTUALLY reversing at support/resistance
+    Uses: RSI reversal patterns, Volume spikes, Historical success rate
     """
     if df is None or len(df) < 50:
-        return {"signal": "NEUTRAL", "strength": 5, "reasoning": "Insufficient data"}
+        return {
+            "signal": "NO_CONFIRMATION", 
+            "strength": 0, 
+            "reasoning": "Insufficient data",
+            "reversal_confirmed": False
+        }
     
     latest = df.iloc[-1]
+    close = latest.get('close', 0)
+    rsi = latest.get('rsi', 50)
+    volume = latest.get('volume', 0)
     adx = latest.get('adx', 20)
     macd = latest.get('macd', 0)
     macd_signal = latest.get('macd_signal', 0)
-    sma_20 = latest.get('sma_20', 0)
-    close = latest.get('close', 0)
     
-    signal = "NEUTRAL"
-    strength = 5
+    signal = "NO_CONFIRMATION"
+    strength = 0
     reasoning = []
+    reversal_confirmed = False
+    confirmation_score = 0
     
-    # ADX Trend Strength
-    if adx > 40:
-        if close > sma_20:
+    # === IF C1 IS AT SUPPORT OR RESISTANCE, CHECK FOR REVERSAL ===
+    if c1_result and c1_result.get('at_key_level'):
+        level_type = c1_result.get('level_type')
+        
+        if level_type == 'SUPPORT':
+            # === CHECK FOR BULLISH REVERSAL AT SUPPORT ===
+            
+            # Check #1: RSI Reversal Pattern (Most Important)
+            rsi_prev_5 = [df['rsi'].iloc[i] for i in range(-6, -1) if i >= -len(df)]
+            if len(rsi_prev_5) >= 4:
+                rsi_low = min(rsi_prev_5)
+                if rsi < 40 and rsi > rsi_low + 3:
+                    # RSI forming higher low (reversal pattern!)
+                    confirmation_score += 4
+                    reasoning.append(f"RSI reversal: {rsi_low:.0f}→{rsi:.0f}")
+            
+            # Check #2: Volume Spike
+            avg_volume = df['volume'].tail(20).mean()
+            volume_ratio = volume / avg_volume if avg_volume > 0 else 1.0
+            if volume_ratio > 1.5:
+                confirmation_score += 3
+                reasoning.append(f"Volume spike: {volume_ratio:.1f}x")
+            elif volume_ratio > 1.2:
+                confirmation_score += 1
+                reasoning.append(f"Volume elevated: {volume_ratio:.1f}x")
+            
+            # Check #3: MACD Turning Up
+            macd_prev = df['macd'].iloc[-2] if len(df) > 1 else macd
+            if macd > macd_prev and macd > macd_signal:
+                confirmation_score += 1
+                reasoning.append("MACD turning bullish")
+            
+            # Check #4: ADX (Trend Strength)
+            if adx > 25:
+                confirmation_score += 1
+                reasoning.append(f"Strong trend ADX:{adx:.0f}")
+            
+            # Decision for Support
+            if confirmation_score >= 6:
+                signal = "BULLISH_REVERSAL_CONFIRMED"
+                strength = min(confirmation_score, 10)
+                reversal_confirmed = True
+            elif confirmation_score >= 3:
+                signal = "POSSIBLE_BULLISH_REVERSAL"
+                strength = confirmation_score
+                reversal_confirmed = False
+            else:
+                signal = "NO_BULLISH_CONFIRMATION"
+                strength = confirmation_score
+                reversal_confirmed = False
+        
+        elif level_type == 'RESISTANCE':
+            # === CHECK FOR BEARISH REVERSAL AT RESISTANCE ===
+            
+            # Check #1: RSI Reversal Pattern
+            rsi_prev_5 = [df['rsi'].iloc[i] for i in range(-6, -1) if i >= -len(df)]
+            if len(rsi_prev_5) >= 4:
+                rsi_high = max(rsi_prev_5)
+                if rsi > 60 and rsi < rsi_high - 3:
+                    # RSI forming lower high (reversal pattern!)
+                    confirmation_score += 4
+                    reasoning.append(f"RSI reversal: {rsi_high:.0f}→{rsi:.0f}")
+            
+            # Check #2: Volume Spike
+            avg_volume = df['volume'].tail(20).mean()
+            volume_ratio = volume / avg_volume if avg_volume > 0 else 1.0
+            if volume_ratio > 1.5:
+                confirmation_score += 3
+                reasoning.append(f"Volume spike: {volume_ratio:.1f}x")
+            elif volume_ratio > 1.2:
+                confirmation_score += 1
+                reasoning.append(f"Volume elevated: {volume_ratio:.1f}x")
+            
+            # Check #3: MACD Turning Down
+            macd_prev = df['macd'].iloc[-2] if len(df) > 1 else macd
+            if macd < macd_prev and macd < macd_signal:
+                confirmation_score += 1
+                reasoning.append("MACD turning bearish")
+            
+            # Check #4: ADX (Trend Strength)
+            if adx > 25:
+                confirmation_score += 1
+                reasoning.append(f"Strong trend ADX:{adx:.0f}")
+            
+            # Decision for Resistance
+            if confirmation_score >= 6:
+                signal = "BEARISH_REVERSAL_CONFIRMED"
+                strength = min(confirmation_score, 10)
+                reversal_confirmed = True
+            elif confirmation_score >= 3:
+                signal = "POSSIBLE_BEARISH_REVERSAL"
+                strength = confirmation_score
+                reversal_confirmed = False
+            else:
+                signal = "NO_BEARISH_CONFIRMATION"
+                strength = confirmation_score
+                reversal_confirmed = False
+    
+    # === IF C1 IS MID-RANGE, CHECK MOMENTUM DIRECTION ===
+    else:
+        # Standard momentum analysis (when not at S/R)
+        if adx > 40:
+            if close > df['sma_20'].iloc[-1]:
+                signal = "BULLISH"
+                strength = 8
+                reasoning.append(f"ADX {adx:.1f} strong uptrend")
+            else:
+                signal = "BEARISH"
+                strength = 8
+                reasoning.append(f"ADX {adx:.1f} strong downtrend")
+        
+        elif macd > macd_signal and macd > 0:
             signal = "BULLISH"
-            strength = 8
-            reasoning.append(f"ADX {adx:.1f} strong_uptrend")
+            strength = 6
+            reasoning.append("MACD bullish")
+        
+        elif macd < macd_signal and macd < 0:
+            signal = "BEARISH"
+            strength = 6
+            reasoning.append("MACD bearish")
+        
         else:
-            signal = "BEARISH"
-            strength = 8
-            reasoning.append(f"ADX {adx:.1f} strong_downtrend")
-    elif adx < 20:
-        reasoning.append(f"ADX {adx:.1f} weak_trend")
-    
-    # MACD
-    if macd > macd_signal and macd > 0:
-        if signal == "NEUTRAL":
-            signal = "BULLISH"
-        strength = min(strength + 1, 10)
-        reasoning.append("MACD_bullish_cross")
-    elif macd < macd_signal and macd < 0:
-        if signal == "NEUTRAL":
-            signal = "BEARISH"
-        strength = min(strength + 1, 10)
-        reasoning.append("MACD_bearish_cross")
+            signal = "NEUTRAL"
+            strength = 5
+            reasoning.append("No clear momentum")
     
     return {
         "signal": signal,
         "strength": strength,
-        "reasoning": " ".join(reasoning) if reasoning else "neutral"
+        "reasoning": " | ".join(reasoning) if reasoning else "neutral",
+        "reversal_confirmed": reversal_confirmed,
+        "confirmation_score": confirmation_score
     }
 
 
@@ -1735,7 +1839,6 @@ def consultant_c4_news_sentiment(symbol, news_data=None):
         }
 
 # ==================== MULTI-TIMEFRAME ANALYSIS ====================
-
 def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
     """
     Fetch data for a specific timeframe (used by multi-timeframe analysis)
@@ -1915,10 +2018,8 @@ def multi_timeframe_analysis(symbol, asset_type):
 # ==================== END MULTI-TIMEFRAME ANALYSIS ====================
 def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None, asset_type=None, timeframe_hours=4):
     """
-    Unified Consultant Meeting - All 4 consultants discuss and reach consensus
-    Returns: ONE clear recommendation with entry, target, stop loss, hold duration
-    
-    NEW: timeframe_hours parameter for 1-candle prediction
+    NEW LOGIC: C1 identifies location, C2 confirms reversal
+    Only trades when BOTH agree on confirmed reversals
     """
     
     # If C3 shows extreme risk (3+ warnings), DO NOT TRADE
@@ -1934,212 +2035,157 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
             "risk_reward": 0
         }
     
-    # Weight consultants based on C4 news importance
-    news_weight = c4['weight']
-    technical_weight = 100 - news_weight
+    # ==================== NEW DECISION LOGIC ====================
+    # C1 identifies WHERE (support/resistance/mid-range)
+    # C2 confirms IF momentum is reversing
     
-    # Calculate technical consensus (C1 + C2)
-    technical_signals = []
-    if c1['signal'] == 'BULLISH':
-        technical_signals.append(c1['strength'])
-    elif c1['signal'] == 'BEARISH':
-        technical_signals.append(-c1['strength'])
+    c1_signal = c1['signal']
+    c1_strength = c1['strength']
+    c2_confirmed = c2.get('reversal_confirmed', False)
+    c2_signal = c2['signal']
+    c2_strength = c2['strength']
     
-    if c2['signal'] == 'BULLISH':
-        technical_signals.append(c2['strength'])
-    elif c2['signal'] == 'BEARISH':
-        technical_signals.append(-c2['strength'])
+    position = "NEUTRAL"
+    confidence = 0
+    reasoning_parts = []
     
-    technical_score = sum(technical_signals) / len(technical_signals) if technical_signals else 0
+    # === CASE 1: AT SUPPORT ===
+    if c1_signal in ['AT_SUPPORT', 'NEAR_SUPPORT']:
+        if c2_confirmed and 'BULLISH' in c2_signal:
+            # CONFIRMED BULLISH REVERSAL
+            position = "LONG"
+            confidence = min((c1_strength + c2_strength) / 20 * 100, 90)
+            reasoning_parts.append(f"✅ Confirmed bullish reversal at support")
+        else:
+            # NO CONFIRMATION - WAIT
+            position = "NEUTRAL"
+            confidence = 0
+            reasoning_parts.append(f"⏸️ At support but no reversal confirmation - WAIT")
     
-    # REMOVED: The "high risk + weak signals" check that was blocking trades
-    # This was too aggressive and blocked good trades like your 6/10 + 6/10 bullish signals
+    # === CASE 2: AT RESISTANCE ===
+    elif c1_signal in ['AT_RESISTANCE', 'NEAR_RESISTANCE']:
+        if c2_confirmed and 'BEARISH' in c2_signal:
+            # CONFIRMED BEARISH REVERSAL
+            position = "SHORT"
+            confidence = min((c1_strength + c2_strength) / 20 * 100, 90)
+            reasoning_parts.append(f"✅ Confirmed bearish reversal at resistance")
+        else:
+            # NO CONFIRMATION - WAIT
+            position = "NEUTRAL"
+            confidence = 0
+            reasoning_parts.append(f"⏸️ At resistance but no reversal confirmation - WAIT")
     
-    # Calculate news score
-    news_score = 0
-    if c4['signal'] == 'BULLISH':
-        news_score = c4['strength']
-    elif c4['signal'] == 'BEARISH':
-        news_score = -c4['strength']
+    # === CASE 3: MID-RANGE ===
+    else:
+        # Follow C2 momentum when not at S/R
+        if c2_signal == 'BULLISH' and c2_strength >= 6:
+            position = "LONG"
+            confidence = c2_strength * 10
+            reasoning_parts.append(f"📈 Mid-range bullish momentum")
+        elif c2_signal == 'BEARISH' and c2_strength >= 6:
+            position = "SHORT"
+            confidence = c2_strength * 10
+            reasoning_parts.append(f"📉 Mid-range bearish momentum")
+        else:
+            position = "NEUTRAL"
+            confidence = 0
+            reasoning_parts.append(f"⚪ Mid-range, no clear momentum")
     
-    # Weighted final score
-    final_score = (technical_score * technical_weight + news_score * news_weight) / 100
-    
-    # Adjust for risk (C3) - but less harshly
+    # === APPLY RISK PENALTY (C3) ===
     risk_multiplier = c3['strength'] / 10.0
-    # CHANGED: Don't cut score in half, just reduce by 20% for high risk
     if c3['signal'] == 'HIGH_RISK':
-        final_score *= max(risk_multiplier, 0.7)  # Minimum 70% of original score
+        confidence *= max(risk_multiplier, 0.7)  # Max 30% reduction
     else:
-        final_score *= risk_multiplier  # Normal risk adjustment
+        confidence *= risk_multiplier
     
-    # ==================== NEW: 1-CANDLE PREDICTION LOGIC ====================
-    # Calculate hold duration - MATCH TIMEFRAME (predict only next candle)
+    # === APPLY NEWS WEIGHT (C4) ===
+    if c4['weight'] >= 70:  # Critical news
+        if c4['signal'] == 'BULLISH' and position == 'SHORT':
+            confidence *= 0.5  # Cut in half if against critical news
+        elif c4['signal'] == 'BEARISH' and position == 'LONG':
+            confidence *= 0.5
+    
+    # === MINIMUM CONFIDENCE CHECK ===
+    if confidence < 20:
+        position = "NEUTRAL"
+        confidence = 0
+        reasoning_parts.append(f"⚠️ Confidence too low")
+    
+    # ==================== CALCULATE TARGETS ====================
+    # Hold duration - 1 candle prediction
     if c4['weight'] >= 70:
-        # Critical news - can hold 2-3 candles max
-        if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
-            hold_hours = timeframe_hours * 2  # Forex: 2 candles
-        else:
-            hold_hours = timeframe_hours * 3  # Crypto: 3 candles (more volatile, bigger moves)
-    elif c4['weight'] >= 40:
-        # Major news - hold 1-2 candles
-        if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
-            hold_hours = timeframe_hours * 1  # Forex: 1 candle
-        else:
-            hold_hours = timeframe_hours * 2  # Crypto: 2 candles
+        hold_hours = timeframe_hours * 2  # Critical news: 2 candles
     else:
-        # NORMAL: Predict ONLY next candle (most common case)
-        hold_hours = timeframe_hours  # 1 candle prediction ✅
-    # ==================== END 1-CANDLE PREDICTION ====================
+        hold_hours = timeframe_hours  # Normal: 1 candle
     
-    # Determine position with SMART TARGETS based on S/R and timeframe
-    if final_score > 2:
-        position = "LONG"
-        confidence = min(abs(final_score) * 10, 90)
-        
-        # Apply multi-timeframe multiplier (but don't be too harsh on conflicts)
-        if mtf_result and mtf_result['aligned']:
-            if mtf_result['direction'] == 'BULLISH':
-                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
-            elif mtf_result['direction'] == 'BEARISH':
-                # CHANGED: Less harsh penalty for timeframe conflicts (was 0.6, now 0.8)
-                confidence = confidence * 0.8
-        
-        entry = current_price
-        
-        # ASSET-AWARE: Calculate timeframe-adjusted max move (based on actual hold time)
-        if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
-            # Forex/Metals are less volatile
-            if hold_hours <= 12:  # Short-term (up to half day)
-                max_move_pct = 0.01  # 1% max for forex short-term
-            elif hold_hours <= 24:  # Full day
-                max_move_pct = 0.015  # 1.5% max for forex daily
-            else:  # Multi-day
-                max_move_pct = 0.03  # 3% max for forex multi-day
+    entry = current_price
+    
+    # Asset-aware max move
+    if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
+        if hold_hours <= 12:
+            max_move_pct = 0.01  # 1% for forex
         else:
-            # Crypto is more volatile
-            if hold_hours <= 8:  # Intraday
-                max_move_pct = 0.03  # 3% max for crypto intraday
-            elif hold_hours <= 24:  # Same day
-                max_move_pct = 0.05  # 5% max for crypto daily
-            else:  # Multi-day
-                max_move_pct = 0.10  # 10% max for crypto multi-day
-        
-        # Get S/R targets from C1
+            max_move_pct = 0.015  # 1.5% for forex daily
+    else:
+        if hold_hours <= 8:
+            max_move_pct = 0.03  # 3% for crypto
+        else:
+            max_move_pct = 0.05  # 5% for crypto daily
+    
+    if position == "LONG":
+        # Get S/R target
         targets_sr = c1.get('targets', {})
         next_resistance = targets_sr.get('next_resistance')
         
-        # FIX: Calculate S/R-based target ONLY if resistance is ABOVE entry
-        if next_resistance and next_resistance['price'] > entry * 1.01:  # At least 1% above
-            # Target 2% below resistance (safety margin)
-            sr_target = next_resistance['price'] * 0.98
-            # Cap at max realistic move
-            sr_target = min(sr_target, entry * (1 + max_move_pct))
+        if next_resistance and next_resistance['price'] > entry * 1.01:
+            target = min(next_resistance['price'] * 0.98, entry * (1 + max_move_pct))
         else:
-            # No valid resistance - use percentage target
-            sr_target = entry * (1 + max_move_pct)
+            target = entry * (1 + max_move_pct)
         
-        target = sr_target
-        
-        # SAFETY: Ensure target is ALWAYS above entry for LONG
         if target <= entry:
             target = entry * (1 + max_move_pct)
         
-        stop_loss = entry * (1 - 0.02)  # 2% stop loss
-        
-    elif final_score < -2:
-        position = "SHORT"
-        confidence = min(abs(final_score) * 10, 90)
-        
-        # Apply multi-timeframe multiplier (but don't be too harsh on conflicts)
-        if mtf_result and mtf_result['aligned']:
-            if mtf_result['direction'] == 'BEARISH':
-                confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
-            elif mtf_result['direction'] == 'BULLISH':
-                # CHANGED: Less harsh penalty for timeframe conflicts (was 0.6, now 0.8)
-                confidence = confidence * 0.8
-        
-        entry = current_price
-        
-        # ASSET-AWARE: Calculate timeframe-adjusted max move (based on actual hold time)
-        if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
-            # Forex/Metals are less volatile
-            if hold_hours <= 12:  # Short-term (up to half day)
-                max_move_pct = 0.01  # 1% max for forex short-term
-            elif hold_hours <= 24:  # Full day
-                max_move_pct = 0.015  # 1.5% max for forex daily
-            else:  # Multi-day
-                max_move_pct = 0.03  # 3% max for forex multi-day
-        else:
-            # Crypto is more volatile
-            if hold_hours <= 8:  # Intraday
-                max_move_pct = 0.03  # 3% max for crypto intraday
-            elif hold_hours <= 24:  # Same day
-                max_move_pct = 0.05  # 5% max for crypto daily
-            else:  # Multi-day
-                max_move_pct = 0.10  # 10% max for crypto multi-day
-        
-        # Get S/R targets from C1
+        stop_loss = entry * (1 - 0.02)
+    
+    elif position == "SHORT":
+        # Get S/R target
         targets_sr = c1.get('targets', {})
         next_support = targets_sr.get('next_support')
         
-        # FIX: Calculate S/R-based target ONLY if support is BELOW entry
-        if next_support and next_support['price'] < entry * 0.99:  # At least 1% below
-            # Target 2% above support (safety margin)
-            sr_target = next_support['price'] * 1.02
-            # Cap at max realistic move
-            sr_target = max(sr_target, entry * (1 - max_move_pct))
+        if next_support and next_support['price'] < entry * 0.99:
+            target = max(next_support['price'] * 1.02, entry * (1 - max_move_pct))
         else:
-            # No valid support - use percentage target
-            sr_target = entry * (1 - max_move_pct)
+            target = entry * (1 - max_move_pct)
         
-        target = sr_target
-        
-        # SAFETY: Ensure target is ALWAYS below entry for SHORT
         if target >= entry:
             target = entry * (1 - max_move_pct)
         
-        stop_loss = entry * (1 + 0.02)  # 2% stop loss
-        
+        stop_loss = entry * (1 + 0.02)
+    
     else:
-        position = "NEUTRAL"
-        confidence = 0
-        entry = current_price
         target = current_price
         stop_loss = current_price
     
     # Calculate risk/reward
     if position != "NEUTRAL":
-        # NEW: Minimum confidence threshold - don't trade if confidence < 20%
-        if confidence < 20:
-            return {
-                "position": "NEUTRAL",
-                "entry": current_price,
-                "target": current_price,
-                "stop_loss": current_price,
-                "hold_hours": 0,
-                "confidence": 0,
-                "reasoning": f"⚠️ NEUTRAL - Very low confidence ({int(confidence)}%). DO NOT TRADE.",
-                "risk_reward": 0
-            }
-        
         risk = abs(entry - stop_loss)
         reward = abs(target - entry)
         risk_reward = reward / risk if risk > 0 else 0
     else:
         risk_reward = 0
     
-    # Build reasoning
-    reasoning_parts = [
+    # Build full reasoning
+    full_reasoning = [
         f"C1: {c1['signal']} {c1['strength']}/10 ({c1['reasoning']})",
         f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
         f"C3: {c3['signal']} ({c3['reasoning']})",
         f"C4: {c4['signal']} (weight: {c4['weight']}%)"
     ]
     
-    # Add multi-timeframe to reasoning
     if mtf_result:
-        reasoning_parts.append(f"MTF: {mtf_result['note']}")
+        full_reasoning.append(f"MTF: {mtf_result['note']}")
+    
+    full_reasoning.extend(reasoning_parts)
     
     return {
         "position": position,
@@ -2148,7 +2194,7 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         "stop_loss": stop_loss,
         "hold_hours": hold_hours,
         "confidence": int(confidence),
-        "reasoning": " | ".join(reasoning_parts),
+        "reasoning": " | ".join(full_reasoning),
         "risk_reward": round(risk_reward, 1)
     }
 
