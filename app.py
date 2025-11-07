@@ -1896,7 +1896,7 @@ def analyze_single_timeframe(df, symbol):
     
     # Run consultants (simplified)
     c1 = consultant_c1_pattern_structure(df, symbol)
-    c2 = consultant_c2_trend_momentum(df, symbol)
+    c1 = consultant_c1_pattern_structure(df, symbol) c2 = consultant_c2_trend_momentum(df, symbol, c1_result=c1)
     
     # Simple vote
     bullish_votes = 0
@@ -3581,7 +3581,7 @@ if df is not None and len(df) > 0:
     
   # ==================== RUN CONSULTANT MEETING ====================
     c1 = consultant_c1_pattern_structure(df, symbol)
-    c2 = consultant_c2_trend_momentum(df, symbol)
+    c1 = consultant_c1_pattern_structure(df, symbol) c2 = consultant_c2_trend_momentum(df, symbol, c1_result=c1)
     c3 = consultant_c3_risk_warnings(df, symbol, warning_details)
     c4 = consultant_c4_news_sentiment(symbol, news_data=None)
     
