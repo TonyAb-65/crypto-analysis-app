@@ -1545,21 +1545,23 @@ def consultant_c1_pattern_structure(df, symbol):
                     signal = "BULLISH"
                     strength = 6
     
-    # RSI Analysis (secondary to S/R)
+    # RSI Analysis (secondary to S/R) - FIXED: Only add to signal, don't override
     if rsi < 30:
         if signal == "NEUTRAL":
             signal = "BULLISH"
             strength = 7
         elif signal == "BULLISH":
-            strength = min(strength + 2, 10)
+            strength = min(strength + 1, 10)  # CHANGED: Less aggressive boost
         reasoning.append(f"RSI {rsi:.1f} oversold")
     
     elif rsi > 70:
+        # CHANGED: Don't let RSI override S/R signals completely
         if signal == "NEUTRAL":
             signal = "BEARISH"
-            strength = 7
+            strength = 6  # CHANGED: Reduced from 7
         elif signal == "BEARISH":
-            strength = min(strength + 2, 10)
+            strength = min(strength + 1, 10)  # CHANGED: Less aggressive boost
+        # CHANGED: Don't flip BULLISH to BEARISH just because RSI > 70
         reasoning.append(f"RSI {rsi:.1f} overbought")
     
     # Build detailed reasoning with targets
@@ -1671,7 +1673,7 @@ def consultant_c3_risk_warnings(df, symbol, warnings):
         reasoning = f"1 warning ({warning_types[0]})"
     elif warning_count == 2:
         signal = "HIGH_RISK"
-        strength = 3
+        strength = 5  # CHANGED: Increased from 3 to 5 (less harsh)
         reasoning = f"2 warnings ({','.join(warning_types)})"
     else:
         signal = "EXTREME_RISK"
@@ -1807,10 +1809,10 @@ def analyze_single_timeframe(df, symbol):
     elif c2['signal'] == 'BEARISH':
         bearish_votes += c2['strength']
     
-    # Determine direction
-    if bullish_votes > bearish_votes + 3:
+    # CHANGED: More lenient threshold (was 3, now 2)
+    if bullish_votes > bearish_votes + 2:
         return "BULLISH", bullish_votes, f"C1: {c1['signal']}, C2: {c2['signal']}"
-    elif bearish_votes > bullish_votes + 3:
+    elif bearish_votes > bullish_votes + 2:
         return "BEARISH", bearish_votes, f"C1: {c1['signal']}, C2: {c2['signal']}"
     else:
         return "NEUTRAL", 0, f"C1: {c1['signal']}, C2: {c2['signal']}"
@@ -1820,6 +1822,8 @@ def multi_timeframe_analysis(symbol, asset_type):
     """
     Check 3 timeframes (1h, 4h, 1d) for signal alignment
     Returns confidence boost and alignment details
+    
+    IMPORTANT: This is for INFORMATIONAL PURPOSES only - it doesn't change the main signal!
     """
     
     timeframes = {
@@ -1869,7 +1873,7 @@ def multi_timeframe_analysis(symbol, asset_type):
         return {
             'aligned': True,
             'direction': available_signals[0],
-            'confidence_multiplier': 1.5,
+            'confidence_multiplier': 1.3,  # CHANGED: Reduced from 1.5 to 1.3
             'signals': signals,
             'details': details,
             'note': f"🔥 ALL TIMEFRAMES {available_signals[0]} - VERY STRONG SIGNAL!"
@@ -1880,7 +1884,7 @@ def multi_timeframe_analysis(symbol, asset_type):
         return {
             'aligned': True,
             'direction': signals['1h'],
-            'confidence_multiplier': 1.3,
+            'confidence_multiplier': 1.2,  # CHANGED: Reduced from 1.3 to 1.2
             'signals': signals,
             'details': details,
             'note': f"✅ 1h & 4h both {signals['1h']} - Strong signal"
@@ -1891,25 +1895,24 @@ def multi_timeframe_analysis(symbol, asset_type):
         return {
             'aligned': True,
             'direction': signals['4h'],
-            'confidence_multiplier': 1.2,
+            'confidence_multiplier': 1.15,  # CHANGED: Reduced from 1.2 to 1.15
             'signals': signals,
             'details': details,
             'note': f"✅ 4h & 1d both {signals['4h']} - Trend aligned"
         }
     
-    # Timeframe conflict
+    # Timeframe conflict - CHANGED: Less harsh penalty
     else:
         return {
             'aligned': False,
             'direction': 'CONFLICT',
-            'confidence_multiplier': 0.7,
+            'confidence_multiplier': 0.9,  # CHANGED: Increased from 0.7 to 0.9 (less harsh)
             'signals': signals,
             'details': details,
             'note': f"⚠️ Timeframe conflict: 1h={signals.get('1h', 'N/A')}, 4h={signals.get('4h', 'N/A')}, 1d={signals.get('1d', 'N/A')}"
         }
 
 # ==================== END MULTI-TIMEFRAME ANALYSIS ====================
-
 def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None, asset_type=None, timeframe_hours=4):
     """
     Unified Consultant Meeting - All 4 consultants discuss and reach consensus
