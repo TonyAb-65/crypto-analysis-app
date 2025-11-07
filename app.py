@@ -3291,7 +3291,7 @@ if df is not None and len(df) > 0:
         if 'committee_recommendation' not in st.session_state:
             st.session_state.committee_recommendation = {}
         # We'll populate this after running the consultant meeting below
-        # ==================== END NEW ====================
+    # ==================== END NEW ====================
         
         col1, col2, col3 = st.columns(3)
         
@@ -3335,79 +3335,7 @@ if df is not None and len(df) > 0:
         
         is_tracked = result and result[0] == 'will_trade'
         
-        if not is_tracked and 'current_prediction_id' in st.session_state:
-            st.info("💡 **Want to track this trade for AI learning?** Enter your actual entry price and click 'Save Trade Entry'. The AI will learn from every trade you complete!")
-            
-            # Get committee recommendation from session state
-            committee_rec = st.session_state.get('committee_recommendation', {})
-            
-            with st.form(key=f"track_form_{st.session_state.current_prediction_id}"):
-                st.markdown(f"### 📊 Save Trade: {asset_type}")
-                
-                st.caption(f"🔢 Prediction ID: {st.session_state.current_prediction_id}")
-                
-                col_info1, col_info2 = st.columns(2)
-                with col_info1:
-                    # CHANGED: Show Committee entry instead of ML
-                    committee_entry = committee_rec.get('entry', current_price)
-                    st.metric("Committee Suggested Entry", f"${committee_entry:,.2f}")
-                    st.caption("(Committee recommendation)")
-                with col_info2:
-                    # CHANGED: Show Committee target instead of ML
-                    committee_target = committee_rec.get('target', predictions[0])
-                    st.metric("Committee Target", f"${committee_target:,.2f}")
-                    st.caption("(Committee target)")
-                
-                st.markdown("---")
-                st.warning("⚠️ **Important:** Enter YOUR actual entry price below (can be different from suggested price)")
-                
-                actual_entry_price = st.number_input(
-                    "💵 Your ACTUAL Entry Price (from your exchange):",
-                    min_value=0.0,
-                    value=float(committee_entry),  # CHANGED: Default to committee entry
-                    step=0.01,
-                    format="%.2f",
-                    help="This is the price YOU actually bought/entered at - it may differ from the suggested price above",
-                    key=f"entry_input_{st.session_state.current_prediction_id}"
-                )
-                
-                st.info(f"📝 **Will save:** Entry Price = ${actual_entry_price:,.2f}")
-                
-                col_btn1, col_btn2 = st.columns([1, 1])
-                with col_btn1:
-                    submit_track = st.form_submit_button("✅ Save Trade Entry", type="primary", use_container_width=True)
-                with col_btn2:
-                    st.caption("Entry saved immediately ✨")
-                
-                if submit_track:
-                    if actual_entry_price > 0:
-                        st.info(f"🔍 DEBUG: Saving entry price: ${actual_entry_price:,.2f} for prediction ID: {st.session_state.current_prediction_id}")
-                        
-                        success = mark_prediction_for_trading(st.session_state.current_prediction_id, actual_entry_price)
-                        
-                        if success:
-                            st.success(f"""
-                            ✅ **Trade Saved Successfully!**
-                            
-                            **Pair:** {symbol}  
-                            **Your Actual Entry:** ${actual_entry_price:,.2f}  
-                            **Committee Target:** ${committee_target:,.2f}  
-                            **Committee Confidence:** {committee_rec.get('confidence', 0)}%
-                            
-                            🧠 **AI will learn from this trade when you close it!**
-                            """)
-                            time.sleep(2)
-                            st.rerun()
-                        else:
-                            st.error("❌ Failed to save trade!")
-                    else:
-                        st.error("⚠️ Please enter a valid entry price greater than 0")
-        elif is_tracked:
-            actual_entry = result[1] if result and result[1] else current_price
-            committee_rec = st.session_state.get('committee_recommendation', {})
-            committee_entry = committee_rec.get('entry', current_price)
-            st.success(f"✅ **Trade Tracked** - Your Entry: ${actual_entry:,.2f}")
-            st.caption(f"Committee suggested entry was: ${committee_entry:,.2f}")
+        # REMOVED: Form section moved to after consultant meeting (below)
         
         st.markdown("---")
         
@@ -3604,10 +3532,24 @@ if df is not None and len(df) > 0:
     st.info("🔄 Analyzing multiple timeframes for confirmation...")
     mtf_result = multi_timeframe_analysis(symbol, asset_type)
     
-    meeting_result = consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result, asset_type)
+    # Map timeframe selection to hours
+    timeframe_map = {
+        "5 Minutes": 0.083,
+        "10 Minutes": 0.167,
+        "15 Minutes": 0.25,
+        "30 Minutes": 0.5,
+        "1 Hour": 1,
+        "4 Hours": 4,
+        "1 Day": 24
+    }
+    
+    # Get timeframe in hours
+    timeframe_hours = timeframe_map.get(timeframe_name, 4)  # Default 4h
+    
+    meeting_result = consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result, asset_type, timeframe_hours)
     
     # ==================== NEW: STORE COMMITTEE RESULT & SAVE PREDICTION ====================
-    # Store committee recommendation in session state for trade tracking
+            # Store committee recommendation in session state for trade tracking
     st.session_state.committee_recommendation = {
         'entry': meeting_result['entry'],
         'target': meeting_result['target'],
