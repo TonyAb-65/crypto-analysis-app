@@ -3598,7 +3598,6 @@ if df is not None and len(df) > 0:
                 st.session_state.current_prediction_id = 999
             st.session_state.current_page_key = page_key
     # ==================== END NEW ====================
-    
     st.markdown("---")
     st.markdown("### 🏢 CONSULTANT MEETING RESULT")
     
@@ -3623,7 +3622,46 @@ if df is not None and len(df) > 0:
         st.info(f"⏰ Hold Duration: {meeting_result['hold_hours']} hours")
         st.info(f"🎯 Confidence: {meeting_result['confidence']}%")
         st.info(f"💰 Risk/Reward Ratio: 1:{meeting_result['risk_reward']}")
-   # Display Multi-Timeframe Analysis
+    
+    # ==================== SAVE PREDICTION TO DATABASE (NEW!) ====================
+    # Save committee recommendation to database and session state
+    if meeting_result['position'] != 'NEUTRAL':
+        # Check if we need a new prediction (not already saved)
+        if 'current_prediction_id' not in st.session_state or st.session_state.get('needs_new_prediction', True):
+            
+            st.info("💾 Saving committee recommendation to database...")
+            
+            # Save to database
+            prediction_id = save_prediction(
+                asset_type=asset_type.replace("💰 ", "").replace("🏆 ", "").replace("💱 ", "").replace("🔍 ", ""),
+                pair=symbol,
+                timeframe=timeframe_name,
+                current_price=meeting_result['entry'],
+                predicted_price=meeting_result['target'],
+                prediction_horizon=meeting_result['hold_hours'],
+                confidence=meeting_result['confidence'],
+                signal_strength=10,  # Committee strength (you can adjust this)
+                features={'committee_position': meeting_result['position'], 'risk_reward': meeting_result['risk_reward']},
+                indicator_snapshot={'stop_loss': meeting_result['stop_loss']}
+            )
+            
+            # Save to session state
+            st.session_state.current_prediction_id = prediction_id
+            st.session_state.last_prediction_id = prediction_id
+            st.session_state.needs_new_prediction = False
+            
+            # Save committee recommendation for form display
+            st.session_state.committee_recommendation = {
+                'entry': meeting_result['entry'],
+                'target': meeting_result['target'],
+                'confidence': meeting_result['confidence'],
+                'position': meeting_result['position']
+            }
+            
+            st.success(f"✅ Prediction saved! ID: {prediction_id}")
+    # ==================== END SAVE PREDICTION ====================
+    
+    # Display Multi-Timeframe Analysis
     if mtf_result:
         with st.expander("🔍 Multi-Timeframe Analysis", expanded=True):
             col_mtf1, col_mtf2, col_mtf3 = st.columns(3)
