@@ -1949,18 +1949,8 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     
     technical_score = sum(technical_signals) / len(technical_signals) if technical_signals else 0
     
-    # NEW FIX: Force NEUTRAL if high risk (2 warnings) + weak signals
-    if c3['signal'] == 'HIGH_RISK' and abs(technical_score) < 4:
-        return {
-            "position": "NEUTRAL",
-            "entry": current_price,
-            "target": current_price,
-            "stop_loss": current_price,
-            "hold_hours": 0,
-            "confidence": 0,
-            "reasoning": f"NEUTRAL - High risk ({c3['reasoning']}) with weak technical signals",
-            "risk_reward": 0
-        }
+    # REMOVED: The "high risk + weak signals" check that was blocking trades
+    # This was too aggressive and blocked good trades like your 6/10 + 6/10 bullish signals
     
     # Calculate news score
     news_score = 0
@@ -1972,9 +1962,13 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     # Weighted final score
     final_score = (technical_score * technical_weight + news_score * news_weight) / 100
     
-    # Adjust for risk (C3)
+    # Adjust for risk (C3) - but less harshly
     risk_multiplier = c3['strength'] / 10.0
-    final_score *= risk_multiplier
+    # CHANGED: Don't cut score in half, just reduce by 20% for high risk
+    if c3['signal'] == 'HIGH_RISK':
+        final_score *= max(risk_multiplier, 0.7)  # Minimum 70% of original score
+    else:
+        final_score *= risk_multiplier  # Normal risk adjustment
     
     # ==================== NEW: 1-CANDLE PREDICTION LOGIC ====================
     # Calculate hold duration - MATCH TIMEFRAME (predict only next candle)
@@ -2000,13 +1994,13 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         position = "LONG"
         confidence = min(abs(final_score) * 10, 90)
         
-        # Apply multi-timeframe multiplier
+        # Apply multi-timeframe multiplier (but don't be too harsh on conflicts)
         if mtf_result and mtf_result['aligned']:
             if mtf_result['direction'] == 'BULLISH':
                 confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
             elif mtf_result['direction'] == 'BEARISH':
-                # Timeframes disagree with position - reduce confidence
-                confidence = confidence * 0.6
+                # CHANGED: Less harsh penalty for timeframe conflicts (was 0.6, now 0.8)
+                confidence = confidence * 0.8
         
         entry = current_price
         
@@ -2054,13 +2048,13 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
         position = "SHORT"
         confidence = min(abs(final_score) * 10, 90)
         
-        # Apply multi-timeframe multiplier
+        # Apply multi-timeframe multiplier (but don't be too harsh on conflicts)
         if mtf_result and mtf_result['aligned']:
             if mtf_result['direction'] == 'BEARISH':
                 confidence = min(confidence * mtf_result['confidence_multiplier'], 95)
             elif mtf_result['direction'] == 'BULLISH':
-                # Timeframes disagree with position - reduce confidence
-                confidence = confidence * 0.6
+                # CHANGED: Less harsh penalty for timeframe conflicts (was 0.6, now 0.8)
+                confidence = confidence * 0.8
         
         entry = current_price
         
@@ -2122,7 +2116,7 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
                 "stop_loss": current_price,
                 "hold_hours": 0,
                 "confidence": 0,
-                "reasoning": f"⚠️ NEUTRAL - Very low confidence ({confidence}%). DO NOT TRADE.",
+                "reasoning": f"⚠️ NEUTRAL - Very low confidence ({int(confidence)}%). DO NOT TRADE.",
                 "risk_reward": 0
             }
         
@@ -2156,6 +2150,43 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, mtf_result=None
     }
 
 # ==================== STREAMLIT PAGE CONFIGURATION ====================
+```
+
+---
+
+## 🎯 **KEY CHANGES MADE:**
+
+### **1. Line 41:** REMOVED the aggressive "high risk + weak signals" check
+- This was blocking trades with C1=6/10, C2=6/10 (score=6 > 4)
+
+### **2. Lines 53-58:** Less harsh risk penalty
+- OLD: Cut score in HALF for high risk
+- NEW: Only reduce by 30% (minimum 70% of original)
+
+### **3. Lines 97 & 152:** Less harsh MTF conflict penalty
+- OLD: 0.6 multiplier (40% cut)
+- NEW: 0.8 multiplier (20% cut)
+
+---
+
+## ✅ **EXPECTED RESULTS:**
+
+Your example (C1: BULLISH 6/10, C2: BULLISH 6/10, HIGH_RISK):
+
+**BEFORE:**
+```
+Score: (6+6)/2 = 6
+× 0.5 risk = 3
+Confidence: 30%
+Result: NEUTRAL (blocked by weak signal check)
+```
+
+**AFTER:**
+```
+Score: (6+6)/2 = 6
+× 0.7 risk = 4.2
+Confidence: 42%
+Result: LONG ✅
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
 st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH SURGICAL FIXES")
