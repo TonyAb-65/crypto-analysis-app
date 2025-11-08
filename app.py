@@ -3321,14 +3321,22 @@ with st.spinner("🧠 Training AI models..."):
         prediction_periods=prediction_periods
     )
 
+st.info(f"🔍 DEBUG A: predictions = {predictions}")
+st.info(f"🔍 DEBUG B: confidence = {confidence}")
+
 if predictions and len(predictions) > 0:
+    st.info("🔍 DEBUG C: Inside if block")
+    
     pred_change = ((predictions[-1] - current_price) / current_price) * 100
+    st.info("🔍 DEBUG D: pred_change calculated")
     
     indicator_snapshot = create_indicator_snapshot(df)
+    st.info("🔍 DEBUG E: indicator_snapshot created")
     
     # ==================== SURGICAL FIX #5: CONSULTANT MEETING ====================
     # Step 1: Calculate raw signal (without warnings)
     raw_signal_strength = calculate_signal_strength(df, warning_details={})
+    st.info("🔍 DEBUG F: raw_signal_strength calculated")
     
     # Step 2: Check news warning
     news_warning_data = None
@@ -3341,22 +3349,25 @@ if predictions and len(predictions) > 0:
             'warning_message': news_msg,
             'sentiment_status': sentiment_status
         }
+    st.info("🔍 DEBUG G: news_warning_data created")
     
     # Step 3: Calculate all warnings (including news)
     warning_count, warning_details = calculate_warning_signs(
         df, raw_signal_strength, news_warning_data
     )
+    st.info("🔍 DEBUG H: warnings calculated")
     
     # Step 4: Recalculate signal WITH warning adjustments
     final_signal_strength = calculate_signal_strength(df, warning_details)
+    st.info("🔍 DEBUG I: final_signal_strength calculated")
     
     # Step 5: Adjust AI confidence based on warnings
     adjusted_confidence = confidence
     if warning_count >= 1:
         adjusted_confidence = confidence * (1 - (warning_count * 0.15))
         adjusted_confidence = max(adjusted_confidence, 30.0)
-    # ==================== END CONSULTANT MEETING ====================
-    
+    st.info("🔍 DEBUG J: adjusted_confidence calculated")
+    # ==================== END CONSULTANT MEETING ====================    
     # ==================== NEW: STORE COMMITTEE RESULT IN SESSION STATE ====================
     # This will be used when saving trades
     if 'committee_recommendation' not in st.session_state:
