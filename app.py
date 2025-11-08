@@ -559,16 +559,28 @@ if df is not None and len(df) > 0:
                                 level = zone['price']
                                 touches = zone.get('touches', 1)
                                 strength = zone.get('strength', 'MEDIUM')
+                                status = zone.get('status', 'INTACT')
                             elif isinstance(zone, (tuple, list)) and len(zone) >= 2:
                                 level, touches = zone[0], zone[1]
                                 strength = 'STRONG' if touches >= 3 else 'MEDIUM'
+                                status = 'INTACT'
                             else:
                                 level = float(zone)
                                 touches = 1
                                 strength = 'MEDIUM'
+                                status = 'INTACT'
                             
                             distance_pct = ((current_price - level) / current_price) * 100
-                            st.caption(f"{i}. ${level:.2f} ({distance_pct:+.1f}%) - {strength} ({touches} touches)")
+                            
+                            # Show FLIPPED status for role reversals
+                            if strength == 'FLIPPED':
+                                status_emoji = "🔄"
+                                status_text = "FLIPPED (was resistance)"
+                            else:
+                                status_emoji = "🟢"
+                                status_text = f"{strength}"
+                            
+                            st.caption(f"{i}. {status_emoji} ${level:.2f} ({distance_pct:+.1f}%) - {status_text} ({touches} touches)")
                         except Exception as e:
                             if debug_mode:
                                 st.error(f"Error displaying support zone: {e}")
@@ -585,16 +597,28 @@ if df is not None and len(df) > 0:
                                 level = zone['price']
                                 touches = zone.get('touches', 1)
                                 strength = zone.get('strength', 'MEDIUM')
+                                status = zone.get('status', 'INTACT')
                             elif isinstance(zone, (tuple, list)) and len(zone) >= 2:
                                 level, touches = zone[0], zone[1]
                                 strength = 'STRONG' if touches >= 3 else 'MEDIUM'
+                                status = 'INTACT'
                             else:
                                 level = float(zone)
                                 touches = 1
                                 strength = 'MEDIUM'
+                                status = 'INTACT'
                             
                             distance_pct = ((level - current_price) / current_price) * 100
-                            st.caption(f"{i}. ${level:.2f} ({distance_pct:+.1f}%) - {strength} ({touches} touches)")
+                            
+                            # Show FLIPPED status for role reversals
+                            if strength == 'FLIPPED':
+                                status_emoji = "🔄"
+                                status_text = "FLIPPED (was support)"
+                            else:
+                                status_emoji = "🔴"
+                                status_text = f"{strength}"
+                            
+                            st.caption(f"{i}. {status_emoji} ${level:.2f} ({distance_pct:+.1f}%) - {status_text} ({touches} touches)")
                         except Exception as e:
                             if debug_mode:
                                 st.error(f"Error displaying resistance zone: {e}")
@@ -639,18 +663,26 @@ if df is not None and len(df) > 0:
                     # Handle dictionary format from find_support_resistance_zones
                     if isinstance(zone, dict):
                         level = zone['price']
+                        strength = zone.get('strength', 'MEDIUM')
+                        # Use orange for flipped levels, blue for normal support
+                        line_color = "orange" if strength == 'FLIPPED' else "blue"
+                        annotation = f"Support ${level:.2f}" if strength != 'FLIPPED' else f"Support ${level:.2f} (FLIPPED)"
                     elif isinstance(zone, (tuple, list)) and len(zone) >= 2:
                         level = zone[0]
+                        line_color = "blue"
+                        annotation = f"Support ${level:.2f}"
                     else:
                         level = float(zone)
+                        line_color = "blue"
+                        annotation = f"Support ${level:.2f}"
                     
                     fig.add_hline(
                         y=level,
                         line_dash="dash",
-                        line_color="blue",
+                        line_color=line_color,
                         line_width=2,
                         opacity=0.6,
-                        annotation_text=f"Support ${level:.2f}",
+                        annotation_text=annotation,
                         annotation_position="right",
                         row=1, col=1
                     )
@@ -664,18 +696,26 @@ if df is not None and len(df) > 0:
                     # Handle dictionary format from find_support_resistance_zones
                     if isinstance(zone, dict):
                         level = zone['price']
+                        strength = zone.get('strength', 'MEDIUM')
+                        # Use orange for flipped levels, red for normal resistance
+                        line_color = "orange" if strength == 'FLIPPED' else "red"
+                        annotation = f"Resistance ${level:.2f}" if strength != 'FLIPPED' else f"Resistance ${level:.2f} (FLIPPED)"
                     elif isinstance(zone, (tuple, list)) and len(zone) >= 2:
                         level = zone[0]
+                        line_color = "red"
+                        annotation = f"Resistance ${level:.2f}"
                     else:
                         level = float(zone)
+                        line_color = "red"
+                        annotation = f"Resistance ${level:.2f}"
                     
                     fig.add_hline(
                         y=level,
                         line_dash="dash",
-                        line_color="red",
+                        line_color=line_color,
                         line_width=2,
                         opacity=0.6,
-                        annotation_text=f"Resistance ${level:.2f}",
+                        annotation_text=annotation,
                         annotation_position="right",
                         row=1, col=1
                     )
