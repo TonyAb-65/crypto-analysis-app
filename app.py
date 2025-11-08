@@ -3260,91 +3260,68 @@ with col4:
     st.metric("Data Source", data_source)
 
 st.markdown("---")
-    
-    # ==================== SURGICAL FIX #4: NEWS INTEGRATION ====================
 
-## 🔧 **Changes Made:**
+# ==================== SURGICAL FIX #4: NEWS INTEGRATION ====================
+st.markdown("### 📰 Market Intelligence Check")
 
-1. **Line 3:** `current_price:,.2f` → `current_price:,.4f` ✅
-2. **Line 5:** `df['high'].tail(24).max():,.2f` → `df['high'].tail(24).max():,.4f` ✅
-3. **Line 7:** `df['low'].tail(24).min():,.2f` → `df['low'].tail(24).min():,.4f` ✅
-4. **Percentage kept at `.2f`** ✅ (correct - percentages don't need 4 decimals)
+with st.spinner("🔄 Fetching market sentiment..."):
+    fear_greed_value, fear_greed_class = get_fear_greed_index()
+    news_sentiment, news_headlines = get_crypto_news_sentiment(symbol)
 
----
+col_sentiment1, col_sentiment2 = st.columns(2)
 
-## 📊 **Result:**
+with col_sentiment1:
+    if fear_greed_value:
+        emoji = "😱" if fear_greed_value < 25 else "😰" if fear_greed_value < 45 else "😐" if fear_greed_value < 55 else "😃" if fear_greed_value < 75 else "🤑"
+        st.metric("Fear & Greed Index", f"{emoji} {fear_greed_value}/100", fear_greed_class)
+    else:
+        st.warning("⚠️ Fear & Greed data unavailable")
 
-**Before:**
-```
-Current Price: $162.49  +0.52%
-24h High: $163.49
-24h Low: $161.31
-```
+with col_sentiment2:
+    if news_sentiment:
+        emoji = "🔴" if news_sentiment < 40 else "🟡" if news_sentiment < 60 else "🟢"
+        st.metric("News Sentiment", f"{emoji} {news_sentiment:.0f}/100",
+                 "Bearish" if news_sentiment < 40 else "Neutral" if news_sentiment < 60 else "Bullish")
+    else:
+        st.info("ℹ️ News sentiment unavailable")
 
-**After:**
-```
-Current Price: $162.4856  +0.52%
-24h High: $163.4902
-24h Low: $161.3145
-    st.markdown("### 📰 Market Intelligence Check")
+if news_headlines and len(news_headlines) > 0:
+    with st.expander("📰 Recent Headlines", expanded=False):
+        for i, headline in enumerate(news_headlines, 1):
+            st.caption(f"{i}. {headline}")
+
+st.markdown("---")
+
+# ==================== END NEWS INTEGRATION ====================
+
+st.markdown("### 🤖 Improved AI Predictions with Learning")
+st.info(f"""
+**🎯 Improvements:**
+- ✅ Monitors last {lookback_hours} hours as context
+- ✅ Analyzes RSI bounce patterns from history
+- ✅ Uses pattern-based prediction
+- ✅ Optimized ML models with feature scaling
+- 🆕 AI learns from your trades automatically!
+- 🆕 Checks support/resistance barriers
+- 🆕 RSI duration-weighted signals
+- 🆕 Equal indicator weights (Fair signal calculation)
+- 🆕 **News sentiment integrated as 4th warning type!**
+- 🆕 **NOW TRACKS COMMITTEE RECOMMENDATIONS (not ML model)!**
+""")
+
+with st.spinner("🧠 Training AI models..."):
+    predictions, features, confidence, rsi_insights = train_improved_model(
+        df, 
+        lookback=lookback_hours,
+        prediction_periods=prediction_periods
+    )
+
+if predictions and len(predictions) > 0:
+    pred_change = ((predictions[-1] - current_price) / current_price) * 100
     
-    with st.spinner("🔄 Fetching market sentiment..."):
-        fear_greed_value, fear_greed_class = get_fear_greed_index()
-        news_sentiment, news_headlines = get_crypto_news_sentiment(symbol)
+    indicator_snapshot = create_indicator_snapshot(df)
     
-    col_sentiment1, col_sentiment2 = st.columns(2)
-    
-    with col_sentiment1:
-        if fear_greed_value:
-            emoji = "😱" if fear_greed_value < 25 else "😰" if fear_greed_value < 45 else "😐" if fear_greed_value < 55 else "😃" if fear_greed_value < 75 else "🤑"
-            st.metric("Fear & Greed Index", f"{emoji} {fear_greed_value}/100", fear_greed_class)
-        else:
-            st.warning("⚠️ Fear & Greed data unavailable")
-    
-    with col_sentiment2:
-        if news_sentiment:
-            emoji = "🔴" if news_sentiment < 40 else "🟡" if news_sentiment < 60 else "🟢"
-            st.metric("News Sentiment", f"{emoji} {news_sentiment:.0f}/100",
-                     "Bearish" if news_sentiment < 40 else "Neutral" if news_sentiment < 60 else "Bullish")
-        else:
-            st.info("ℹ️ News sentiment unavailable")
-    
-    if news_headlines and len(news_headlines) > 0:
-        with st.expander("📰 Recent Headlines", expanded=False):
-            for i, headline in enumerate(news_headlines, 1):
-                st.caption(f"{i}. {headline}")
-    
-    st.markdown("---")
-   # ==================== END NEWS INTEGRATION ====================
-    
-    st.markdown("### 🤖 Improved AI Predictions with Learning")
-    st.info(f"""
-    **🎯 Improvements:**
-    - ✅ Monitors last {lookback_hours} hours as context
-    - ✅ Analyzes RSI bounce patterns from history
-    - ✅ Uses pattern-based prediction
-    - ✅ Optimized ML models with feature scaling
-    - 🆕 AI learns from your trades automatically!
-    - 🆕 Checks support/resistance barriers
-    - 🆕 RSI duration-weighted signals
-    - 🆕 Equal indicator weights (Fair signal calculation)
-    - 🆕 **News sentiment integrated as 4th warning type!**
-    - 🆕 **NOW TRACKS COMMITTEE RECOMMENDATIONS (not ML model)!**
-    """)
-    
-    with st.spinner("🧠 Training AI models..."):
-        predictions, features, confidence, rsi_insights = train_improved_model(
-            df, 
-            lookback=lookback_hours,
-            prediction_periods=prediction_periods
-        )
-    
-    if predictions and len(predictions) > 0:
-        pred_change = ((predictions[-1] - current_price) / current_price) * 100
-        
-        indicator_snapshot = create_indicator_snapshot(df)
-        
-        # ==================== SURGICAL FIX #5: CONSULTANT MEETING ====================
+    # ==================== SURGICAL FIX #5: CONSULTANT MEETING ====================
         # Step 1: Calculate raw signal (without warnings)
         raw_signal_strength = calculate_signal_strength(df, warning_details=None)
         
