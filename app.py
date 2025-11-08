@@ -3293,7 +3293,6 @@ if news_headlines and len(news_headlines) > 0:
 st.markdown("---")
 
 # ==================== END NEWS INTEGRATION ====================
-
 st.markdown("### 🤖 Improved AI Predictions with Learning")
 st.info(f"""
 **🎯 Improvements:**
@@ -3347,18 +3346,17 @@ if predictions and len(predictions) > 0:
     
     # Step 5: Adjust AI confidence based on warnings
     adjusted_confidence = confidence
-        if warning_count >= 1:
-            adjusted_confidence = confidence * (1 - (warning_count * 0.15))
-            adjusted_confidence = max(adjusted_confidence, 30.0)
-        # ==================== END CONSULTANT MEETING ====================
-        
-        # ==================== NEW: STORE COMMITTEE RESULT IN SESSION STATE ====================
-        # This will be used when saving trades
-        if 'committee_recommendation' not in st.session_state:
-            st.session_state.committee_recommendation = {}
-        # We'll populate this after running the consultant meeting below
-    # ==================== END NEW ====================
-        
+    if warning_count >= 1:
+        adjusted_confidence = confidence * (1 - (warning_count * 0.15))
+        adjusted_confidence = max(adjusted_confidence, 30.0)
+    # ==================== END CONSULTANT MEETING ====================
+    
+    # ==================== NEW: STORE COMMITTEE RESULT IN SESSION STATE ====================
+    # This will be used when saving trades
+    if 'committee_recommendation' not in st.session_state:
+        st.session_state.committee_recommendation = {}
+    # We'll populate this after running the consultant meeting below
+    # ==================== END NEW ====================        
         col1, col2, col3 = st.columns(3)
         
         with col1:
