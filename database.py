@@ -175,14 +175,194 @@ def get_all_recent_predictions(limit=50):
     return df
 
 
+def evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won):
+    """
+    Evaluate if an indicator correctly predicted the trade outcome
+    Returns True if indicator was correct, False otherwise
+    """
+    if indicator_value is None or pd.isna(indicator_value):
+        return None  # Skip if no data
+    
+    try:
+        indicator_value = float(indicator_value)
+    except:
+        return None
+    
+    # Indicator prediction rules
+    if indicator_name == 'OBV':
+        # OBV > 0 = bullish, < 0 = bearish
+        predicted_bullish = indicator_value > 0
+        actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
+        return predicted_bullish == actual_bullish
+    
+    elif indicator_name == 'MFI':
+        # MFI > 80 = overbought (bearish), < 20 = oversold (bullish)
+        if indicator_value > 80:
+            predicted_bearish = True
+            actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
+            return predicted_bearish == actual_bearish
+        elif indicator_value < 20:
+            predicted_bullish = True
+            actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
+            return predicted_bullish == actual_bullish
+        else:
+            return None  # Neutral zone, skip
+    
+    elif indicator_name == 'ADX':
+        # ADX > 25 = strong trend (trust the position)
+        if indicator_value > 25:
+            # Strong trend indicator - if trade won, ADX was correct about trend strength
+            return trade_won
+        else:
+            return None  # Weak trend, skip
+    
+    elif indicator_name == 'Stochastic':
+        # Stoch > 80 = overbought (bearish), < 20 = oversold (bullish)
+        if indicator_value > 80:
+            predicted_bearish = True
+            actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
+            return predicted_bearish == actual_bearish
+        elif indicator_value < 20:
+            predicted_bullish = True
+            actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
+            return predicted_bullish == actual_bullish
+        else:
+            return None  # Neutral zone, skip
+    
+    elif indicator_name == 'CCI':
+        # CCI > 100 = overbought (bearish), < -100 = oversold (bullish)
+        if indicator_value > 100:
+            predicted_bearish = True
+            actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
+            return predicted_bearish == actual_bearish
+        elif indicator_value < -100:
+            predicted_bullish = True
+            actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
+            return predicted_bullish == actual_bullish
+        else:
+            return None  # Neutral zone, skip
+    
+    return None  # Unknown indicator
+
+
+def parse_indicator_snapshot(snapshot_str):
+    """Parse indicator snapshot string into dictionary"""
+    try:
+        import json
+        import ast
+        
+        # Try JSON first
+        try:
+            return json.loads(snapshot_str)
+        except:
+            pass
+        
+        # Try ast.literal_eval
+        try:
+            return ast.literal_eval(snapshot_str)
+        except:
+            pass
+        
+        # Try simple parsing
+        indicators = {}
+        if isinstance(snapshot_str, str):
+            # Remove brackets and split
+            clean_str = snapshot_str.strip('{}[]')
+            pairs = clean_str.split(',')
+            for pair in pairs:
+                if ':' in pair:
+                    key, val = pair.split(':', 1)
+                    key = key.strip().strip("'\"")
+                    val = val.strip().strip("'\"")
+                    try:
+                        indicators[key] = float(val)
+                    except:
+                        indicators[key] = val
+        
+        return indicators
+    except:
+        return {}
+
+
+def evaluate_and_learn_from_trade(prediction_id, trade_won, cursor):
+    """
+    Evaluate which indicators were correct and update learning
+    This is the CORE AI learning function!
+    """
+    # Get prediction data
+    cursor.execute("""
+        SELECT indicator_snapshot, position_type, committee_reasoning
+        FROM predictions WHERE id = ?
+    """, (prediction_id,))
+    
+    row = cursor.fetchone()
+    if not row:
+        return
+    
+    indicator_snapshot, position_type, committee_reasoning = row
+    
+    # Parse indicators
+    indicators = parse_indicator_snapshot(indicator_snapshot)
+    
+    if not indicators:
+        return
+    
+    # Evaluate each tracked indicator
+    tracked_indicators = ['OBV', 'MFI', 'ADX', 'Stochastic', 'CCI']
+    
+    for indicator_name in tracked_indicators:
+        # Get indicator value from snapshot
+        indicator_value = indicators.get(indicator_name.lower(), indicators.get(indicator_name))
+        
+        # Evaluate if indicator was correct
+        was_correct = evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won)
+        
+        if was_correct is None:
+            # Skip neutral/unclear cases
+            continue
+        
+        # Update indicator accuracy
+        if was_correct:
+            cursor.execute("""
+                UPDATE indicator_accuracy 
+                SET correct_count = correct_count + 1,
+                    last_updated = ?
+                WHERE indicator_name = ?
+            """, (datetime.now().isoformat(), indicator_name))
+        else:
+            cursor.execute("""
+                UPDATE indicator_accuracy 
+                SET wrong_count = wrong_count + 1,
+                    last_updated = ?
+                WHERE indicator_name = ?
+            """, (datetime.now().isoformat(), indicator_name))
+    
+    # Recalculate accuracy rates and weights for all indicators
+    cursor.execute("""
+        UPDATE indicator_accuracy
+        SET accuracy_rate = CAST(correct_count AS REAL) / NULLIF(correct_count + wrong_count, 0),
+            weight_multiplier = CASE
+                WHEN CAST(correct_count AS REAL) / NULLIF(correct_count + wrong_count, 0) >= 0.6 THEN 1.0
+                WHEN CAST(correct_count AS REAL) / NULLIF(correct_count + wrong_count, 0) >= 0.5 THEN 0.9
+                WHEN CAST(correct_count AS REAL) / NULLIF(correct_count + wrong_count, 0) >= 0.45 THEN 0.7
+                ELSE 0.5
+            END
+        WHERE correct_count + wrong_count > 0
+    """)
+
+
 def save_trade_result(prediction_id, entry_price, exit_price, profit_loss, 
                      profit_loss_pct, prediction_error, notes=''):
-    """Save trade result"""
+    """
+    Save trade result AND update AI learning
+    This function now includes automatic learning from trade outcomes!
+    """
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
     trade_date = datetime.now().isoformat()
     
+    # Save trade result
     cursor.execute('''
         INSERT INTO trade_results (
             prediction_id, entry_price, exit_price, trade_date, 
@@ -191,12 +371,19 @@ def save_trade_result(prediction_id, entry_price, exit_price, profit_loss,
     ''', (prediction_id, entry_price, exit_price, trade_date, 
           profit_loss, profit_loss_pct, prediction_error, notes))
     
+    # Update prediction status
     cursor.execute('''
         UPDATE predictions SET status = 'completed' WHERE id = ?
     ''', (prediction_id,))
     
+    # ✅ NEW: AI LEARNING - Evaluate indicators and update weights
+    trade_won = profit_loss > 0
+    evaluate_and_learn_from_trade(prediction_id, trade_won, cursor)
+    
     conn.commit()
     conn.close()
+    
+    print(f"✅ Trade saved and AI learning updated for prediction #{prediction_id}")
     
     return True
 
@@ -217,3 +404,50 @@ def get_indicator_weights():
             'OBV': 1.0, 'ADX': 1.0, 'Stochastic': 1.0, 'MFI': 1.0,
             'CCI': 1.0, 'Hammer': 1.0, 'Doji': 1.0, 'Shooting_Star': 1.0
         }
+
+
+def relearn_from_past_trades():
+    """
+    Retroactively learn from all completed trades
+    Use this to teach the AI from your 49 existing trades!
+    """
+    conn = sqlite3.connect(str(DB_PATH))
+    cursor = conn.cursor()
+    
+    # Reset indicator counts
+    cursor.execute("""
+        UPDATE indicator_accuracy
+        SET correct_count = 0,
+            wrong_count = 0,
+            accuracy_rate = 0,
+            weight_multiplier = 1.0
+    """)
+    
+    # Get all completed trades with their prediction data
+    cursor.execute("""
+        SELECT 
+            tr.prediction_id,
+            tr.profit_loss,
+            p.indicator_snapshot,
+            p.position_type
+        FROM trade_results tr
+        JOIN predictions p ON tr.prediction_id = p.id
+        WHERE p.status = 'completed'
+    """)
+    
+    trades = cursor.fetchall()
+    learned_count = 0
+    
+    for trade in trades:
+        prediction_id, profit_loss, indicator_snapshot, position_type = trade
+        trade_won = profit_loss > 0
+        
+        # Evaluate and learn from this trade
+        evaluate_and_learn_from_trade(prediction_id, trade_won, cursor)
+        learned_count += 1
+    
+    conn.commit()
+    conn.close()
+    
+    print(f"✅ AI Learning: Analyzed {learned_count} past trades!")
+    return learned_count
