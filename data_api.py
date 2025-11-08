@@ -28,11 +28,13 @@ def fetch_forex_data(pair, interval="1h", limit=100):
     """Fetch forex data from Alpha Vantage or Twelve Data"""
     try:
         # Try Twelve Data free API (no key required for basic data)
-        base_currency = pair.split('/')[0]
-        quote_currency = pair.split('/')[1]
+        base_currency = pair.split('/')[0] if '/' in pair else pair[:3]
+        quote_currency = pair.split('/')[1] if '/' in pair else pair[3:]
         
         # Format for API
         symbol = f"{base_currency}{quote_currency}"
+        
+        print(f"Fetching forex data for {symbol} ({base_currency}/{quote_currency})")
         
         # Using Twelve Data
         url = "https://api.twelvedata.com/time_series"
@@ -45,16 +47,25 @@ def fetch_forex_data(pair, interval="1h", limit=100):
         td_interval = interval_map.get(interval, "1h")
         
         params = {
-            "symbol": symbol,
+            "symbol": f"{base_currency}/{quote_currency}",
             "interval": td_interval,
-            "outputsize": str(limit),
+            "outputsize": str(min(limit, 100)),  # Twelve Data free tier limit
             "format": "JSON"
         }
         
+        print(f"Twelve Data API request: {url} with params {params}")
+        
         response = get_retry_session().get(url, params=params, timeout=15)
+        
+        print(f"Twelve Data response status: {response.status_code}")
         
         if response.status_code == 200:
             data = response.json()
+            
+            # Check for API errors
+            if 'status' in data and data['status'] == 'error':
+                print(f"Twelve Data API error: {data.get('message', 'Unknown error')}")
+                return None
             
             if 'values' in data and len(data['values']) > 0:
                 df = pd.DataFrame(data['values'])
@@ -67,11 +78,16 @@ def fetch_forex_data(pair, interval="1h", limit=100):
                 df['volume'] = 0  # Forex doesn't have traditional volume
                 
                 df = df.sort_values('timestamp').reset_index(drop=True)
+                print(f"Successfully fetched {len(df)} forex data points")
                 return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].tail(limit)
+            else:
+                print(f"No values in Twelve Data response: {data}")
         
         return None
     except Exception as e:
         print(f"Forex API error: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -296,21 +312,31 @@ def fetch_data(symbol, asset_type="💰 Cryptocurrency", timeframe="1h", limit=1
     timeframe_lower = timeframe.lower().replace(" ", "")
     interval = interval_map.get(timeframe_lower, "1h")
     
+    # Detect asset type by symbol format or asset_type parameter
+    is_forex = "/" in symbol and len(symbol.split("/")[0]) == 3
+    is_metal = symbol in ["XAU/USD", "XAG/USD"] or "Precious Metals" in str(asset_type)
+    is_forex_type = "Forex" in str(asset_type)
+    
     # FOREX handling
-    if asset_type == "💱 Forex" or "/" in symbol:
+    if is_forex or is_forex_type:
+        print(f"Attempting to fetch Forex data for {symbol}")
         df = fetch_forex_data(symbol, interval, limit)
         if df is not None and len(df) > 0:
             return df, "Twelve Data (Forex)"
+        print(f"Forex fetch failed for {symbol}")
         return None, "Forex data unavailable"
     
     # METALS handling
-    if asset_type == "🏆 Precious Metals" or symbol in ["XAU/USD", "XAG/USD"]:
+    if is_metal:
+        print(f"Attempting to fetch Metals data for {symbol}")
         df = fetch_metals_data(symbol, interval, limit)
         if df is not None and len(df) > 0:
             return df, "Twelve Data (Metals)"
+        print(f"Metals fetch failed for {symbol}")
         return None, "Metals data unavailable"
     
     # CRYPTO handling
+    print(f"Attempting to fetch Crypto data for {symbol}")
     intervals = {
         "okx": {"5m": "5m", "15m": "15m", "30m": "30m", "1h": "1H", "4h": "4H", "1d": "1D"},
         "binance": {"5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d"}
@@ -340,6 +366,7 @@ def fetch_data(symbol, asset_type="💰 Cryptocurrency", timeframe="1h", limit=1
         return df, "CoinGecko"
     
     # All failed
+    print(f"All data sources failed for {symbol}")
     return None, "None"
 
 
