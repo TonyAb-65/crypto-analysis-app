@@ -426,13 +426,18 @@ if df is not None and len(df) > 0:
             warning_cols = st.columns(4)
             col_idx = 0
             
-            for warning_key, warning_info in warning_details.items():
-                if warning_info['active']:
-                    with warning_cols[col_idx % 4]:
-                        severity_emoji = "🔴" if warning_info['severity'] == 'high' else "🟡"
-                        st.warning(f"{severity_emoji} **{warning_info['category']}**")
-                        st.caption(warning_info['message'])
-                    col_idx += 1
+            # Safety check: ensure warning_details is a dictionary
+            if isinstance(warning_details, dict):
+                for warning_key, warning_info in warning_details.items():
+                    # Check if warning_info is a dict and has required keys
+                    if isinstance(warning_info, dict) and warning_info.get('active'):
+                        with warning_cols[col_idx % 4]:
+                            severity_emoji = "🔴" if warning_info.get('severity') == 'high' else "🟡"
+                            category = warning_info.get('category', 'Warning')
+                            message = warning_info.get('message', 'Check indicators')
+                            st.warning(f"{severity_emoji} **{category}**")
+                            st.caption(message)
+                        col_idx += 1
             
             st.caption(f"⚠️ Total warnings: {warning_count} - Confidence reduced by {warning_count * 15}%")
         
