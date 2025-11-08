@@ -1834,7 +1834,6 @@ def consultant_c4_news_sentiment(symbol, news_data=None):
             "weight": 5,
             "reasoning": "Regular news (ignored)"
         }
-        }
 
 # ==================== MULTI-TIMEFRAME ANALYSIS ====================
 def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
