@@ -3262,9 +3262,6 @@ if df is not None and len(df) > 0:
     st.markdown("---")
     
     # ==================== SURGICAL FIX #4: NEWS INTEGRATION ====================
-```
-
----
 
 ## 🔧 **Changes Made:**
 
