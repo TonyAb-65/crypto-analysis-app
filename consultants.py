@@ -234,11 +234,21 @@ def run_consultant_meeting(symbol, asset_type, current_price, warning_details):
         # Asset-aware target calculation
         if "Forex" in asset_type or "Precious Metals" in asset_type:
             target_pct = 0.01  # 1% for forex
+            min_stop_pct = 0.008  # 0.8% minimum for forex
         else:
             target_pct = 0.03  # 3% for crypto
+            min_stop_pct = 0.015  # 1.5% minimum for crypto
         
         target = entry * (1 + target_pct)
-        stop_loss = max(support, entry * 0.98)  # 2% or support, whichever is closer
+        
+        # Stop loss should be BELOW entry for LONG
+        # Use support if it's far enough, otherwise use minimum %
+        stop_from_support = support if support < entry * (1 - min_stop_pct) else entry * (1 - min_stop_pct)
+        stop_from_pct = entry * 0.98  # 2% below
+        
+        # Use whichever is closer but still gives at least min_stop_pct cushion
+        stop_loss = max(stop_from_support, stop_from_pct)
+        stop_loss = min(stop_loss, entry * (1 - min_stop_pct))  # Ensure minimum distance
         
         reasoning = f"LONG: Trend={trend_alignment}, RSI={current_rsi:.0f}, Votes={long_votes}/4, Warnings={warning_count}"
         
@@ -248,11 +258,21 @@ def run_consultant_meeting(symbol, asset_type, current_price, warning_details):
         # Asset-aware target calculation
         if "Forex" in asset_type or "Precious Metals" in asset_type:
             target_pct = 0.01  # 1% for forex
+            min_stop_pct = 0.008  # 0.8% minimum for forex
         else:
             target_pct = 0.03  # 3% for crypto
+            min_stop_pct = 0.015  # 1.5% minimum for crypto
         
         target = entry * (1 - target_pct)
-        stop_loss = min(resistance, entry * 1.02)  # 2% or resistance, whichever is closer
+        
+        # Stop loss should be ABOVE entry for SHORT
+        # Use resistance if it's far enough, otherwise use minimum %
+        stop_from_resistance = resistance if resistance > entry * (1 + min_stop_pct) else entry * (1 + min_stop_pct)
+        stop_from_pct = entry * 1.02  # 2% above
+        
+        # Use whichever is closer but still gives at least min_stop_pct cushion
+        stop_loss = min(stop_from_resistance, stop_from_pct)
+        stop_loss = max(stop_loss, entry * (1 + min_stop_pct))  # Ensure minimum distance
         
         reasoning = f"SHORT: Trend={trend_alignment}, RSI={current_rsi:.0f}, Votes={short_votes}/4, Warnings={warning_count}"
         
