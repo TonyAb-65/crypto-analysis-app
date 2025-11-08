@@ -518,7 +518,6 @@ if df is not None and len(df) > 0:
                         mark_prediction_for_trading(pred_id)
                         st.success(f"✅ Marked for trading!")
                     else:
-                        st.warning("⚠️ Save prediction first")
         
         # ==================== SUPPORT/RESISTANCE ZONES ====================
         st.markdown("---")
@@ -531,21 +530,45 @@ if df is not None and len(df) > 0:
             
             with col_sr1:
                 st.markdown("**🟢 Support Levels:**")
-                if support_zones:
-                    for i, (level, strength) in enumerate(support_zones[:3], 1):
-                        distance_pct = ((current_price - level) / current_price) * 100
-                        st.caption(f"{i}. ${level:.2f} ({distance_pct:+.1f}%) - Strength: {strength:.1f}")
+                if support_zones and len(support_zones) > 0:
+                    # Handle both tuple format (level, strength) and single value format
+                    for i, zone in enumerate(support_zones[:3], 1):
+                        try:
+                            if isinstance(zone, (tuple, list)) and len(zone) >= 2:
+                                level, strength = zone[0], zone[1]
+                            else:
+                                level = float(zone)
+                                strength = 1.0
+                            
+                            distance_pct = ((current_price - level) / current_price) * 100
+                            st.caption(f"{i}. ${level:.2f} ({distance_pct:+.1f}%) - Strength: {strength:.1f}")
+                        except Exception as e:
+                            if debug_mode:
+                                st.error(f"Error displaying support zone: {e}")
                 else:
                     st.caption("No clear support zones")
             
             with col_sr2:
                 st.markdown("**🔴 Resistance Levels:**")
-                if resistance_zones:
-                    for i, (level, strength) in enumerate(resistance_zones[:3], 1):
-                        distance_pct = ((level - current_price) / current_price) * 100
-                        st.caption(f"{i}. ${level:.2f} ({distance_pct:+.1f}%) - Strength: {strength:.1f}")
+                if resistance_zones and len(resistance_zones) > 0:
+                    # Handle both tuple format (level, strength) and single value format
+                    for i, zone in enumerate(resistance_zones[:3], 1):
+                        try:
+                            if isinstance(zone, (tuple, list)) and len(zone) >= 2:
+                                level, strength = zone[0], zone[1]
+                            else:
+                                level = float(zone)
+                                strength = 1.0
+                            
+                            distance_pct = ((level - current_price) / current_price) * 100
+                            st.caption(f"{i}. ${level:.2f} ({distance_pct:+.1f}%) - Strength: {strength:.1f}")
+                        except Exception as e:
+                            if debug_mode:
+                                st.error(f"Error displaying resistance zone: {e}")
                 else:
                     st.caption("No clear resistance zones")
+        else:
+            st.info("ℹ️ No clear support/resistance zones detected")
         
         # ==================== CHART WITH S/R ZONES ====================
         st.markdown("---")
@@ -572,29 +595,45 @@ if df is not None and len(df) > 0:
         )
         
         # Add Support/Resistance zones
-        if support_zones:
-            for level, strength in support_zones[:3]:
-                fig.add_hline(
-                    y=level,
-                    line_dash="dash",
-                    line_color="green",
-                    opacity=0.5,
-                    annotation_text=f"Support ${level:.2f}",
-                    annotation_position="right",
-                    row=1, col=1
-                )
+        if support_zones and len(support_zones) > 0:
+            for zone in support_zones[:3]:
+                try:
+                    if isinstance(zone, (tuple, list)) and len(zone) >= 2:
+                        level = zone[0]
+                    else:
+                        level = float(zone)
+                    
+                    fig.add_hline(
+                        y=level,
+                        line_dash="dash",
+                        line_color="green",
+                        opacity=0.5,
+                        annotation_text=f"Support ${level:.2f}",
+                        annotation_position="right",
+                        row=1, col=1
+                    )
+                except:
+                    pass
         
-        if resistance_zones:
-            for level, strength in resistance_zones[:3]:
-                fig.add_hline(
-                    y=level,
-                    line_dash="dash",
-                    line_color="red",
-                    opacity=0.5,
-                    annotation_text=f"Resistance ${level:.2f}",
-                    annotation_position="right",
-                    row=1, col=1
-                )
+        if resistance_zones and len(resistance_zones) > 0:
+            for zone in resistance_zones[:3]:
+                try:
+                    if isinstance(zone, (tuple, list)) and len(zone) >= 2:
+                        level = zone[0]
+                    else:
+                        level = float(zone)
+                    
+                    fig.add_hline(
+                        y=level,
+                        line_dash="dash",
+                        line_color="red",
+                        opacity=0.5,
+                        annotation_text=f"Resistance ${level:.2f}",
+                        annotation_position="right",
+                        row=1, col=1
+                    )
+                except:
+                    pass
         
         # Add Entry/Target/Stop Loss if not NEUTRAL
         if meeting_result['position'] != 'NEUTRAL':
