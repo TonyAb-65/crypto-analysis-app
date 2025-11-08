@@ -1519,19 +1519,19 @@ def consultant_c1_pattern_structure(df, symbol):
             signal = "AT_RESISTANCE"
             if level_info['strength'] == 'STRONG':
                 strength = 9
-                reasoning.append(f"At STRONG resistance ${level_info['price']:,.4f} ({level_info['touches']} rejections)")
+                reasoning.append(f"At STRONG resistance ${level_info['price']:,.0f} ({level_info['touches']} rejections)")
             else:
                 strength = 7
-                reasoning.append(f"At resistance ${level_info['price']:,.4f} ({level_info['touches']} tests)")
+                reasoning.append(f"At resistance ${level_info['price']:,.0f} ({level_info['touches']} tests)")
         
         elif detected_level_type == 'SUPPORT':
             signal = "AT_SUPPORT"
             if level_info['strength'] == 'STRONG':
                 strength = 9
-                reasoning.append(f"At STRONG support ${level_info['price']:,.4f} ({level_info['touches']} bounces)")
+                reasoning.append(f"At STRONG support ${level_info['price']:,.0f} ({level_info['touches']} bounces)")
             else:
                 strength = 7
-                reasoning.append(f"At support ${level_info['price']:,.4f} ({level_info['touches']} tests)")
+                reasoning.append(f"At support ${level_info['price']:,.0f} ({level_info['touches']} tests)")
     
     # If not at key level, check proximity
     else:
@@ -1542,7 +1542,7 @@ def consultant_c1_pattern_structure(df, symbol):
             if distance_pct < 2:  # Very close to resistance
                 signal = "NEAR_RESISTANCE"
                 strength = 6
-                reasoning.append(f"Near resistance ${next_r['price']:,.4f}")
+                reasoning.append(f"Near resistance ${next_r['price']:,.0f}")
         
         if targets['next_support']:
             next_s = targets['next_support']
@@ -1551,19 +1551,19 @@ def consultant_c1_pattern_structure(df, symbol):
             if distance_pct < 2:  # Very close to support
                 signal = "NEAR_SUPPORT"
                 strength = 6
-                reasoning.append(f"Near support ${next_s['price']:,.4f}")
+                reasoning.append(f"Near support ${next_s['price']:,.0f}")
     
     # Build detailed reasoning with targets
     reasoning_text = " ".join(reasoning) if reasoning else "neutral"
     
     # Add price targets to reasoning
     if targets['next_resistance']:
-        reasoning_text += f" | Next R: ${targets['next_resistance']['price']:,.4f}"
+        reasoning_text += f" | Next R: ${targets['next_resistance']['price']:,.0f}"
     if targets['next_support']:
-        reasoning_text += f" | Next S: ${targets['next_support']['price']:,.4f}"
+        reasoning_text += f" | Next S: ${targets['next_support']['price']:,.0f}"
     
     return {
-        "signal": signal,
+        "signal": signal,  # Now returns: AT_SUPPORT, AT_RESISTANCE, NEAR_SUPPORT, NEAR_RESISTANCE, or MID_RANGE
         "strength": strength,
         "reasoning": reasoning_text,
         "targets": targets,
@@ -1777,7 +1777,7 @@ def consultant_c3_risk_warnings(df, symbol, warnings):
         reasoning = f"1 warning ({warning_types[0]})"
     elif warning_count == 2:
         signal = "HIGH_RISK"
-        strength = 5
+        strength = 5  # CHANGED: Increased from 3 to 5 (less harsh)
         reasoning = f"2 warnings ({','.join(warning_types)})"
     else:
         signal = "EXTREME_RISK"
@@ -1800,7 +1800,7 @@ def consultant_c4_news_sentiment(symbol, news_data=None):
         return {
             "signal": "NO_NEWS",
             "strength": 5,
-            "weight": 5,
+            "weight": 5,  # Low weight when no news
             "reasoning": "No significant news"
         }
     
@@ -1812,26 +1812,29 @@ def consultant_c4_news_sentiment(symbol, news_data=None):
     has_major = any(keyword in str(news_data).lower() for keyword in major_keywords)
     
     if has_critical:
+        # Critical news - very high weight
         sentiment = news_data.get('sentiment', 'neutral')
         return {
             "signal": "BULLISH" if sentiment == 'positive' else "BEARISH",
             "strength": 9,
-            "weight": 70,
+            "weight": 70,  # Critical news gets 70% weight
             "reasoning": "CRITICAL_NEWS_OVERRIDE"
         }
     elif has_major:
+        # Major news - moderate weight
         sentiment = news_data.get('sentiment', 'neutral')
         return {
             "signal": "BULLISH" if sentiment == 'positive' else "BEARISH",
             "strength": 7,
-            "weight": 40,
+            "weight": 40,  # Major news gets 40% weight
             "reasoning": "MAJOR_NEWS_IMPACT"
         }
     else:
+        # Regular news - ignored
         return {
             "signal": "NO_NEWS",
             "strength": 5,
-            "weight": 5,
+            "weight": 5,  # Regular news basically ignored
             "reasoning": "Regular news (ignored)"
         }
 
@@ -3210,29 +3213,19 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
             base_confidence = 65
         
         # ==================== SURGICAL FIX #1 APPLICATION ====================
-        st.info("✅ DEBUG 1: Starting predictions")
-        
         current_price_model = df_clean['close'].iloc[-1]
         predicted_price = predictions[0]
         pred_change_pct = ((predicted_price - current_price_model) / current_price_model) * 100
         
-        st.info("✅ DEBUG 2: Price calculations done")
-        
         barriers = check_support_resistance_barriers(df_clean, predicted_price, current_price_model)
-        st.info("✅ DEBUG 3: Barriers checked")
         
         timeframe_hours = prediction_periods
         volatility_context = analyze_timeframe_volatility(df_clean, pred_change_pct, timeframe_hours)
-        st.info("✅ DEBUG 4: Volatility analyzed")
         
         adjusted_confidence = adjust_confidence_for_barriers(base_confidence, barriers, volatility_context)
-        st.info("✅ DEBUG 5: Confidence adjusted")
         # ==================== END SURGICAL FIX #1 ====================
         
         rsi_insights = analyze_rsi_bounce_patterns(df_clean)
-        st.info("✅ DEBUG 6: RSI analyzed")
-        
-        st.info("✅ DEBUG 7: About to return predictions")
         
         return predictions, ['Pattern-based features'], adjusted_confidence, rsi_insights
         
@@ -3241,7 +3234,7 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         import traceback
         st.error(f"Details: {traceback.format_exc()}")
         return None, None, 0, None
-# ==================== MAIN DATA FETCHING & ANALYSIS ====================
+        # ==================== MAIN DATA FETCHING & ANALYSIS ====================
 
 with st.spinner(f"🔄 Fetching {pair_display} data..."):
     df, data_source = fetch_data(symbol, asset_type)
@@ -3258,11 +3251,11 @@ if df is not None and len(df) > 0:
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Current Price", f"${current_price:,.4f}", f"{price_change_pct:+.2f}%")
+        st.metric("Current Price", f"${current_price:,.2f}", f"{price_change_pct:+.2f}%")
     with col2:
-        st.metric("24h High", f"${df['high'].tail(24).max():,.4f}" if len(df) >= 24 else "N/A")
+        st.metric("24h High", f"${df['high'].tail(24).max():,.2f}" if len(df) >= 24 else "N/A")
     with col3:
-        st.metric("24h Low", f"${df['low'].tail(24).min():,.4f}" if len(df) >= 24 else "N/A")
+        st.metric("24h Low", f"${df['low'].tail(24).min():,.2f}" if len(df) >= 24 else "N/A")
     with col4:
         st.metric("Data Source", data_source)
     
@@ -3298,82 +3291,73 @@ if df is not None and len(df) > 0:
                 st.caption(f"{i}. {headline}")
     
     st.markdown("---")
-# ==================== END NEWS INTEGRATION ====================
-st.markdown("### 🤖 Improved AI Predictions with Learning")
-st.info(f"""
-**🎯 Improvements:**
-- ✅ Monitors last {lookback_hours} hours as context
-- ✅ Analyzes RSI bounce patterns from history
-- ✅ Uses pattern-based prediction
-- ✅ Optimized ML models with feature scaling
-- 🆕 AI learns from your trades automatically!
-- 🆕 Checks support/resistance barriers
-- 🆕 RSI duration-weighted signals
-- 🆕 Equal indicator weights (Fair signal calculation)
-- 🆕 **News sentiment integrated as 4th warning type!**
-- 🆕 **NOW TRACKS COMMITTEE RECOMMENDATIONS (not ML model)!**
-""")
-
-with st.spinner("🧠 Training AI models..."):
-    predictions, features, confidence, rsi_insights = train_improved_model(
-        df, 
-        lookback=lookback_hours,
-        prediction_periods=prediction_periods
-    )
-
-st.info(f"🔍 DEBUG A: predictions = {predictions}")
-st.info(f"🔍 DEBUG B: confidence = {confidence}")
-
-if predictions and len(predictions) > 0:
-    st.info("🔍 DEBUG C: Inside if block")
+   # ==================== END NEWS INTEGRATION ====================
     
-    pred_change = ((predictions[-1] - current_price) / current_price) * 100
-    st.info("🔍 DEBUG D: pred_change calculated")
+    st.markdown("### 🤖 Improved AI Predictions with Learning")
+    st.info(f"""
+    **🎯 Improvements:**
+    - ✅ Monitors last {lookback_hours} hours as context
+    - ✅ Analyzes RSI bounce patterns from history
+    - ✅ Uses pattern-based prediction
+    - ✅ Optimized ML models with feature scaling
+    - 🆕 AI learns from your trades automatically!
+    - 🆕 Checks support/resistance barriers
+    - 🆕 RSI duration-weighted signals
+    - 🆕 Equal indicator weights (Fair signal calculation)
+    - 🆕 **News sentiment integrated as 4th warning type!**
+    - 🆕 **NOW TRACKS COMMITTEE RECOMMENDATIONS (not ML model)!**
+    """)
     
-    indicator_snapshot = create_indicator_snapshot(df)
-    st.info("🔍 DEBUG E: indicator_snapshot created")
-    
-    # ==================== SURGICAL FIX #5: CONSULTANT MEETING ====================
-    # Step 1: Calculate raw signal (without warnings)
-    raw_signal_strength = calculate_signal_strength(df, warning_details={})
-    st.info("🔍 DEBUG F: raw_signal_strength calculated")
-    
-    # Step 2: Check news warning
-    news_warning_data = None
-    if fear_greed_value is not None:
-        has_news_warning, news_msg, sentiment_status = analyze_news_sentiment_warning(
-            fear_greed_value, news_sentiment, raw_signal_strength
+    with st.spinner("🧠 Training AI models..."):
+        predictions, features, confidence, rsi_insights = train_improved_model(
+            df, 
+            lookback=lookback_hours,
+            prediction_periods=prediction_periods
         )
-        news_warning_data = {
-            'has_warning': has_news_warning,
-            'warning_message': news_msg,
-            'sentiment_status': sentiment_status
-        }
-    st.info("🔍 DEBUG G: news_warning_data created")
     
-    # Step 3: Calculate all warnings (including news)
-    warning_count, warning_details = calculate_warning_signs(
-        df, raw_signal_strength, news_warning_data
-    )
-    st.info("🔍 DEBUG H: warnings calculated")
-    
-    # Step 4: Recalculate signal WITH warning adjustments
-    final_signal_strength = calculate_signal_strength(df, warning_details)
-    st.info("🔍 DEBUG I: final_signal_strength calculated")
-    
-    # Step 5: Adjust AI confidence based on warnings
-    adjusted_confidence = confidence
-    if warning_count >= 1:
-        adjusted_confidence = confidence * (1 - (warning_count * 0.15))
-        adjusted_confidence = max(adjusted_confidence, 30.0)
-    st.info("🔍 DEBUG J: adjusted_confidence calculated")
-    # ==================== END CONSULTANT MEETING ====================    
-    # ==================== NEW: STORE COMMITTEE RESULT IN SESSION STATE ====================
-    # This will be used when saving trades
-    if 'committee_recommendation' not in st.session_state:
-        st.session_state.committee_recommendation = {}
-    # We'll populate this after running the consultant meeting below
-    # ==================== END NEW ====================        
+    if predictions and len(predictions) > 0:
+        pred_change = ((predictions[-1] - current_price) / current_price) * 100
+        
+        indicator_snapshot = create_indicator_snapshot(df)
+        
+        # ==================== SURGICAL FIX #5: CONSULTANT MEETING ====================
+        # Step 1: Calculate raw signal (without warnings)
+        raw_signal_strength = calculate_signal_strength(df, warning_details=None)
+        
+        # Step 2: Check news warning
+        news_warning_data = None
+        if fear_greed_value is not None:
+            has_news_warning, news_msg, sentiment_status = analyze_news_sentiment_warning(
+                fear_greed_value, news_sentiment, raw_signal_strength
+            )
+            news_warning_data = {
+                'has_warning': has_news_warning,
+                'warning_message': news_msg,
+                'sentiment_status': sentiment_status
+            }
+        
+        # Step 3: Calculate all warnings (including news)
+        warning_count, warning_details = calculate_warning_signs(
+            df, raw_signal_strength, news_warning_data
+        )
+        
+        # Step 4: Recalculate signal WITH warning adjustments
+        final_signal_strength = calculate_signal_strength(df, warning_details)
+        
+        # Step 5: Adjust AI confidence based on warnings
+        adjusted_confidence = confidence
+        if warning_count >= 1:
+            adjusted_confidence = confidence * (1 - (warning_count * 0.15))
+            adjusted_confidence = max(adjusted_confidence, 30.0)
+        # ==================== END CONSULTANT MEETING ====================
+        
+        # ==================== NEW: STORE COMMITTEE RESULT IN SESSION STATE ====================
+        # This will be used when saving trades
+        if 'committee_recommendation' not in st.session_state:
+            st.session_state.committee_recommendation = {}
+        # We'll populate this after running the consultant meeting below
+    # ==================== END NEW ====================
+        
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -3993,147 +3977,147 @@ if predictions and len(predictions) > 0:
     
     fig.update_layout(height=chart_height, showlegend=True, xaxis_rangeslider_visible=False)
     # ==================== ADD S/R LINES TO CHART (CLEAN VERSION) ====================
-try:
-    # Get S/R zones
-    sr_zones = find_support_resistance_zones(df, lookback=100)
+    try:
+        # Get S/R zones
+        sr_zones = find_support_resistance_zones(df, lookback=100)
+        
+        # Filter: Only show STRONG levels or top 3
+        strong_resistance = [r for r in sr_zones['resistance'] if r['strength'] == 'STRONG'][:3]
+        strong_support = [s for s in sr_zones['support'] if s['strength'] == 'STRONG'][:3]
+        
+        # If no strong levels, show top 3 medium levels
+        if len(strong_resistance) == 0:
+            strong_resistance = sr_zones['resistance'][:3]
+        if len(strong_support) == 0:
+            strong_support = sr_zones['support'][:3]
+        
+        # Add resistance lines (RED - only strong ones)
+        for i, r in enumerate(strong_resistance):
+            fig.add_hline(
+                y=r['price'],
+                line_dash="dash",
+                line_color='red',
+                line_width=2,
+                row=1, col=1,
+                annotation_text=f"🔴 R: ${r['price']:,.0f}",
+                annotation_position="top right" if i % 2 == 0 else "bottom right"
+            )
+        
+        # Add support lines (GREEN - only strong ones)
+        for i, s in enumerate(strong_support):
+            fig.add_hline(
+                y=s['price'],
+                line_dash="dash",
+                line_color='green',
+                line_width=2,
+                row=1, col=1,
+                annotation_text=f"🟢 S: ${s['price']:,.0f}",
+                annotation_position="top right" if i % 2 == 0 else "bottom right"
+            )
     
-    # Filter: Only show STRONG levels or top 3
-    strong_resistance = [r for r in sr_zones['resistance'] if r['strength'] == 'STRONG'][:3]
-    strong_support = [s for s in sr_zones['support'] if s['strength'] == 'STRONG'][:3]
+    except Exception as e:
+        pass  # If S/R fails, chart still displays
+    # ==================== END S/R LINES ====================    
+    st.plotly_chart(fig, use_container_width=True)
     
-    # If no strong levels, show top 3 medium levels
-    if len(strong_resistance) == 0:
-        strong_resistance = sr_zones['resistance'][:3]
-    if len(strong_support) == 0:
-        strong_support = sr_zones['support'][:3]
-    
-    # Add resistance lines (RED - only strong ones)
-    for i, r in enumerate(strong_resistance):
-        fig.add_hline(
-            y=r['price'],
-            line_dash="dash",
-            line_color='red',
-            line_width=2,
-            row=1, col=1,
-            annotation_text=f"🔴 R: ${r['price']:,.4f}",
-            annotation_position="top right" if i % 2 == 0 else "bottom right"
-        )
-    
-    # Add support lines (GREEN - only strong ones)
-    for i, s in enumerate(strong_support):
-        fig.add_hline(
-            y=s['price'],
-            line_dash="dash",
-            line_color='green',
-            line_width=2,
-            row=1, col=1,
-            annotation_text=f"🟢 S: ${s['price']:,.4f}",
-            annotation_position="top right" if i % 2 == 0 else "bottom right"
-        )
-
-except Exception as e:
-    pass
-
-st.plotly_chart(fig, use_container_width=True)
-
-if any([use_obv, use_mfi, use_adx, use_stoch, use_cci]):
-    st.markdown("---")
-    st.markdown("### 🆕 Advanced Technical Indicators")
-    
-    indicator_cols = st.columns(3)
-    col_idx = 0
-    
-    if use_obv and 'obv' in df.columns:
-        with indicator_cols[col_idx % 3]:
-            obv_current = df['obv'].iloc[-1]
-            obv_prev = df['obv'].iloc[-5] if len(df) > 5 else obv_current
-            obv_change = obv_current - obv_prev
-            
-            if obv_current < 0:
-                pressure_type = "Selling"
-            else:
-                pressure_type = "Buying"
-            
-            if obv_change > 0:
+    if any([use_obv, use_mfi, use_adx, use_stoch, use_cci]):
+        st.markdown("---")
+        st.markdown("### 🆕 Advanced Technical Indicators")
+        
+        indicator_cols = st.columns(3)
+        col_idx = 0
+        
+        if use_obv and 'obv' in df.columns:
+            with indicator_cols[col_idx % 3]:
+                obv_current = df['obv'].iloc[-1]
+                obv_prev = df['obv'].iloc[-5] if len(df) > 5 else obv_current
+                obv_change = obv_current - obv_prev
+                
                 if obv_current < 0:
-                    momentum = "Decreasing"
-                    momentum_emoji = "📊"
-                    trend_color = "normal"
+                    pressure_type = "Selling"
                 else:
-                    momentum = "Increasing"
-                    momentum_emoji = "📈"
-                    trend_color = "normal"
-            elif obv_change < 0:
-                if obv_current < 0:
-                    momentum = "Increasing"
-                    momentum_emoji = "📉"
-                    trend_color = "inverse"
+                    pressure_type = "Buying"
+                
+                if obv_change > 0:
+                    if obv_current < 0:
+                        momentum = "Decreasing"
+                        momentum_emoji = "📊"
+                        trend_color = "normal"
+                    else:
+                        momentum = "Increasing"
+                        momentum_emoji = "📈"
+                        trend_color = "normal"
+                elif obv_change < 0:
+                    if obv_current < 0:
+                        momentum = "Increasing"
+                        momentum_emoji = "📉"
+                        trend_color = "inverse"
+                    else:
+                        momentum = "Decreasing"
+                        momentum_emoji = "📊"
+                        trend_color = "inverse"
                 else:
-                    momentum = "Decreasing"
-                    momentum_emoji = "📊"
-                    trend_color = "inverse"
-            else:
-                momentum = "Flat"
-                momentum_emoji = "➡️"
-                trend_color = "off"
-            
-            obv_status = f"{momentum_emoji} {pressure_type} - {momentum}"
-            
-            st.metric("OBV (Volume Flow)", 
-                     f"{obv_current:,.0f}",
-                     obv_status,
-                     delta_color=trend_color)
-            st.caption("Tracks cumulative buying/selling pressure")
-        col_idx += 1
-    
-    if use_mfi and 'mfi' in df.columns:
-        with indicator_cols[col_idx % 3]:
-            mfi_current = df['mfi'].iloc[-1]
-            mfi_status = "🔴 Overbought" if mfi_current > 80 else "🟢 Oversold" if mfi_current < 20 else "⚪ Neutral"
-            
-            st.metric("MFI (Money Flow)", 
-                     f"{mfi_current:.1f}",
-                     mfi_status)
-            st.caption("Volume-weighted RSI")
-        col_idx += 1
-    
-    if use_adx and 'adx' in df.columns:
-        with indicator_cols[col_idx % 3]:
-            adx_current = df['adx'].iloc[-1]
-            plus_di = df['plus_di'].iloc[-1]
-            minus_di = df['minus_di'].iloc[-1]
-            
-            trend_strength = "💪 Strong" if adx_current > 25 else "😐 Weak"
-            trend_dir = "🟢 Up" if plus_di > minus_di else "🔴 Down"
-            
-            st.metric("ADX (Trend Strength)", 
-                     f"{adx_current:.1f}",
-                     f"{trend_strength} | {trend_dir}")
-            st.caption(f"+DI: {plus_di:.1f} | -DI: {minus_di:.1f}")
-        col_idx += 1
-    
-    if use_stoch and 'stoch_k' in df.columns:
-        with indicator_cols[col_idx % 3]:
-            stoch_k = df['stoch_k'].iloc[-1]
-            stoch_d = df['stoch_d'].iloc[-1]
-            stoch_status = "🔴 Overbought" if stoch_k > 80 else "🟢 Oversold" if stoch_k < 20 else "⚪ Neutral"
-            
-            st.metric("Stochastic", 
-                     f"{stoch_k:.1f}",
-                     stoch_status)
-            st.caption(f"%K: {stoch_k:.1f} | %D: {stoch_d:.1f}")
-        col_idx += 1
-    
-    if use_cci and 'cci' in df.columns:
-        with indicator_cols[col_idx % 3]:
-            cci_current = df['cci'].iloc[-1]
-            cci_status = "🔴 Overbought" if cci_current > 100 else "🟢 Oversold" if cci_current < -100 else "⚪ Neutral"
-            
-            st.metric("CCI (Cyclical)", 
-                     f"{cci_current:.1f}",
-                     cci_status)
-            st.caption("Commodity Channel Index")
-        col_idx += 1
+                    momentum = "Flat"
+                    momentum_emoji = "➡️"
+                    trend_color = "off"
+                
+                obv_status = f"{momentum_emoji} {pressure_type} - {momentum}"
+                
+                st.metric("OBV (Volume Flow)", 
+                         f"{obv_current:,.0f}",
+                         obv_status,
+                         delta_color=trend_color)
+                st.caption("Tracks cumulative buying/selling pressure")
+            col_idx += 1
+        
+        if use_mfi and 'mfi' in df.columns:
+            with indicator_cols[col_idx % 3]:
+                mfi_current = df['mfi'].iloc[-1]
+                mfi_status = "🔴 Overbought" if mfi_current > 80 else "🟢 Oversold" if mfi_current < 20 else "⚪ Neutral"
+                
+                st.metric("MFI (Money Flow)", 
+                         f"{mfi_current:.1f}",
+                         mfi_status)
+                st.caption("Volume-weighted RSI")
+            col_idx += 1
+        
+        if use_adx and 'adx' in df.columns:
+            with indicator_cols[col_idx % 3]:
+                adx_current = df['adx'].iloc[-1]
+                plus_di = df['plus_di'].iloc[-1]
+                minus_di = df['minus_di'].iloc[-1]
+                
+                trend_strength = "💪 Strong" if adx_current > 25 else "😐 Weak"
+                trend_dir = "🟢 Up" if plus_di > minus_di else "🔴 Down"
+                
+                st.metric("ADX (Trend Strength)", 
+                         f"{adx_current:.1f}",
+                         f"{trend_strength} | {trend_dir}")
+                st.caption(f"+DI: {plus_di:.1f} | -DI: {minus_di:.1f}")
+            col_idx += 1
+        
+        if use_stoch and 'stoch_k' in df.columns:
+            with indicator_cols[col_idx % 3]:
+                stoch_k = df['stoch_k'].iloc[-1]
+                stoch_d = df['stoch_d'].iloc[-1]
+                stoch_status = "🔴 Overbought" if stoch_k > 80 else "🟢 Oversold" if stoch_k < 20 else "⚪ Neutral"
+                
+                st.metric("Stochastic", 
+                         f"{stoch_k:.1f}",
+                         stoch_status)
+                st.caption(f"%K: {stoch_k:.1f} | %D: {stoch_d:.1f}")
+            col_idx += 1
+        
+        if use_cci and 'cci' in df.columns:
+            with indicator_cols[col_idx % 3]:
+                cci_current = df['cci'].iloc[-1]
+                cci_status = "🔴 Overbought" if cci_current > 100 else "🟢 Oversold" if cci_current < -100 else "⚪ Neutral"
+                
+                st.metric("CCI (Cyclical)", 
+                         f"{cci_current:.1f}",
+                         cci_status)
+                st.caption("Commodity Channel Index")
+            col_idx += 1
 
 else:
     st.error("❌ Unable to fetch data. Please check symbol and try again.")
