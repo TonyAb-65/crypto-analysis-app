@@ -43,6 +43,7 @@ def init_database():
         )
     ''')
     
+    # Check and add missing columns
     cursor.execute("PRAGMA table_info(predictions)")
     columns = [column[1] for column in cursor.fetchall()]
     
@@ -52,6 +53,18 @@ def init_database():
         cursor.execute("ALTER TABLE predictions ADD COLUMN entry_timestamp TEXT")
     if 'indicator_snapshot' not in columns:
         cursor.execute("ALTER TABLE predictions ADD COLUMN indicator_snapshot TEXT")
+    if 'position_type' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN position_type TEXT")
+    if 'target_price' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN target_price REAL")
+    if 'stop_loss' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN stop_loss REAL")
+    if 'committee_position' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN committee_position TEXT")
+    if 'committee_confidence' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN committee_confidence REAL")
+    if 'committee_reasoning' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN committee_reasoning TEXT")
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS trade_results (
@@ -184,6 +197,8 @@ def save_trade_result(prediction_id, entry_price, exit_price, profit_loss,
     
     conn.commit()
     conn.close()
+    
+    return True
 
 
 def get_indicator_weights():
