@@ -518,6 +518,7 @@ if df is not None and len(df) > 0:
                         mark_prediction_for_trading(pred_id)
                         st.success(f"✅ Marked for trading!")
                     else:
+                        st.warning("⚠️ Save prediction first")
         
         # ==================== SUPPORT/RESISTANCE ZONES ====================
         st.markdown("---")
