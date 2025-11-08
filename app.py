@@ -3220,7 +3220,7 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         volatility_context = analyze_timeframe_volatility(df_clean, pred_change_pct, timeframe_hours)
         
         adjusted_confidence = adjust_confidence_for_barriers(base_confidence, barriers, volatility_context)
-        # ==================== END SURGICAL FIX #1 ====================
+       # ==================== END SURGICAL FIX #1 ====================
         
         rsi_insights = analyze_rsi_bounce_patterns(df_clean)
         
@@ -3231,7 +3231,8 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         import traceback
         st.error(f"Details: {traceback.format_exc()}")
         return None, None, 0, None
-        # ==================== MAIN DATA FETCHING & ANALYSIS ====================
+
+# ==================== MAIN DATA FETCHING & ANALYSIS ====================
 
 with st.spinner(f"🔄 Fetching {pair_display} data..."):
     df, data_source = fetch_data(symbol, asset_type)
@@ -3246,49 +3247,48 @@ if df is not None and len(df) > 0:
     
     st.markdown(f"### 📊 {pair_display} - Real-Time Analysis")
     col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.metric("Current Price", f"${current_price:,.4f}", f"{price_change_pct:+.2f}%")
-with col2:
-    st.metric("24h High", f"${df['high'].tail(24).max():,.4f}" if len(df) >= 24 else "N/A")
-with col3:
-    st.metric("24h Low", f"${df['low'].tail(24).min():,.4f}" if len(df) >= 24 else "N/A")
-with col4:
-    st.metric("Data Source", data_source)
-
-st.markdown("---")
-
-# ==================== SURGICAL FIX #4: NEWS INTEGRATION ====================
-st.markdown("### 📰 Market Intelligence Check")
-
-with st.spinner("🔄 Fetching market sentiment..."):
-    fear_greed_value, fear_greed_class = get_fear_greed_index()
-    news_sentiment, news_headlines = get_crypto_news_sentiment(symbol)
-
-col_sentiment1, col_sentiment2 = st.columns(2)
-
-with col_sentiment1:
-    if fear_greed_value:
-        emoji = "😱" if fear_greed_value < 25 else "😰" if fear_greed_value < 45 else "😐" if fear_greed_value < 55 else "😃" if fear_greed_value < 75 else "🤑"
-        st.metric("Fear & Greed Index", f"{emoji} {fear_greed_value}/100", fear_greed_class)
-    else:
-        st.warning("⚠️ Fear & Greed data unavailable")
-
-with col_sentiment2:
-    if news_sentiment:
-        emoji = "🔴" if news_sentiment < 40 else "🟡" if news_sentiment < 60 else "🟢"
-        st.metric("News Sentiment", f"{emoji} {news_sentiment:.0f}/100",
-                 "Bearish" if news_sentiment < 40 else "Neutral" if news_sentiment < 60 else "Bullish")
-    else:
-        st.info("ℹ️ News sentiment unavailable")
-
-if news_headlines and len(news_headlines) > 0:
-    with st.expander("📰 Recent Headlines", expanded=False):
-        for i, headline in enumerate(news_headlines, 1):
-            st.caption(f"{i}. {headline}")
-
-st.markdown("---")
-
+    
+    with col1:
+        st.metric("Current Price", f"${current_price:,.4f}", f"{price_change_pct:+.2f}%")
+    with col2:
+        st.metric("24h High", f"${df['high'].tail(24).max():,.4f}" if len(df) >= 24 else "N/A")
+    with col3:
+        st.metric("24h Low", f"${df['low'].tail(24).min():,.4f}" if len(df) >= 24 else "N/A")
+    with col4:
+        st.metric("Data Source", data_source)
+    
+    st.markdown("---")
+    
+    # ==================== SURGICAL FIX #4: NEWS INTEGRATION ====================
+    st.markdown("### 📰 Market Intelligence Check")
+    
+    with st.spinner("🔄 Fetching market sentiment..."):
+        fear_greed_value, fear_greed_class = get_fear_greed_index()
+        news_sentiment, news_headlines = get_crypto_news_sentiment(symbol)
+    
+    col_sentiment1, col_sentiment2 = st.columns(2)
+    
+    with col_sentiment1:
+        if fear_greed_value:
+            emoji = "😱" if fear_greed_value < 25 else "😰" if fear_greed_value < 45 else "😐" if fear_greed_value < 55 else "😃" if fear_greed_value < 75 else "🤑"
+            st.metric("Fear & Greed Index", f"{emoji} {fear_greed_value}/100", fear_greed_class)
+        else:
+            st.warning("⚠️ Fear & Greed data unavailable")
+    
+    with col_sentiment2:
+        if news_sentiment:
+            emoji = "🔴" if news_sentiment < 40 else "🟡" if news_sentiment < 60 else "🟢"
+            st.metric("News Sentiment", f"{emoji} {news_sentiment:.0f}/100",
+                     "Bearish" if news_sentiment < 40 else "Neutral" if news_sentiment < 60 else "Bullish")
+        else:
+            st.info("ℹ️ News sentiment unavailable")
+    
+    if news_headlines and len(news_headlines) > 0:
+        with st.expander("📰 Recent Headlines", expanded=False):
+            for i, headline in enumerate(news_headlines, 1):
+                st.caption(f"{i}. {headline}")
+    
+    st.markdown("---")
 # ==================== END NEWS INTEGRATION ====================
 st.markdown("### 🤖 Improved AI Predictions with Learning")
 st.info(f"""
