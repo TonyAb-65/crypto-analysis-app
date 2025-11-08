@@ -28,7 +28,7 @@ from news import (
 from signals import (
     calculate_signal_strength, calculate_warning_signs, create_indicator_snapshot
 )
-from data_api import fetch_data, get_batch_data_binance
+from data_api import fetch_data, get_batch_data_binance, get_retry_session
 from support_resistance import find_support_resistance_zones
 from indicators import calculate_technical_indicators
 from ml_model import train_improved_model
@@ -70,14 +70,12 @@ st.sidebar.header("⚙️ Configuration")
 debug_mode = st.sidebar.checkbox("🔧 Debug Mode", value=False, help="Show detailed API information")
 
 # ==================== TOP MOVERS ====================
-show_market_movers = st.sidebar.checkbox("📈 Show Top Movers", value=False,
+show_market_movers = st.sidebar.checkbox("📈 Show Top Movers", value=True,
                                         help="Display today's top gainers and losers")
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_market_movers():
     """Get top movers from popular cryptocurrencies"""
-    from data_api import get_retry_session
-    
     popular_symbols = ['BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'MATIC', 'DOT', 'AVAX']
     movers = []
     
@@ -141,7 +139,11 @@ def get_market_movers():
 
 if show_market_movers:
     with st.sidebar:
-        movers_df = get_market_movers()
+        st.markdown("---")
+        st.markdown("### 📈 Market Movers")
+        
+        with st.spinner("Loading market movers..."):
+            movers_df = get_market_movers()
         
         if movers_df is not None and len(movers_df) > 0:
             st.markdown("#### 📈 Top Gainers")
@@ -156,7 +158,9 @@ if show_market_movers:
                 delta = f"{row['Change %']:.2f}%"
                 st.metric(row['Symbol'], f"${row['Price']:,.2f}", delta)
         else:
-            st.warning("Unable to load market movers")
+            st.warning("⚠️ Unable to load market movers")
+            if debug_mode:
+                st.error("Debug: movers_df returned None or empty")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💾 Database Status")
@@ -300,11 +304,11 @@ use_macd = st.sidebar.checkbox("MACD", value=True)
 use_bb = st.sidebar.checkbox("Bollinger Bands", value=True)
 
 st.sidebar.markdown("#### 🆕 Advanced Indicators")
-use_obv = st.sidebar.checkbox("OBV (Volume)", value=False, help="On-Balance Volume - tracks volume flow")
-use_mfi = st.sidebar.checkbox("MFI (14)", value=False, help="Money Flow Index - volume-weighted RSI")
-use_adx = st.sidebar.checkbox("ADX (14)", value=False, help="Average Directional Index - trend strength")
-use_stoch = st.sidebar.checkbox("Stochastic", value=False, help="Stochastic Oscillator - momentum indicator")
-use_cci = st.sidebar.checkbox("CCI (20)", value=False, help="Commodity Channel Index - cyclical trends")
+use_obv = st.sidebar.checkbox("OBV (Volume)", value=True, help="On-Balance Volume - tracks volume flow")
+use_mfi = st.sidebar.checkbox("MFI (14)", value=True, help="Money Flow Index - volume-weighted RSI")
+use_adx = st.sidebar.checkbox("ADX (14)", value=True, help="Average Directional Index - trend strength")
+use_stoch = st.sidebar.checkbox("Stochastic", value=True, help="Stochastic Oscillator - momentum indicator")
+use_cci = st.sidebar.checkbox("CCI (20)", value=True, help="Commodity Channel Index - cyclical trends")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🎓 AI Learning System")
@@ -725,11 +729,24 @@ if df is not None and len(df) > 0:
             st.write(f"Support zones: {support_zones}")
             st.write(f"Resistance zones: {resistance_zones}")
         
+        # Calculate number of rows needed for chart
+        chart_rows = 1  # Main price chart always
+        if use_rsi and 'rsi' in df.columns:
+            chart_rows += 1
+        if use_macd and 'macd' in df.columns:
+            chart_rows += 1
+        
+        # Create row heights dynamically
+        row_heights = [0.6] + [0.2] * (chart_rows - 1) if chart_rows > 1 else [1.0]
+        
         fig = make_subplots(
-            rows=2, cols=1,
+            rows=chart_rows, cols=1,
             shared_xaxes=True,
             vertical_spacing=0.03,
-            row_heights=[0.7, 0.3]
+            row_heights=row_heights,
+            subplot_titles=(['Price'] + 
+                           (['RSI'] if use_rsi and 'rsi' in df.columns else []) +
+                           (['MACD'] if use_macd and 'macd' in df.columns else []))
         )
         
         # Candlestick
@@ -858,14 +875,35 @@ if df is not None and len(df) > 0:
             fig.add_trace(go.Scatter(x=df['timestamp'], y=df['bb_lower'], name='BB Lower',
                                      line=dict(color='gray', width=1, dash='dot')), row=1, col=1)
         
-        # RSI
+        # RSI in row 2 if enabled
+        current_row = 2
         if use_rsi and 'rsi' in df.columns:
             fig.add_trace(
                 go.Scatter(x=df['timestamp'], y=df['rsi'], name='RSI', line=dict(color='purple')),
-                row=2, col=1
+                row=current_row, col=1
             )
-            fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-            fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+            fig.add_hline(y=70, line_dash="dash", line_color="red", row=current_row, col=1)
+            fig.add_hline(y=30, line_dash="dash", line_color="green", row=current_row, col=1)
+            current_row += 1
+        
+        # MACD in next row if enabled
+        if use_macd and 'macd' in df.columns:
+            fig.add_trace(
+                go.Scatter(x=df['timestamp'], y=df['macd'], name='MACD', line=dict(color='blue')),
+                row=current_row, col=1
+            )
+            fig.add_trace(
+                go.Scatter(x=df['timestamp'], y=df['macd_signal'], name='Signal', line=dict(color='red')),
+                row=current_row, col=1
+            )
+            # Add MACD histogram if available
+            if 'macd_hist' in df.columns:
+                colors = ['green' if val >= 0 else 'red' for val in df['macd_hist']]
+                fig.add_trace(
+                    go.Bar(x=df['timestamp'], y=df['macd_hist'], name='Histogram', marker_color=colors),
+                    row=current_row, col=1
+                )
+            current_row += 1
         
         fig.update_layout(
             title=f"{pair_display} - {timeframe_name}",
@@ -882,8 +920,13 @@ if df is not None and len(df) > 0:
         st.markdown("---")
         st.markdown("### 🆕 Advanced Technical Indicators")
         
+        if debug_mode:
+            st.write(f"Debug - use_obv: {use_obv}, use_mfi: {use_mfi}, use_adx: {use_adx}, use_stoch: {use_stoch}, use_cci: {use_cci}")
+            st.write(f"Debug - Columns in df: {df.columns.tolist()}")
+        
         indicator_cols = st.columns(3)
         col_idx = 0
+        indicators_displayed = 0
         
         if use_obv and 'obv' in df.columns:
             with indicator_cols[col_idx % 3]:
@@ -927,6 +970,7 @@ if df is not None and len(df) > 0:
                          delta_color=trend_color)
                 st.caption("Tracks cumulative buying/selling pressure")
             col_idx += 1
+            indicators_displayed += 1
         
         if use_mfi and 'mfi' in df.columns:
             with indicator_cols[col_idx % 3]:
@@ -938,6 +982,7 @@ if df is not None and len(df) > 0:
                          mfi_status)
                 st.caption("Volume-weighted RSI")
             col_idx += 1
+            indicators_displayed += 1
         
         if use_adx and 'adx' in df.columns:
             with indicator_cols[col_idx % 3]:
@@ -953,6 +998,7 @@ if df is not None and len(df) > 0:
                          f"{trend_strength} | {trend_dir}")
                 st.caption(f"+DI: {plus_di:.1f} | -DI: {minus_di:.1f}")
             col_idx += 1
+            indicators_displayed += 1
         
         if use_stoch and 'stoch_k' in df.columns:
             with indicator_cols[col_idx % 3]:
@@ -965,6 +1011,7 @@ if df is not None and len(df) > 0:
                          stoch_status)
                 st.caption(f"%K: {stoch_k:.1f} | %D: {stoch_d:.1f}")
             col_idx += 1
+            indicators_displayed += 1
         
         if use_cci and 'cci' in df.columns:
             with indicator_cols[col_idx % 3]:
@@ -976,6 +1023,13 @@ if df is not None and len(df) > 0:
                          cci_status)
                 st.caption("Commodity Channel Index")
             col_idx += 1
+            indicators_displayed += 1
+        
+        if debug_mode:
+            st.write(f"Debug - Total indicators displayed: {indicators_displayed}")
+        
+        if indicators_displayed == 0:
+            st.info("👆 Enable indicators in the sidebar to see advanced analysis")
         
         # ==================== TRADE TRACKING TABLE ====================
         if show_learning_dashboard:
