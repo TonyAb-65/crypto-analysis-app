@@ -3249,17 +3249,17 @@ if df is not None and len(df) > 0:
     
     st.markdown(f"### 📊 {pair_display} - Real-Time Analysis")
     col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Current Price", f"${current_price:,.4f}", f"{price_change_pct:+.2f}%")
-    with col2:
-        st.metric("24h High", f"${df['high'].tail(24).max():,.4f}" if len(df) >= 24 else "N/A")
-    with col3:
-        st.metric("24h Low", f"${df['low'].tail(24).min():,.4f}" if len(df) >= 24 else "N/A")
-    with col4:
-        st.metric("Data Source", data_source)
-    
-    st.markdown("---")
+
+with col1:
+    st.metric("Current Price", f"${current_price:,.4f}", f"{price_change_pct:+.2f}%")
+with col2:
+    st.metric("24h High", f"${df['high'].tail(24).max():,.4f}" if len(df) >= 24 else "N/A")
+with col3:
+    st.metric("24h Low", f"${df['low'].tail(24).min():,.4f}" if len(df) >= 24 else "N/A")
+with col4:
+    st.metric("Data Source", data_source)
+
+st.markdown("---")
     
     # ==================== SURGICAL FIX #4: NEWS INTEGRATION ====================
 
