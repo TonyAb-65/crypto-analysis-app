@@ -16,7 +16,8 @@ warnings.filterwarnings('ignore')
 # Import from modules
 from database import (
     init_database, save_prediction, mark_prediction_for_trading,
-    get_all_recent_predictions, save_trade_result, get_indicator_weights, DB_PATH
+    get_all_recent_predictions, save_trade_result, get_indicator_weights, 
+    relearn_from_past_trades, DB_PATH
 )
 from utils import (
     should_retrain, trigger_ai_retraining, analyze_indicator_accuracy,
@@ -189,6 +190,16 @@ try:
             st.sidebar.caption(f"🕐 Last prediction: {last_pred[:16]}")
         if last_trade:
             st.sidebar.caption(f"🕐 Last trade: {last_trade[:16]}")
+        
+        # AI Learning button
+        if trade_count > 0:
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("### 🧠 AI Learning")
+            if st.sidebar.button("🔄 Relearn from Past Trades", help=f"Analyze {trade_count} completed trades to update indicator weights"):
+                with st.sidebar.spinner("Learning..."):
+                    learned = relearn_from_past_trades()
+                    st.sidebar.success(f"✅ Learned from {learned} trades!")
+                    st.sidebar.info("🔄 Refresh page to see updated weights")
         
         with st.sidebar.expander("🔍 Full Path", expanded=False):
             st.code(str(DB_PATH))
