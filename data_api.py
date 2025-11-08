@@ -1,223 +1,219 @@
 """
-Data API Module - Fetch market data from multiple sources with fallback
+Database Module - SQLite operations for trade tracking and AI learning
 """
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import sqlite3
+from pathlib import Path
 import pandas as pd
 from datetime import datetime
 
-
-def get_retry_session(retries=3, backoff_factor=0.3):
-    """Create requests session with retry logic"""
-    session = requests.Session()
-    retry = Retry(
-        total=retries,
-        read=retries,
-        connect=retries,
-        backoff_factor=backoff_factor,
-        status_forcelist=(500, 502, 504)
-    )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount('http://', adapter)
-    session.mount('https://', adapter)
-    return session
+# Database path
+HOME = Path.home()
+DB_PATH = HOME / 'trading_ai_learning.db'
+print(f"💾 Database location: {DB_PATH}")
 
 
-def fetch_data_okx(symbol, interval="1H", limit=100):
-    """Fetch data from OKX API"""
+def init_database():
+    """Initialize SQLite database for trade tracking with AI learning"""
+    conn = sqlite3.connect(str(DB_PATH))
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            asset_type TEXT NOT NULL,
+            pair TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            current_price REAL NOT NULL,
+            predicted_price REAL NOT NULL,
+            prediction_horizon INTEGER NOT NULL,
+            confidence REAL NOT NULL,
+            signal_strength INTEGER,
+            features TEXT,
+            status TEXT DEFAULT 'analysis_only',
+            actual_entry_price REAL,
+            entry_timestamp TEXT,
+            indicator_snapshot TEXT,
+            position_type TEXT,
+            target_price REAL,
+            stop_loss REAL,
+            committee_position TEXT,
+            committee_confidence REAL,
+            committee_reasoning TEXT
+        )
+    ''')
+    
+    # Check and add missing columns
+    cursor.execute("PRAGMA table_info(predictions)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'actual_entry_price' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN actual_entry_price REAL")
+    if 'entry_timestamp' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN entry_timestamp TEXT")
+    if 'indicator_snapshot' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN indicator_snapshot TEXT")
+    if 'position_type' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN position_type TEXT")
+    if 'target_price' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN target_price REAL")
+    if 'stop_loss' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN stop_loss REAL")
+    if 'committee_position' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN committee_position TEXT")
+    if 'committee_confidence' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN committee_confidence REAL")
+    if 'committee_reasoning' not in columns:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN committee_reasoning TEXT")
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS trade_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prediction_id INTEGER NOT NULL,
+            entry_price REAL NOT NULL,
+            exit_price REAL NOT NULL,
+            trade_date TEXT NOT NULL,
+            profit_loss REAL NOT NULL,
+            profit_loss_pct REAL NOT NULL,
+            prediction_error REAL NOT NULL,
+            notes TEXT,
+            FOREIGN KEY (prediction_id) REFERENCES predictions (id)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS indicator_accuracy (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            indicator_name TEXT NOT NULL,
+            correct_count INTEGER DEFAULT 0,
+            wrong_count INTEGER DEFAULT 0,
+            missed_count INTEGER DEFAULT 0,
+            accuracy_rate REAL DEFAULT 0,
+            weight_multiplier REAL DEFAULT 1.0,
+            last_updated TEXT NOT NULL
+        )
+    ''')
+    
+    cursor.execute("SELECT COUNT(*) FROM indicator_accuracy")
+    if cursor.fetchone()[0] == 0:
+        indicators = ['OBV', 'ADX', 'Stochastic', 'MFI', 'CCI', 'Hammer', 'Doji', 'Shooting_Star']
+        for ind in indicators:
+            cursor.execute('''
+                INSERT INTO indicator_accuracy 
+                (indicator_name, correct_count, wrong_count, missed_count, accuracy_rate, weight_multiplier, last_updated)
+                VALUES (?, 0, 0, 0, 0.5, 1.0, ?)
+            ''', (ind, datetime.now().isoformat()))
+    
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_timestamp ON predictions(timestamp DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_pair ON predictions(pair, timestamp DESC)")
+    
+    conn.commit()
+    conn.close()
+
+
+def save_prediction(asset_type, pair, timeframe, current_price, predicted_price, 
+                   prediction_horizon, confidence, signal_strength, features, 
+                   status='analysis_only', actual_entry_price=None, entry_timestamp=None,
+                   indicator_snapshot=None, position_type=None, target_price=None, 
+                   stop_loss=None, committee_position=None, committee_confidence=None, 
+                   committee_reasoning=None):
+    """Save prediction to database"""
+    conn = sqlite3.connect(str(DB_PATH))
+    cursor = conn.cursor()
+    
+    timestamp = datetime.now().isoformat()
+    
+    cursor.execute('''
+        INSERT INTO predictions (
+            timestamp, asset_type, pair, timeframe, current_price, predicted_price,
+            prediction_horizon, confidence, signal_strength, features, status,
+            actual_entry_price, entry_timestamp, indicator_snapshot, position_type,
+            target_price, stop_loss, committee_position, committee_confidence, committee_reasoning
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (timestamp, asset_type, pair, timeframe, current_price, predicted_price,
+          prediction_horizon, confidence, signal_strength, str(features), status,
+          actual_entry_price, entry_timestamp, str(indicator_snapshot), position_type,
+          target_price, stop_loss, committee_position, committee_confidence, committee_reasoning))
+    
+    prediction_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    
+    return prediction_id
+
+
+def mark_prediction_for_trading(prediction_id, actual_entry_price, entry_timestamp, 
+                                position_type, target_price, stop_loss):
+    """Mark prediction as will_trade"""
+    conn = sqlite3.connect(str(DB_PATH))
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        UPDATE predictions 
+        SET actual_entry_price = ?, entry_timestamp = ?, status = 'will_trade',
+            position_type = ?, target_price = ?, stop_loss = ?
+        WHERE id = ?
+    ''', (actual_entry_price, entry_timestamp, position_type, target_price, stop_loss, prediction_id))
+    
+    conn.commit()
+    conn.close()
+
+
+def get_all_recent_predictions(limit=50):
+    """Get recent predictions for dashboard"""
+    conn = sqlite3.connect(str(DB_PATH))
+    
+    query = '''
+        SELECT * FROM predictions 
+        ORDER BY timestamp DESC 
+        LIMIT ?
+    '''
+    
+    df = pd.read_sql_query(query, conn, params=(limit,))
+    conn.close()
+    
+    return df
+
+
+def save_trade_result(prediction_id, entry_price, exit_price, profit_loss, 
+                     profit_loss_pct, prediction_error, notes=''):
+    """Save trade result"""
+    conn = sqlite3.connect(str(DB_PATH))
+    cursor = conn.cursor()
+    
+    trade_date = datetime.now().isoformat()
+    
+    cursor.execute('''
+        INSERT INTO trade_results (
+            prediction_id, entry_price, exit_price, trade_date, 
+            profit_loss, profit_loss_pct, prediction_error, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (prediction_id, entry_price, exit_price, trade_date, 
+          profit_loss, profit_loss_pct, prediction_error, notes))
+    
+    cursor.execute('''
+        UPDATE predictions SET status = 'completed' WHERE id = ?
+    ''', (prediction_id,))
+    
+    conn.commit()
+    conn.close()
+    
+    return True
+
+
+def get_indicator_weights():
+    """Get current indicator weights"""
     try:
-        url = "https://www.okx.com/api/v5/market/candles"
-        params = {
-            "instId": f"{symbol}-USDT",
-            "bar": interval,
-            "limit": str(limit)
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT indicator_name, weight_multiplier FROM indicator_accuracy")
+        weights = {row[0]: row[1] for row in cursor.fetchall()}
+        
+        conn.close()
+        return weights
+    except:
+        return {
+            'OBV': 1.0, 'ADX': 1.0, 'Stochastic': 1.0, 'MFI': 1.0,
+            'CCI': 1.0, 'Hammer': 1.0, 'Doji': 1.0, 'Shooting_Star': 1.0
         }
-        
-        response = get_retry_session().get(url, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if 'data' in data and len(data['data']) > 0:
-                df = pd.DataFrame(data['data'], columns=[
-                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                    'volume_currency', 'volume_quote', 'confirm'
-                ])
-                
-                df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
-                for col in ['open', 'high', 'low', 'close', 'volume']:
-                    df[col] = df[col].astype(float)
-                
-                df = df.sort_values('timestamp').reset_index(drop=True)
-                return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        
-        return None
-    except Exception as e:
-        print(f"OKX API error: {e}")
-        return None
-
-
-def fetch_data_binance(symbol, interval="1h", limit=100):
-    """Fetch data from Binance API"""
-    try:
-        url = "https://api.binance.com/api/v3/klines"
-        params = {
-            "symbol": f"{symbol}USDT",
-            "interval": interval,
-            "limit": limit
-        }
-        
-        response = get_retry_session().get(url, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            df = pd.DataFrame(data, columns=[
-                'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                'close_time', 'quote_volume', 'trades', 'taker_buy_base',
-                'taker_buy_quote', 'ignore'
-            ])
-            
-            df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
-            for col in ['open', 'high', 'low', 'close', 'volume']:
-                df[col] = df[col].astype(float)
-            
-            return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        
-        return None
-    except Exception as e:
-        print(f"Binance API error: {e}")
-        return None
-
-
-def fetch_data_cryptocompare(symbol, limit=100):
-    """Fetch data from CryptoCompare API"""
-    try:
-        url = f"https://min-api.cryptocompare.com/data/v2/histohour"
-        params = {
-            "fsym": symbol,
-            "tsym": "USDT",
-            "limit": limit
-        }
-        
-        response = get_retry_session().get(url, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if 'Data' in data and 'Data' in data['Data']:
-                df = pd.DataFrame(data['Data']['Data'])
-                
-                df['timestamp'] = pd.to_datetime(df['time'], unit='s')
-                df = df.rename(columns={
-                    'open': 'open',
-                    'high': 'high',
-                    'low': 'low',
-                    'close': 'close',
-                    'volumefrom': 'volume'
-                })
-                
-                return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        
-        return None
-    except Exception as e:
-        print(f"CryptoCompare API error: {e}")
-        return None
-
-
-def fetch_data_coingecko(symbol, days=4):
-    """Fetch data from CoinGecko API (hourly for last N days)"""
-    try:
-        # Map common symbols to CoinGecko IDs
-        symbol_map = {
-            'BTC': 'bitcoin',
-            'ETH': 'ethereum',
-            'SOL': 'solana',
-            'BNB': 'binancecoin',
-            'XRP': 'ripple',
-            'ADA': 'cardano',
-            'DOGE': 'dogecoin',
-            'MATIC': 'matic-network',
-            'DOT': 'polkadot',
-            'AVAX': 'avalanche-2'
-        }
-        
-        coin_id = symbol_map.get(symbol.upper(), symbol.lower())
-        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-        params = {
-            "vs_currency": "usd",
-            "days": days,
-            "interval": "hourly"
-        }
-        
-        response = get_retry_session().get(url, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if 'prices' in data:
-                prices = data['prices']
-                volumes = data.get('total_volumes', [])
-                
-                df = pd.DataFrame({
-                    'timestamp': [pd.to_datetime(p[0], unit='ms') for p in prices],
-                    'close': [p[1] for p in prices],
-                    'volume': [v[1] if len(volumes) > 0 else 0 for v in volumes] if len(volumes) > 0 else [0] * len(prices)
-                })
-                
-                # CoinGecko doesn't provide OHLC, so we approximate
-                df['open'] = df['close']
-                df['high'] = df['close'] * 1.001
-                df['low'] = df['close'] * 0.999
-                
-                return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].tail(100)
-        
-        return None
-    except Exception as e:
-        print(f"CoinGecko API error: {e}")
-        return None
-
-
-def fetch_data(symbol, asset_type="crypto", timeframe="1h", limit=100):
-    """
-    Main data fetching function with multiple fallbacks
-    Returns: (df, data_source)
-    """
-    # Map timeframe
-    interval_map = {
-        "1h": {"okx": "1H", "binance": "1h"},
-        "4h": {"okx": "4H", "binance": "4h"},
-        "1d": {"okx": "1D", "binance": "1d"}
-    }
-    
-    intervals = interval_map.get(timeframe, {"okx": "1H", "binance": "1h"})
-    
-    # Try OKX first (most reliable)
-    df = fetch_data_okx(symbol, intervals["okx"], limit)
-    if df is not None and len(df) > 0:
-        return df, "OKX"
-    
-    # Try Binance
-    df = fetch_data_binance(symbol, intervals["binance"], limit)
-    if df is not None and len(df) > 0:
-        return df, "Binance"
-    
-    # Try CryptoCompare
-    df = fetch_data_cryptocompare(symbol, limit)
-    if df is not None and len(df) > 0:
-        return df, "CryptoCompare"
-    
-    # Try CoinGecko (last resort)
-    df = fetch_data_coingecko(symbol, days=4)
-    if df is not None and len(df) > 0:
-        return df, "CoinGecko"
-    
-    # All failed
-    return None, "None"
-
-
-def get_batch_data_binance(symbols_list, interval="1h", limit=100):
-    """Batch request capability - fetch multiple symbols at once"""
-    results = {}
-    for symbol in symbols_list:
-        df = fetch_data_binance(symbol, interval, limit)
-        if df is not None:
-            results[symbol] = df
-    return results
