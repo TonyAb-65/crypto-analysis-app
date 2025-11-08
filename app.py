@@ -3328,7 +3328,7 @@ if predictions and len(predictions) > 0:
     
     # ==================== SURGICAL FIX #5: CONSULTANT MEETING ====================
     # Step 1: Calculate raw signal (without warnings)
-    raw_signal_strength = calculate_signal_strength(df, warning_details=None)
+    raw_signal_strength = calculate_signal_strength(df, warning_details={})
     
     # Step 2: Check news warning
     news_warning_data = None
