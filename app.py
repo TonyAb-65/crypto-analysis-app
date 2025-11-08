@@ -914,13 +914,13 @@ if df is not None and len(df) > 0:
                     SELECT 
                         tr.id,
                         tr.trade_date,
-                        p.symbol,
+                        p.pair as symbol,
                         p.position_type,
-                        p.entry_price,
+                        p.actual_entry_price as entry_price,
                         tr.exit_price,
                         tr.profit_loss,
                         tr.profit_loss_pct,
-                        tr.exit_reason,
+                        tr.notes as exit_reason,
                         p.confidence,
                         p.signal_strength
                     FROM trade_results tr
