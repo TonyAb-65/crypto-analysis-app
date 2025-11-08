@@ -480,19 +480,25 @@ if df is not None and len(df) > 0:
                 if st.button("💾 Save Prediction", use_container_width=True):
                     with st.spinner("Saving..."):
                         pred_id = save_prediction(
-                            symbol=symbol,
                             asset_type=asset_type,
+                            pair=symbol,
                             timeframe=timeframe_name,
                             current_price=current_price,
                             predicted_price=predictions[-1],
+                            prediction_horizon=prediction_periods,
                             confidence=adjusted_confidence,
                             signal_strength=final_signal_strength,
+                            features=str(features),
+                            status='analysis_only',
+                            actual_entry_price=meeting_result['entry'] if meeting_result['position'] != 'NEUTRAL' else None,
+                            entry_timestamp=None,
+                            indicator_snapshot=str(indicator_snapshot),
                             position_type=meeting_result['position'],
-                            entry_price=meeting_result['entry'],
-                            target_price=meeting_result['target'],
-                            stop_loss=meeting_result['stop_loss'],
-                            indicator_snapshot=indicator_snapshot,
-                            features_used=features
+                            target_price=meeting_result['target'] if meeting_result['position'] != 'NEUTRAL' else None,
+                            stop_loss=meeting_result['stop_loss'] if meeting_result['position'] != 'NEUTRAL' else None,
+                            committee_position=meeting_result['position'],
+                            committee_confidence=adjusted_confidence,
+                            committee_reasoning=meeting_result['reasoning']
                         )
                         if pred_id:
                             st.success(f"✅ Saved! ID: {pred_id}")
@@ -505,8 +511,8 @@ if df is not None and len(df) > 0:
                     conn = sqlite3.connect(str(DB_PATH))
                     cursor = conn.cursor()
                     cursor.execute("""
-                        SELECT id FROM predictions 
-                        WHERE symbol = ? 
+                        SELECT id, current_price, position_type, target_price, stop_loss FROM predictions 
+                        WHERE pair = ? 
                         ORDER BY timestamp DESC 
                         LIMIT 1
                     """, (symbol,))
@@ -514,8 +520,15 @@ if df is not None and len(df) > 0:
                     conn.close()
                     
                     if result:
-                        pred_id = result[0]
-                        mark_prediction_for_trading(pred_id)
+                        pred_id, curr_price, pos_type, target, stop = result
+                        mark_prediction_for_trading(
+                            prediction_id=pred_id,
+                            actual_entry_price=curr_price,
+                            entry_timestamp=datetime.now().isoformat(),
+                            position_type=pos_type,
+                            target_price=target,
+                            stop_loss=stop
+                        )
                         st.success(f"✅ Marked for trading!")
                     else:
                         st.warning("⚠️ Save prediction first")
@@ -574,6 +587,11 @@ if df is not None and len(df) > 0:
         # ==================== CHART WITH S/R ZONES ====================
         st.markdown("---")
         st.markdown("### 📈 Technical Chart with S/R Zones")
+        
+        # Debug S/R zones
+        if debug_mode:
+            st.write(f"Support zones: {support_zones}")
+            st.write(f"Resistance zones: {resistance_zones}")
         
         fig = make_subplots(
             rows=2, cols=1,
@@ -708,9 +726,9 @@ if df is not None and len(df) > 0:
             st.markdown("## 📊 Trade Tracking & Learning Dashboard")
             
             # Get all predictions
-            all_predictions = get_all_recent_predictions(limit=50)
+            all_predictions_df = get_all_recent_predictions(limit=50)
             
-            if all_predictions and len(all_predictions) > 0:
+            if all_predictions_df is not None and len(all_predictions_df) > 0:
                 st.markdown("### 🎯 Recent Predictions & Trades")
                 
                 # Filter options
@@ -724,9 +742,11 @@ if df is not None and len(df) > 0:
                     )
                 
                 with col_filter2:
+                    # Get unique symbols from DataFrame
+                    unique_symbols = sorted(all_predictions_df['pair'].unique().tolist())
                     filter_symbol = st.selectbox(
                         "Filter by Symbol",
-                        ["All"] + sorted(list(set([p['symbol'] for p in all_predictions]))),
+                        ["All"] + unique_symbols,
                         index=0
                     )
                 
@@ -737,56 +757,68 @@ if df is not None and len(df) > 0:
                         index=0
                     )
                 
-                # Apply filters
-                filtered_preds = all_predictions
+                # Apply filters on DataFrame
+                filtered_df = all_predictions_df.copy()
                 
                 if filter_status != "All":
                     if filter_status == "Open":
-                        filtered_preds = [p for p in filtered_preds if not p['is_closed']]
+                        filtered_df = filtered_df[filtered_df['status'] != 'completed']
                     elif filter_status == "Closed":
-                        filtered_preds = [p for p in filtered_preds if p['is_closed']]
+                        filtered_df = filtered_df[filtered_df['status'] == 'completed']
                     elif filter_status == "For Trading":
-                        filtered_preds = [p for p in filtered_preds if p['marked_for_trading']]
+                        filtered_df = filtered_df[filtered_df['status'] == 'will_trade']
                 
                 if filter_symbol != "All":
-                    filtered_preds = [p for p in filtered_preds if p['symbol'] == filter_symbol]
+                    filtered_df = filtered_df[filtered_df['pair'] == filter_symbol]
                 
                 # Sort
                 if sort_by == "Newest First":
-                    filtered_preds = sorted(filtered_preds, key=lambda x: x['timestamp'], reverse=True)
+                    filtered_df = filtered_df.sort_values('timestamp', ascending=False)
                 elif sort_by == "Oldest First":
-                    filtered_preds = sorted(filtered_preds, key=lambda x: x['timestamp'])
+                    filtered_df = filtered_df.sort_values('timestamp', ascending=True)
                 elif sort_by == "Highest Confidence":
-                    filtered_preds = sorted(filtered_preds, key=lambda x: x['confidence'], reverse=True)
+                    filtered_df = filtered_df.sort_values('confidence', ascending=False)
                 elif sort_by == "Largest Signal":
-                    filtered_preds = sorted(filtered_preds, key=lambda x: abs(x['signal_strength']), reverse=True)
+                    filtered_df['abs_signal'] = filtered_df['signal_strength'].abs()
+                    filtered_df = filtered_df.sort_values('abs_signal', ascending=False)
                 
                 # Display predictions in a table
-                if filtered_preds:
-                    for pred in filtered_preds[:20]:  # Show top 20
+                if len(filtered_df) > 0:
+                    for idx, pred in filtered_df.head(20).iterrows():  # Show top 20
                         with st.container():
                             col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 2])
                             
                             with col1:
-                                status_emoji = "✅" if pred['is_closed'] else "📈" if pred['marked_for_trading'] else "⏳"
-                                st.markdown(f"**{status_emoji} {pred['symbol']}**")
+                                status_emoji = "✅" if pred['status'] == 'completed' else "📈" if pred['status'] == 'will_trade' else "⏳"
+                                st.markdown(f"**{status_emoji} {pred['pair']}**")
                                 st.caption(f"ID: {pred['id']} | {pred['timestamp'][:16]}")
                             
                             with col2:
-                                direction = "🟢 LONG" if pred['position_type'] == 'LONG' else "🔴 SHORT" if pred['position_type'] == 'SHORT' else "⚪ NEUTRAL"
+                                pos_type = pred.get('position_type', 'NEUTRAL')
+                                direction = "🟢 LONG" if pos_type == 'LONG' else "🔴 SHORT" if pos_type == 'SHORT' else "⚪ NEUTRAL"
                                 st.markdown(f"**{direction}**")
-                                st.caption(f"Entry: ${pred['entry_price']:.2f}")
+                                entry_price = pred.get('actual_entry_price') or pred['current_price']
+                                st.caption(f"Entry: ${entry_price:.2f}")
                             
                             with col3:
                                 st.markdown(f"**Confidence: {pred['confidence']:.1f}%**")
-                                st.caption(f"Signal: {pred['signal_strength']:.1f}/10")
+                                signal = pred.get('signal_strength', 0)
+                                st.caption(f"Signal: {signal:.1f}/10" if signal else "N/A")
                             
                             with col4:
-                                st.markdown(f"**Target: ${pred['target_price']:.2f}**")
-                                st.caption(f"Stop: ${pred['stop_loss']:.2f}")
+                                target = pred.get('target_price')
+                                stop = pred.get('stop_loss')
+                                if target:
+                                    st.markdown(f"**Target: ${target:.2f}**")
+                                else:
+                                    st.markdown("**Target: N/A**")
+                                if stop:
+                                    st.caption(f"Stop: ${stop:.2f}")
+                                else:
+                                    st.caption("Stop: N/A")
                             
                             with col5:
-                                if not pred['is_closed'] and pred['position_type'] != 'NEUTRAL':
+                                if pred['status'] != 'completed' and pos_type != 'NEUTRAL':
                                     if st.button(f"Close Trade", key=f"close_{pred['id']}", use_container_width=True):
                                         st.session_state[f'closing_{pred["id"]}'] = True
                                         st.rerun()
@@ -820,21 +852,29 @@ if df is not None and len(df) > 0:
                                             
                                             if submitted:
                                                 # Calculate P/L
-                                                entry = pred['entry_price']
-                                                if pred['position_type'] == 'LONG':
+                                                entry = pred.get('actual_entry_price') or pred['current_price']
+                                                pos_type = pred.get('position_type', 'NEUTRAL')
+                                                
+                                                if pos_type == 'LONG':
                                                     pl = exit_price - entry
                                                 else:  # SHORT
                                                     pl = entry - exit_price
                                                 
                                                 pl_pct = (pl / entry) * 100
                                                 
+                                                # Calculate prediction error
+                                                predicted = pred.get('predicted_price', entry)
+                                                prediction_error = abs(exit_price - predicted) / predicted * 100
+                                                
                                                 # Save trade result
                                                 success = save_trade_result(
-                                                    prediction_id=pred['id'],
+                                                    prediction_id=int(pred['id']),
+                                                    entry_price=entry,
                                                     exit_price=exit_price,
                                                     profit_loss=pl,
                                                     profit_loss_pct=pl_pct,
-                                                    exit_reason=exit_reason
+                                                    prediction_error=prediction_error,
+                                                    notes=exit_reason
                                                 )
                                                 
                                                 if success:
