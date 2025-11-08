@@ -3210,19 +3210,29 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
             base_confidence = 65
         
         # ==================== SURGICAL FIX #1 APPLICATION ====================
+        st.info("✅ DEBUG 1: Starting predictions")
+        
         current_price_model = df_clean['close'].iloc[-1]
         predicted_price = predictions[0]
         pred_change_pct = ((predicted_price - current_price_model) / current_price_model) * 100
         
+        st.info("✅ DEBUG 2: Price calculations done")
+        
         barriers = check_support_resistance_barriers(df_clean, predicted_price, current_price_model)
+        st.info("✅ DEBUG 3: Barriers checked")
         
         timeframe_hours = prediction_periods
         volatility_context = analyze_timeframe_volatility(df_clean, pred_change_pct, timeframe_hours)
+        st.info("✅ DEBUG 4: Volatility analyzed")
         
         adjusted_confidence = adjust_confidence_for_barriers(base_confidence, barriers, volatility_context)
-       # ==================== END SURGICAL FIX #1 ====================
+        st.info("✅ DEBUG 5: Confidence adjusted")
+        # ==================== END SURGICAL FIX #1 ====================
         
         rsi_insights = analyze_rsi_bounce_patterns(df_clean)
+        st.info("✅ DEBUG 6: RSI analyzed")
+        
+        st.info("✅ DEBUG 7: About to return predictions")
         
         return predictions, ['Pattern-based features'], adjusted_confidence, rsi_insights
         
@@ -3231,7 +3241,6 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
         import traceback
         st.error(f"Details: {traceback.format_exc()}")
         return None, None, 0, None
-
 # ==================== MAIN DATA FETCHING & ANALYSIS ====================
 
 with st.spinner(f"🔄 Fetching {pair_display} data..."):
