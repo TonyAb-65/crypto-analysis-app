@@ -28,7 +28,7 @@ from news import (
 from signals import (
     calculate_signal_strength, calculate_warning_signs, create_indicator_snapshot
 )
-from data_api import fetch_data, get_retry_session
+from data_api import fetch_data, get_batch_data_binance
 from support_resistance import find_support_resistance_zones
 from indicators import calculate_technical_indicators
 from ml_model import train_improved_model
@@ -307,7 +307,7 @@ with col_export:
 # ==================== MAIN DATA FETCHING ====================
 
 with st.spinner(f"🔄 Fetching {pair_display} data..."):
-    df, data_source = fetch_data(symbol, asset_type, timeframe_name.lower().replace(" ", ""))
+    df, data_source = fetch_data(symbol, asset_type, timeframe_config)
 
 if df is not None and len(df) > 0:
     df = calculate_technical_indicators(df)
