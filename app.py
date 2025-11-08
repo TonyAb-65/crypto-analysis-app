@@ -3322,31 +3322,31 @@ if predictions and len(predictions) > 0:
     indicator_snapshot = create_indicator_snapshot(df)
     
     # ==================== SURGICAL FIX #5: CONSULTANT MEETING ====================
-        # Step 1: Calculate raw signal (without warnings)
-        raw_signal_strength = calculate_signal_strength(df, warning_details=None)
-        
-        # Step 2: Check news warning
-        news_warning_data = None
-        if fear_greed_value is not None:
-            has_news_warning, news_msg, sentiment_status = analyze_news_sentiment_warning(
-                fear_greed_value, news_sentiment, raw_signal_strength
-            )
-            news_warning_data = {
-                'has_warning': has_news_warning,
-                'warning_message': news_msg,
-                'sentiment_status': sentiment_status
-            }
-        
-        # Step 3: Calculate all warnings (including news)
-        warning_count, warning_details = calculate_warning_signs(
-            df, raw_signal_strength, news_warning_data
+    # Step 1: Calculate raw signal (without warnings)
+    raw_signal_strength = calculate_signal_strength(df, warning_details=None)
+    
+    # Step 2: Check news warning
+    news_warning_data = None
+    if fear_greed_value is not None:
+        has_news_warning, news_msg, sentiment_status = analyze_news_sentiment_warning(
+            fear_greed_value, news_sentiment, raw_signal_strength
         )
-        
-        # Step 4: Recalculate signal WITH warning adjustments
-        final_signal_strength = calculate_signal_strength(df, warning_details)
-        
-        # Step 5: Adjust AI confidence based on warnings
-        adjusted_confidence = confidence
+        news_warning_data = {
+            'has_warning': has_news_warning,
+            'warning_message': news_msg,
+            'sentiment_status': sentiment_status
+        }
+    
+    # Step 3: Calculate all warnings (including news)
+    warning_count, warning_details = calculate_warning_signs(
+        df, raw_signal_strength, news_warning_data
+    )
+    
+    # Step 4: Recalculate signal WITH warning adjustments
+    final_signal_strength = calculate_signal_strength(df, warning_details)
+    
+    # Step 5: Adjust AI confidence based on warnings
+    adjusted_confidence = confidence
         if warning_count >= 1:
             adjusted_confidence = confidence * (1 - (warning_count * 0.15))
             adjusted_confidence = max(adjusted_confidence, 30.0)
