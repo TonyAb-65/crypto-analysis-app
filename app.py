@@ -3973,147 +3973,147 @@ if predictions and len(predictions) > 0:
     
     fig.update_layout(height=chart_height, showlegend=True, xaxis_rangeslider_visible=False)
     # ==================== ADD S/R LINES TO CHART (CLEAN VERSION) ====================
-    try:
-        # Get S/R zones
-        sr_zones = find_support_resistance_zones(df, lookback=100)
-        
-        # Filter: Only show STRONG levels or top 3
-        strong_resistance = [r for r in sr_zones['resistance'] if r['strength'] == 'STRONG'][:3]
-        strong_support = [s for s in sr_zones['support'] if s['strength'] == 'STRONG'][:3]
-        
-        # If no strong levels, show top 3 medium levels
-        if len(strong_resistance) == 0:
-            strong_resistance = sr_zones['resistance'][:3]
-        if len(strong_support) == 0:
-            strong_support = sr_zones['support'][:3]
-        
-        # Add resistance lines (RED - only strong ones)
-        for i, r in enumerate(strong_resistance):
-            fig.add_hline(
-                y=r['price'],
-                line_dash="dash",
-                line_color='red',
-                line_width=2,
-                row=1, col=1,
-                annotation_text=f"🔴 R: ${r['price']:,.0f}",
-                annotation_position="top right" if i % 2 == 0 else "bottom right"
-            )
-        
-        # Add support lines (GREEN - only strong ones)
-        for i, s in enumerate(strong_support):
-            fig.add_hline(
-                y=s['price'],
-                line_dash="dash",
-                line_color='green',
-                line_width=2,
-                row=1, col=1,
-                annotation_text=f"🟢 S: ${s['price']:,.0f}",
-                annotation_position="top right" if i % 2 == 0 else "bottom right"
-            )
+try:
+    # Get S/R zones
+    sr_zones = find_support_resistance_zones(df, lookback=100)
     
-    except Exception as e:
-        pass  # If S/R fails, chart still displays
-    # ==================== END S/R LINES ====================    
-    st.plotly_chart(fig, use_container_width=True)
+    # Filter: Only show STRONG levels or top 3
+    strong_resistance = [r for r in sr_zones['resistance'] if r['strength'] == 'STRONG'][:3]
+    strong_support = [s for s in sr_zones['support'] if s['strength'] == 'STRONG'][:3]
     
-    if any([use_obv, use_mfi, use_adx, use_stoch, use_cci]):
-        st.markdown("---")
-        st.markdown("### 🆕 Advanced Technical Indicators")
-        
-        indicator_cols = st.columns(3)
-        col_idx = 0
-        
-        if use_obv and 'obv' in df.columns:
-            with indicator_cols[col_idx % 3]:
-                obv_current = df['obv'].iloc[-1]
-                obv_prev = df['obv'].iloc[-5] if len(df) > 5 else obv_current
-                obv_change = obv_current - obv_prev
-                
+    # If no strong levels, show top 3 medium levels
+    if len(strong_resistance) == 0:
+        strong_resistance = sr_zones['resistance'][:3]
+    if len(strong_support) == 0:
+        strong_support = sr_zones['support'][:3]
+    
+    # Add resistance lines (RED - only strong ones)
+    for i, r in enumerate(strong_resistance):
+        fig.add_hline(
+            y=r['price'],
+            line_dash="dash",
+            line_color='red',
+            line_width=2,
+            row=1, col=1,
+            annotation_text=f"🔴 R: ${r['price']:,.4f}",
+            annotation_position="top right" if i % 2 == 0 else "bottom right"
+        )
+    
+    # Add support lines (GREEN - only strong ones)
+    for i, s in enumerate(strong_support):
+        fig.add_hline(
+            y=s['price'],
+            line_dash="dash",
+            line_color='green',
+            line_width=2,
+            row=1, col=1,
+            annotation_text=f"🟢 S: ${s['price']:,.4f}",
+            annotation_position="top right" if i % 2 == 0 else "bottom right"
+        )
+
+except Exception as e:
+    pass
+
+st.plotly_chart(fig, use_container_width=True)
+
+if any([use_obv, use_mfi, use_adx, use_stoch, use_cci]):
+    st.markdown("---")
+    st.markdown("### 🆕 Advanced Technical Indicators")
+    
+    indicator_cols = st.columns(3)
+    col_idx = 0
+    
+    if use_obv and 'obv' in df.columns:
+        with indicator_cols[col_idx % 3]:
+            obv_current = df['obv'].iloc[-1]
+            obv_prev = df['obv'].iloc[-5] if len(df) > 5 else obv_current
+            obv_change = obv_current - obv_prev
+            
+            if obv_current < 0:
+                pressure_type = "Selling"
+            else:
+                pressure_type = "Buying"
+            
+            if obv_change > 0:
                 if obv_current < 0:
-                    pressure_type = "Selling"
+                    momentum = "Decreasing"
+                    momentum_emoji = "📊"
+                    trend_color = "normal"
                 else:
-                    pressure_type = "Buying"
-                
-                if obv_change > 0:
-                    if obv_current < 0:
-                        momentum = "Decreasing"
-                        momentum_emoji = "📊"
-                        trend_color = "normal"
-                    else:
-                        momentum = "Increasing"
-                        momentum_emoji = "📈"
-                        trend_color = "normal"
-                elif obv_change < 0:
-                    if obv_current < 0:
-                        momentum = "Increasing"
-                        momentum_emoji = "📉"
-                        trend_color = "inverse"
-                    else:
-                        momentum = "Decreasing"
-                        momentum_emoji = "📊"
-                        trend_color = "inverse"
+                    momentum = "Increasing"
+                    momentum_emoji = "📈"
+                    trend_color = "normal"
+            elif obv_change < 0:
+                if obv_current < 0:
+                    momentum = "Increasing"
+                    momentum_emoji = "📉"
+                    trend_color = "inverse"
                 else:
-                    momentum = "Flat"
-                    momentum_emoji = "➡️"
-                    trend_color = "off"
-                
-                obv_status = f"{momentum_emoji} {pressure_type} - {momentum}"
-                
-                st.metric("OBV (Volume Flow)", 
-                         f"{obv_current:,.0f}",
-                         obv_status,
-                         delta_color=trend_color)
-                st.caption("Tracks cumulative buying/selling pressure")
-            col_idx += 1
-        
-        if use_mfi and 'mfi' in df.columns:
-            with indicator_cols[col_idx % 3]:
-                mfi_current = df['mfi'].iloc[-1]
-                mfi_status = "🔴 Overbought" if mfi_current > 80 else "🟢 Oversold" if mfi_current < 20 else "⚪ Neutral"
-                
-                st.metric("MFI (Money Flow)", 
-                         f"{mfi_current:.1f}",
-                         mfi_status)
-                st.caption("Volume-weighted RSI")
-            col_idx += 1
-        
-        if use_adx and 'adx' in df.columns:
-            with indicator_cols[col_idx % 3]:
-                adx_current = df['adx'].iloc[-1]
-                plus_di = df['plus_di'].iloc[-1]
-                minus_di = df['minus_di'].iloc[-1]
-                
-                trend_strength = "💪 Strong" if adx_current > 25 else "😐 Weak"
-                trend_dir = "🟢 Up" if plus_di > minus_di else "🔴 Down"
-                
-                st.metric("ADX (Trend Strength)", 
-                         f"{adx_current:.1f}",
-                         f"{trend_strength} | {trend_dir}")
-                st.caption(f"+DI: {plus_di:.1f} | -DI: {minus_di:.1f}")
-            col_idx += 1
-        
-        if use_stoch and 'stoch_k' in df.columns:
-            with indicator_cols[col_idx % 3]:
-                stoch_k = df['stoch_k'].iloc[-1]
-                stoch_d = df['stoch_d'].iloc[-1]
-                stoch_status = "🔴 Overbought" if stoch_k > 80 else "🟢 Oversold" if stoch_k < 20 else "⚪ Neutral"
-                
-                st.metric("Stochastic", 
-                         f"{stoch_k:.1f}",
-                         stoch_status)
-                st.caption(f"%K: {stoch_k:.1f} | %D: {stoch_d:.1f}")
-            col_idx += 1
-        
-        if use_cci and 'cci' in df.columns:
-            with indicator_cols[col_idx % 3]:
-                cci_current = df['cci'].iloc[-1]
-                cci_status = "🔴 Overbought" if cci_current > 100 else "🟢 Oversold" if cci_current < -100 else "⚪ Neutral"
-                
-                st.metric("CCI (Cyclical)", 
-                         f"{cci_current:.1f}",
-                         cci_status)
-                st.caption("Commodity Channel Index")
-            col_idx += 1
+                    momentum = "Decreasing"
+                    momentum_emoji = "📊"
+                    trend_color = "inverse"
+            else:
+                momentum = "Flat"
+                momentum_emoji = "➡️"
+                trend_color = "off"
+            
+            obv_status = f"{momentum_emoji} {pressure_type} - {momentum}"
+            
+            st.metric("OBV (Volume Flow)", 
+                     f"{obv_current:,.0f}",
+                     obv_status,
+                     delta_color=trend_color)
+            st.caption("Tracks cumulative buying/selling pressure")
+        col_idx += 1
+    
+    if use_mfi and 'mfi' in df.columns:
+        with indicator_cols[col_idx % 3]:
+            mfi_current = df['mfi'].iloc[-1]
+            mfi_status = "🔴 Overbought" if mfi_current > 80 else "🟢 Oversold" if mfi_current < 20 else "⚪ Neutral"
+            
+            st.metric("MFI (Money Flow)", 
+                     f"{mfi_current:.1f}",
+                     mfi_status)
+            st.caption("Volume-weighted RSI")
+        col_idx += 1
+    
+    if use_adx and 'adx' in df.columns:
+        with indicator_cols[col_idx % 3]:
+            adx_current = df['adx'].iloc[-1]
+            plus_di = df['plus_di'].iloc[-1]
+            minus_di = df['minus_di'].iloc[-1]
+            
+            trend_strength = "💪 Strong" if adx_current > 25 else "😐 Weak"
+            trend_dir = "🟢 Up" if plus_di > minus_di else "🔴 Down"
+            
+            st.metric("ADX (Trend Strength)", 
+                     f"{adx_current:.1f}",
+                     f"{trend_strength} | {trend_dir}")
+            st.caption(f"+DI: {plus_di:.1f} | -DI: {minus_di:.1f}")
+        col_idx += 1
+    
+    if use_stoch and 'stoch_k' in df.columns:
+        with indicator_cols[col_idx % 3]:
+            stoch_k = df['stoch_k'].iloc[-1]
+            stoch_d = df['stoch_d'].iloc[-1]
+            stoch_status = "🔴 Overbought" if stoch_k > 80 else "🟢 Oversold" if stoch_k < 20 else "⚪ Neutral"
+            
+            st.metric("Stochastic", 
+                     f"{stoch_k:.1f}",
+                     stoch_status)
+            st.caption(f"%K: {stoch_k:.1f} | %D: {stoch_d:.1f}")
+        col_idx += 1
+    
+    if use_cci and 'cci' in df.columns:
+        with indicator_cols[col_idx % 3]:
+            cci_current = df['cci'].iloc[-1]
+            cci_status = "🔴 Overbought" if cci_current > 100 else "🟢 Oversold" if cci_current < -100 else "⚪ Neutral"
+            
+            st.metric("CCI (Cyclical)", 
+                     f"{cci_current:.1f}",
+                     cci_status)
+            st.caption("Commodity Channel Index")
+        col_idx += 1
 
 else:
     st.error("❌ Unable to fetch data. Please check symbol and try again.")
