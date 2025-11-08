@@ -818,86 +818,103 @@ if df is not None and len(df) > 0:
                                     st.caption("Stop: N/A")
                             
                             with col5:
-                                if pred['status'] != 'completed' and pos_type != 'NEUTRAL':
-                                    if st.button(f"Close Trade", key=f"close_{pred['id']}", use_container_width=True):
-                                        st.session_state[f'closing_{pred["id"]}'] = True
-                                        st.rerun()
-                                    
-                                    # Show close trade form
-                                    if st.session_state.get(f'closing_{pred["id"]}', False):
-                                        with st.form(key=f"form_close_{pred['id']}"):
-                                            st.markdown(f"**Close Trade #{pred['id']}**")
-                                            
-                                            exit_price = st.number_input(
-                                                "Exit Price ($)",
-                                                min_value=0.0,
-                                                value=float(current_price),
-                                                step=0.01,
-                                                key=f"exit_{pred['id']}"
-                                            )
-                                            
-                                            exit_reason = st.selectbox(
-                                                "Exit Reason",
-                                                ["Target Hit", "Stop Loss Hit", "Manual Close", "Timeout"],
-                                                key=f"reason_{pred['id']}"
-                                            )
-                                            
-                                            col_submit, col_cancel = st.columns(2)
-                                            
-                                            with col_submit:
-                                                submitted = st.form_submit_button("✅ Confirm", use_container_width=True)
-                                            
-                                            with col_cancel:
-                                                cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
-                                            
-                                            if submitted:
-                                                # Calculate P/L
-                                                entry = pred.get('actual_entry_price') or pred['current_price']
-                                                pos_type = pred.get('position_type', 'NEUTRAL')
+                                # Get position type, treating None as NEUTRAL
+                                pos_type = pred.get('position_type')
+                                if not pos_type or pos_type == 'NEUTRAL' or pd.isna(pos_type):
+                                    st.caption("Closed" if pred['status'] == 'completed' else "N/A")
+                                elif pred['status'] != 'completed':
+                                    # Check if we have valid entry price
+                                    entry_check = pred.get('actual_entry_price')
+                                    if pd.isna(entry_check) or entry_check is None:
+                                        st.caption("⚠️ No entry price")
+                                    else:
+                                        if st.button(f"Close Trade", key=f"close_{pred['id']}", use_container_width=True):
+                                            st.session_state[f'closing_{pred["id"]}'] = True
+                                            st.rerun()
+                                        
+                                        # Show close trade form
+                                        if st.session_state.get(f'closing_{pred["id"]}', False):
+                                            with st.form(key=f"form_close_{pred['id']}"):
+                                                st.markdown(f"**Close Trade #{pred['id']}**")
                                                 
-                                                if pos_type == 'LONG':
-                                                    pl = exit_price - entry
-                                                else:  # SHORT
-                                                    pl = entry - exit_price
-                                                
-                                                pl_pct = (pl / entry) * 100
-                                                
-                                                # Calculate prediction error
-                                                predicted = pred.get('predicted_price', entry)
-                                                prediction_error = abs(exit_price - predicted) / predicted * 100
-                                                
-                                                # Save trade result
-                                                success = save_trade_result(
-                                                    prediction_id=int(pred['id']),
-                                                    entry_price=entry,
-                                                    exit_price=exit_price,
-                                                    profit_loss=pl,
-                                                    profit_loss_pct=pl_pct,
-                                                    prediction_error=prediction_error,
-                                                    notes=exit_reason
+                                                exit_price = st.number_input(
+                                                    "Exit Price ($)",
+                                                    min_value=0.0,
+                                                    value=float(current_price),
+                                                    step=0.01,
+                                                    key=f"exit_{pred['id']}"
                                                 )
                                                 
-                                                if success:
-                                                    # Analyze indicator accuracy
-                                                    analyze_indicator_accuracy(pred['id'])
+                                                exit_reason = st.selectbox(
+                                                    "Exit Reason",
+                                                    ["Target Hit", "Stop Loss Hit", "Manual Close", "Timeout"],
+                                                    key=f"reason_{pred['id']}"
+                                                )
+                                                
+                                                col_submit, col_cancel = st.columns(2)
+                                                
+                                                with col_submit:
+                                                    submitted = st.form_submit_button("✅ Confirm", use_container_width=True)
+                                                
+                                                with col_cancel:
+                                                    cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
+                                                
+                                                if submitted:
+                                                    # Calculate P/L
+                                                    entry = pred.get('actual_entry_price')
                                                     
-                                                    # Check if retraining needed
-                                                    if should_retrain():
-                                                        with st.spinner("🧠 Retraining AI..."):
-                                                            trigger_ai_retraining()
-                                                    
-                                                    st.success(f"✅ Trade closed! P/L: ${pl:.2f} ({pl_pct:+.2f}%)")
+                                                    # Validate entry price
+                                                    if entry is None or pd.isna(entry):
+                                                        st.error("❌ Cannot close trade: No valid entry price")
+                                                    else:
+                                                        pos_type_confirmed = pred.get('position_type', 'LONG')
+                                                        
+                                                        if pos_type_confirmed == 'LONG':
+                                                            pl = exit_price - entry
+                                                        else:  # SHORT
+                                                            pl = entry - exit_price
+                                                        
+                                                        pl_pct = (pl / entry) * 100
+                                                        
+                                                        # Calculate prediction error
+                                                        predicted = pred.get('predicted_price', entry)
+                                                        prediction_error = abs(exit_price - predicted) / predicted * 100 if predicted and not pd.isna(predicted) else 0
+                                                        
+                                                        # Save trade result
+                                                        try:
+                                                            success = save_trade_result(
+                                                                prediction_id=int(pred['id']),
+                                                                entry_price=float(entry),
+                                                                exit_price=float(exit_price),
+                                                                profit_loss=float(pl),
+                                                                profit_loss_pct=float(pl_pct),
+                                                                prediction_error=float(prediction_error),
+                                                                notes=exit_reason
+                                                            )
+                                                            
+                                                            if success:
+                                                                # Analyze indicator accuracy
+                                                                analyze_indicator_accuracy(pred['id'])
+                                                                
+                                                                # Check if retraining needed
+                                                                if should_retrain():
+                                                                    with st.spinner("🧠 Retraining AI..."):
+                                                                        trigger_ai_retraining()
+                                                                
+                                                                st.success(f"✅ Trade closed! P/L: ${pl:.2f} ({pl_pct:+.2f}%)")
+                                                                st.session_state[f'closing_{pred["id"]}'] = False
+                                                                time.sleep(1)
+                                                                st.rerun()
+                                                            else:
+                                                                st.error("❌ Failed to close trade")
+                                                        except Exception as e:
+                                                            st.error(f"❌ Error: {str(e)}")
+                                                
+                                                if cancel:
                                                     st.session_state[f'closing_{pred["id"]}'] = False
-                                                    time.sleep(1)
                                                     st.rerun()
-                                                else:
-                                                    st.error("❌ Failed to close trade")
-                                            
-                                            if cancel:
-                                                st.session_state[f'closing_{pred["id"]}'] = False
-                                                st.rerun()
                                 else:
-                                    st.caption("Closed" if pred['status'] == 'completed' else "Neutral")
+                                    st.caption("Closed")
                             
                             st.markdown("---")
                 else:
