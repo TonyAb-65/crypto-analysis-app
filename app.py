@@ -69,6 +69,95 @@ st.sidebar.header("⚙️ Configuration")
 
 debug_mode = st.sidebar.checkbox("🔧 Debug Mode", value=False, help="Show detailed API information")
 
+# ==================== TOP MOVERS ====================
+show_market_movers = st.sidebar.checkbox("📈 Show Top Movers", value=False,
+                                        help="Display today's top gainers and losers")
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_market_movers():
+    """Get top movers from popular cryptocurrencies"""
+    from data_api import get_retry_session
+    
+    popular_symbols = ['BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'MATIC', 'DOT', 'AVAX']
+    movers = []
+    
+    binance_failed = False
+    for symbol_temp in popular_symbols:
+        try:
+            url = "https://api.binance.com/api/v3/ticker/24hr"
+            params = {"symbol": f"{symbol_temp}USDT"}
+            response = get_retry_session().get(url, params=params, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                price_change_pct = float(data['priceChangePercent'])
+                current_price_temp = float(data['lastPrice'])
+                volume_temp = float(data['volume'])
+                
+                movers.append({
+                    'Symbol': symbol_temp,
+                    'Price': current_price_temp,
+                    'Change %': price_change_pct,
+                    'Volume': volume_temp
+                })
+            else:
+                binance_failed = True
+                break
+        except:
+            binance_failed = True
+            break
+    
+    if binance_failed or len(movers) == 0:
+        movers = []
+        for symbol_temp in popular_symbols:
+            try:
+                url = "https://www.okx.com/api/v5/market/ticker"
+                params = {"instId": f"{symbol_temp}-USDT"}
+                response = get_retry_session().get(url, params=params, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('code') == '0' and len(data.get('data', [])) > 0:
+                        ticker = data['data'][0]
+                        current_price_temp = float(ticker['last'])
+                        open_24h = float(ticker['open24h'])
+                        price_change_pct = ((current_price_temp - open_24h) / open_24h) * 100
+                        volume_temp = float(ticker['vol24h'])
+                        
+                        movers.append({
+                            'Symbol': symbol_temp,
+                            'Price': current_price_temp,
+                            'Change %': price_change_pct,
+                            'Volume': volume_temp
+                        })
+            except:
+                continue
+    
+    if movers:
+        df_movers = pd.DataFrame(movers)
+        df_movers = df_movers.sort_values('Change %', ascending=False)
+        return df_movers
+    return None
+
+if show_market_movers:
+    with st.sidebar:
+        movers_df = get_market_movers()
+        
+        if movers_df is not None and len(movers_df) > 0:
+            st.markdown("#### 📈 Top Gainers")
+            top_gainers = movers_df.head(3)
+            for _, row in top_gainers.iterrows():
+                delta = f"+{row['Change %']:.2f}%"
+                st.metric(row['Symbol'], f"${row['Price']:,.2f}", delta)
+            
+            st.markdown("#### 📉 Top Losers")
+            top_losers = movers_df.tail(3).sort_values('Change %')
+            for _, row in top_losers.iterrows():
+                delta = f"{row['Change %']:.2f}%"
+                st.metric(row['Symbol'], f"${row['Price']:,.2f}", delta)
+        else:
+            st.warning("Unable to load market movers")
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💾 Database Status")
 try:
@@ -788,6 +877,105 @@ if df is not None and len(df) > 0:
         )
         
         st.plotly_chart(fig, use_container_width=True)
+        
+        # ==================== ADVANCED INDICATORS DISPLAY ====================
+        st.markdown("---")
+        st.markdown("### 🆕 Advanced Technical Indicators")
+        
+        indicator_cols = st.columns(3)
+        col_idx = 0
+        
+        if use_obv and 'obv' in df.columns:
+            with indicator_cols[col_idx % 3]:
+                obv_current = df['obv'].iloc[-1]
+                obv_prev = df['obv'].iloc[-5] if len(df) > 5 else obv_current
+                obv_change = obv_current - obv_prev
+                
+                if obv_current < 0:
+                    pressure_type = "Selling"
+                else:
+                    pressure_type = "Buying"
+                
+                if obv_change > 0:
+                    if obv_current < 0:
+                        momentum = "Decreasing"
+                        momentum_emoji = "📊"
+                        trend_color = "normal"
+                    else:
+                        momentum = "Increasing"
+                        momentum_emoji = "📈"
+                        trend_color = "normal"
+                elif obv_change < 0:
+                    if obv_current < 0:
+                        momentum = "Increasing"
+                        momentum_emoji = "📉"
+                        trend_color = "inverse"
+                    else:
+                        momentum = "Decreasing"
+                        momentum_emoji = "📊"
+                        trend_color = "inverse"
+                else:
+                    momentum = "Flat"
+                    momentum_emoji = "➡️"
+                    trend_color = "off"
+                
+                obv_status = f"{momentum_emoji} {pressure_type} - {momentum}"
+                
+                st.metric("OBV (Volume Flow)", 
+                         f"{obv_current:,.0f}",
+                         obv_status,
+                         delta_color=trend_color)
+                st.caption("Tracks cumulative buying/selling pressure")
+            col_idx += 1
+        
+        if use_mfi and 'mfi' in df.columns:
+            with indicator_cols[col_idx % 3]:
+                mfi_current = df['mfi'].iloc[-1]
+                mfi_status = "🔴 Overbought" if mfi_current > 80 else "🟢 Oversold" if mfi_current < 20 else "⚪ Neutral"
+                
+                st.metric("MFI (Money Flow)", 
+                         f"{mfi_current:.1f}",
+                         mfi_status)
+                st.caption("Volume-weighted RSI")
+            col_idx += 1
+        
+        if use_adx and 'adx' in df.columns:
+            with indicator_cols[col_idx % 3]:
+                adx_current = df['adx'].iloc[-1]
+                plus_di = df['plus_di'].iloc[-1]
+                minus_di = df['minus_di'].iloc[-1]
+                
+                trend_strength = "💪 Strong" if adx_current > 25 else "😐 Weak"
+                trend_dir = "🟢 Up" if plus_di > minus_di else "🔴 Down"
+                
+                st.metric("ADX (Trend Strength)", 
+                         f"{adx_current:.1f}",
+                         f"{trend_strength} | {trend_dir}")
+                st.caption(f"+DI: {plus_di:.1f} | -DI: {minus_di:.1f}")
+            col_idx += 1
+        
+        if use_stoch and 'stoch_k' in df.columns:
+            with indicator_cols[col_idx % 3]:
+                stoch_k = df['stoch_k'].iloc[-1]
+                stoch_d = df['stoch_d'].iloc[-1]
+                stoch_status = "🔴 Overbought" if stoch_k > 80 else "🟢 Oversold" if stoch_k < 20 else "⚪ Neutral"
+                
+                st.metric("Stochastic", 
+                         f"{stoch_k:.1f}",
+                         stoch_status)
+                st.caption(f"%K: {stoch_k:.1f} | %D: {stoch_d:.1f}")
+            col_idx += 1
+        
+        if use_cci and 'cci' in df.columns:
+            with indicator_cols[col_idx % 3]:
+                cci_current = df['cci'].iloc[-1]
+                cci_status = "🔴 Overbought" if cci_current > 100 else "🟢 Oversold" if cci_current < -100 else "⚪ Neutral"
+                
+                st.metric("CCI (Cyclical)", 
+                         f"{cci_current:.1f}",
+                         cci_status)
+                st.caption("Commodity Channel Index")
+            col_idx += 1
         
         # ==================== TRADE TRACKING TABLE ====================
         if show_learning_dashboard:
