@@ -1884,7 +1884,7 @@ def fetch_data_for_timeframe(symbol_param, asset_type_param, timeframe_hours):
 def analyze_single_timeframe(df, symbol):
     """
     Analyze a single timeframe and return BULLISH/BEARISH/NEUTRAL
-    Simplified consultant meeting for multi-timeframe analysis
+    Uses NEW C1/C2 logic: confirmed reversals only
     """
     
     if df is None or len(df) < 50:
@@ -1894,32 +1894,38 @@ def analyze_single_timeframe(df, symbol):
     if 'rsi' not in df.columns:
         df = calculate_technical_indicators(df)
     
-    # Run consultants (simplified)
+    # Run consultants with NEW logic
     c1 = consultant_c1_pattern_structure(df, symbol)
     c2 = consultant_c2_trend_momentum(df, symbol, c1_result=c1)
     
-    # Simple vote
+    # NEW VOTING LOGIC - matches main committee logic
     bullish_votes = 0
     bearish_votes = 0
     
-    if c1['signal'] == 'BULLISH':
-        bullish_votes += c1['strength']
-    elif c1['signal'] == 'BEARISH':
-        bearish_votes += c1['strength']
+    # C1: Check if at support/resistance
+    if c1['signal'] in ['AT_SUPPORT', 'NEAR_SUPPORT']:
+        # At support - check if C2 confirms bullish reversal
+        if c2.get('reversal_confirmed') and 'BULLISH' in c2['signal']:
+            bullish_votes += c1['strength']
     
-    if c2['signal'] == 'BULLISH':
+    elif c1['signal'] in ['AT_RESISTANCE', 'NEAR_RESISTANCE']:
+        # At resistance - check if C2 confirms bearish reversal
+        if c2.get('reversal_confirmed') and 'BEARISH' in c2['signal']:
+            bearish_votes += c1['strength']
+    
+    # C2: Add momentum votes (mid-range or additional confirmation)
+    if 'BULLISH' in c2['signal']:
         bullish_votes += c2['strength']
-    elif c2['signal'] == 'BEARISH':
+    elif 'BEARISH' in c2['signal']:
         bearish_votes += c2['strength']
     
-    # CHANGED: More lenient threshold (was 3, now 2)
+    # Decision
     if bullish_votes > bearish_votes + 2:
         return "BULLISH", bullish_votes, f"C1: {c1['signal']}, C2: {c2['signal']}"
     elif bearish_votes > bullish_votes + 2:
         return "BEARISH", bearish_votes, f"C1: {c1['signal']}, C2: {c2['signal']}"
     else:
         return "NEUTRAL", 0, f"C1: {c1['signal']}, C2: {c2['signal']}"
-
 
 def multi_timeframe_analysis(symbol, asset_type):
     """
