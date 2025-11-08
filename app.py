@@ -2937,9 +2937,12 @@ def calculate_technical_indicators(df):
         df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
         df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
         
-        df['volatility'] = df['close'].pct_change().rolling(window=20).std()
+        df['volatility'] = df['close'].rolling(window=20).std()
         
-        df['obv'] = calculate_obv(df)
+        # OBV: Only meaningful for assets with real volume (not forex)
+        # Forex has no centralized exchange, so volume is just tick volume (unreliable)
+        df['obv'] = calculate_obv(df)  # Calculate but will be unreliable for forex
+        
         df['mfi'] = calculate_mfi(df, 14)
         df['adx'], df['plus_di'], df['minus_di'] = calculate_adx(df, 14)
         df['stoch_k'], df['stoch_d'] = calculate_stochastic(df, 14, 3)
@@ -2949,7 +2952,6 @@ def calculate_technical_indicators(df):
     except Exception as e:
         st.error(f"Error calculating indicators: {str(e)}")
         return df
-
 #==================== AI MODEL TRAINING ====================
 
 def analyze_rsi_bounce_patterns(df):
