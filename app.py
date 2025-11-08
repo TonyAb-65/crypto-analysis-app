@@ -897,7 +897,7 @@ if df is not None and len(df) > 0:
                                                 st.session_state[f'closing_{pred["id"]}'] = False
                                                 st.rerun()
                                 else:
-                                    st.caption("Closed" if pred['is_closed'] else "Neutral")
+                                    st.caption("Closed" if pred['status'] == 'completed' else "Neutral")
                             
                             st.markdown("---")
                 else:
