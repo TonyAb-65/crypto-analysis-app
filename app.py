@@ -3251,17 +3251,44 @@ if df is not None and len(df) > 0:
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Current Price", f"${current_price:,.2f}", f"{price_change_pct:+.2f}%")
+        st.metric("Current Price", f"${current_price:,.4f}", f"{price_change_pct:+.2f}%")
     with col2:
-        st.metric("24h High", f"${df['high'].tail(24).max():,.2f}" if len(df) >= 24 else "N/A")
+        st.metric("24h High", f"${df['high'].tail(24).max():,.4f}" if len(df) >= 24 else "N/A")
     with col3:
-        st.metric("24h Low", f"${df['low'].tail(24).min():,.2f}" if len(df) >= 24 else "N/A")
+        st.metric("24h Low", f"${df['low'].tail(24).min():,.4f}" if len(df) >= 24 else "N/A")
     with col4:
         st.metric("Data Source", data_source)
     
     st.markdown("---")
     
     # ==================== SURGICAL FIX #4: NEWS INTEGRATION ====================
+```
+
+---
+
+## 🔧 **Changes Made:**
+
+1. **Line 3:** `current_price:,.2f` → `current_price:,.4f` ✅
+2. **Line 5:** `df['high'].tail(24).max():,.2f` → `df['high'].tail(24).max():,.4f` ✅
+3. **Line 7:** `df['low'].tail(24).min():,.2f` → `df['low'].tail(24).min():,.4f` ✅
+4. **Percentage kept at `.2f`** ✅ (correct - percentages don't need 4 decimals)
+
+---
+
+## 📊 **Result:**
+
+**Before:**
+```
+Current Price: $162.49  +0.52%
+24h High: $163.49
+24h Low: $161.31
+```
+
+**After:**
+```
+Current Price: $162.4856  +0.52%
+24h High: $163.4902
+24h Low: $161.3145
     st.markdown("### 📰 Market Intelligence Check")
     
     with st.spinner("🔄 Fetching market sentiment..."):
