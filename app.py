@@ -1519,19 +1519,19 @@ def consultant_c1_pattern_structure(df, symbol):
             signal = "AT_RESISTANCE"
             if level_info['strength'] == 'STRONG':
                 strength = 9
-                reasoning.append(f"At STRONG resistance ${level_info['price']:,.0f} ({level_info['touches']} rejections)")
+                reasoning.append(f"At STRONG resistance ${level_info['price']:,.4f} ({level_info['touches']} rejections)")
             else:
                 strength = 7
-                reasoning.append(f"At resistance ${level_info['price']:,.0f} ({level_info['touches']} tests)")
+                reasoning.append(f"At resistance ${level_info['price']:,.4f} ({level_info['touches']} tests)")
         
         elif detected_level_type == 'SUPPORT':
             signal = "AT_SUPPORT"
             if level_info['strength'] == 'STRONG':
                 strength = 9
-                reasoning.append(f"At STRONG support ${level_info['price']:,.0f} ({level_info['touches']} bounces)")
+                reasoning.append(f"At STRONG support ${level_info['price']:,.4f} ({level_info['touches']} bounces)")
             else:
                 strength = 7
-                reasoning.append(f"At support ${level_info['price']:,.0f} ({level_info['touches']} tests)")
+                reasoning.append(f"At support ${level_info['price']:,.4f} ({level_info['touches']} tests)")
     
     # If not at key level, check proximity
     else:
@@ -1542,7 +1542,7 @@ def consultant_c1_pattern_structure(df, symbol):
             if distance_pct < 2:  # Very close to resistance
                 signal = "NEAR_RESISTANCE"
                 strength = 6
-                reasoning.append(f"Near resistance ${next_r['price']:,.0f}")
+                reasoning.append(f"Near resistance ${next_r['price']:,.4f}")
         
         if targets['next_support']:
             next_s = targets['next_support']
@@ -1551,19 +1551,19 @@ def consultant_c1_pattern_structure(df, symbol):
             if distance_pct < 2:  # Very close to support
                 signal = "NEAR_SUPPORT"
                 strength = 6
-                reasoning.append(f"Near support ${next_s['price']:,.0f}")
+                reasoning.append(f"Near support ${next_s['price']:,.4f}")
     
     # Build detailed reasoning with targets
     reasoning_text = " ".join(reasoning) if reasoning else "neutral"
     
     # Add price targets to reasoning
     if targets['next_resistance']:
-        reasoning_text += f" | Next R: ${targets['next_resistance']['price']:,.0f}"
+        reasoning_text += f" | Next R: ${targets['next_resistance']['price']:,.4f}"
     if targets['next_support']:
-        reasoning_text += f" | Next S: ${targets['next_support']['price']:,.0f}"
+        reasoning_text += f" | Next S: ${targets['next_support']['price']:,.4f}"
     
     return {
-        "signal": signal,  # Now returns: AT_SUPPORT, AT_RESISTANCE, NEAR_SUPPORT, NEAR_RESISTANCE, or MID_RANGE
+        "signal": signal,
         "strength": strength,
         "reasoning": reasoning_text,
         "targets": targets,
@@ -1777,7 +1777,7 @@ def consultant_c3_risk_warnings(df, symbol, warnings):
         reasoning = f"1 warning ({warning_types[0]})"
     elif warning_count == 2:
         signal = "HIGH_RISK"
-        strength = 5  # CHANGED: Increased from 3 to 5 (less harsh)
+        strength = 5
         reasoning = f"2 warnings ({','.join(warning_types)})"
     else:
         signal = "EXTREME_RISK"
@@ -1800,7 +1800,7 @@ def consultant_c4_news_sentiment(symbol, news_data=None):
         return {
             "signal": "NO_NEWS",
             "strength": 5,
-            "weight": 5,  # Low weight when no news
+            "weight": 5,
             "reasoning": "No significant news"
         }
     
@@ -1812,30 +1812,28 @@ def consultant_c4_news_sentiment(symbol, news_data=None):
     has_major = any(keyword in str(news_data).lower() for keyword in major_keywords)
     
     if has_critical:
-        # Critical news - very high weight
         sentiment = news_data.get('sentiment', 'neutral')
         return {
             "signal": "BULLISH" if sentiment == 'positive' else "BEARISH",
             "strength": 9,
-            "weight": 70,  # Critical news gets 70% weight
+            "weight": 70,
             "reasoning": "CRITICAL_NEWS_OVERRIDE"
         }
     elif has_major:
-        # Major news - moderate weight
         sentiment = news_data.get('sentiment', 'neutral')
         return {
             "signal": "BULLISH" if sentiment == 'positive' else "BEARISH",
             "strength": 7,
-            "weight": 40,  # Major news gets 40% weight
+            "weight": 40,
             "reasoning": "MAJOR_NEWS_IMPACT"
         }
     else:
-        # Regular news - ignored
         return {
             "signal": "NO_NEWS",
             "strength": 5,
-            "weight": 5,  # Regular news basically ignored
+            "weight": 5,
             "reasoning": "Regular news (ignored)"
+        }
         }
 
 # ==================== MULTI-TIMEFRAME ANALYSIS ====================
