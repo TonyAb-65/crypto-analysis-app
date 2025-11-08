@@ -356,6 +356,7 @@ def save_trade_result(prediction_id, entry_price, exit_price, profit_loss,
     """
     Save trade result AND update AI learning
     This function now includes automatic learning from trade outcomes!
+    Also triggers periodic revalidation every 25 trades.
     """
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
@@ -376,16 +377,131 @@ def save_trade_result(prediction_id, entry_price, exit_price, profit_loss,
         UPDATE predictions SET status = 'completed' WHERE id = ?
     ''', (prediction_id,))
     
-    # ✅ NEW: AI LEARNING - Evaluate indicators and update weights
+    # ✅ INCREMENTAL LEARNING - Evaluate this single trade
     trade_won = profit_loss > 0
     evaluate_and_learn_from_trade(prediction_id, trade_won, cursor)
+    
+    # ✅ PERIODIC REVALIDATION - Every 25 trades, do full review
+    cursor.execute("SELECT COUNT(*) FROM trade_results")
+    total_trades = cursor.fetchone()[0]
+    
+    if total_trades % 25 == 0:  # Every 25 trades
+        print(f"\n🔄 MILESTONE: {total_trades} trades completed!")
+        print(f"📊 Running full AI learning revalidation...")
+        
+        # Revalidate all weights from scratch
+        revalidate_all_indicators(cursor)
+        
+        print(f"✅ Revalidation complete! Weights updated based on {total_trades} trades.")
     
     conn.commit()
     conn.close()
     
     print(f"✅ Trade saved and AI learning updated for prediction #{prediction_id}")
+    if total_trades % 25 == 0:
+        print(f"🎯 Milestone reached: {total_trades} trades! Full revalidation completed.")
     
     return True
+
+
+def revalidate_all_indicators(cursor):
+    """
+    Comprehensive revalidation of all indicators
+    Called every 25 trades for stable, accurate weights
+    """
+    # Get all completed trades with their indicators
+    cursor.execute("""
+        SELECT 
+            tr.prediction_id,
+            tr.profit_loss,
+            p.indicator_snapshot,
+            p.position_type
+        FROM trade_results tr
+        JOIN predictions p ON tr.prediction_id = p.id
+        WHERE p.status = 'completed'
+        ORDER BY tr.trade_date ASC
+    """)
+    
+    all_trades = cursor.fetchall()
+    
+    # Reset all counts
+    indicator_stats = {
+        'OBV': {'correct': 0, 'wrong': 0, 'total': 0},
+        'MFI': {'correct': 0, 'wrong': 0, 'total': 0},
+        'ADX': {'correct': 0, 'wrong': 0, 'total': 0},
+        'Stochastic': {'correct': 0, 'wrong': 0, 'total': 0},
+        'CCI': {'correct': 0, 'wrong': 0, 'total': 0}
+    }
+    
+    # Analyze each trade
+    for trade in all_trades:
+        prediction_id, profit_loss, indicator_snapshot, position_type = trade
+        trade_won = profit_loss > 0
+        
+        indicators = parse_indicator_snapshot(indicator_snapshot)
+        
+        for indicator_name in indicator_stats.keys():
+            indicator_value = indicators.get(indicator_name.lower(), indicators.get(indicator_name))
+            was_correct = evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won)
+            
+            if was_correct is not None:
+                indicator_stats[indicator_name]['total'] += 1
+                if was_correct:
+                    indicator_stats[indicator_name]['correct'] += 1
+                else:
+                    indicator_stats[indicator_name]['wrong'] += 1
+    
+    # Update database with comprehensive statistics
+    for indicator_name, stats in indicator_stats.items():
+        if stats['total'] > 0:
+            accuracy = stats['correct'] / stats['total']
+            
+            # Calculate weight based on statistical significance
+            if stats['total'] >= 50:  # High confidence (50+ samples)
+                if accuracy >= 0.65:
+                    weight = 1.0
+                elif accuracy >= 0.60:
+                    weight = 0.95
+                elif accuracy >= 0.55:
+                    weight = 0.9
+                elif accuracy >= 0.50:
+                    weight = 0.85
+                elif accuracy >= 0.45:
+                    weight = 0.7
+                else:
+                    weight = 0.5
+            elif stats['total'] >= 25:  # Medium confidence (25-49 samples)
+                if accuracy >= 0.60:
+                    weight = 1.0
+                elif accuracy >= 0.55:
+                    weight = 0.9
+                elif accuracy >= 0.50:
+                    weight = 0.85
+                elif accuracy >= 0.45:
+                    weight = 0.7
+                else:
+                    weight = 0.6
+            else:  # Low confidence (<25 samples)
+                if accuracy >= 0.60:
+                    weight = 0.95
+                elif accuracy >= 0.50:
+                    weight = 0.85
+                else:
+                    weight = 0.75
+            
+            cursor.execute("""
+                UPDATE indicator_accuracy
+                SET correct_count = ?,
+                    wrong_count = ?,
+                    accuracy_rate = ?,
+                    weight_multiplier = ?,
+                    last_updated = ?
+                WHERE indicator_name = ?
+            """, (stats['correct'], stats['wrong'], accuracy, weight, 
+                  datetime.now().isoformat(), indicator_name))
+            
+            print(f"  {indicator_name}: {stats['correct']}/{stats['total']} ({accuracy*100:.1f}%) → Weight: {weight}")
+
 
 
 def get_indicator_weights():
