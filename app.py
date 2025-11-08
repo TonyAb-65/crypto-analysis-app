@@ -542,7 +542,9 @@ if df is not None and len(df) > 0:
         st.markdown("---")
         st.markdown("### 🎯 Support & Resistance Zones")
         
-        support_zones, resistance_zones = find_support_resistance_zones(df)
+        sr_zones = find_support_resistance_zones(df)
+        support_zones = sr_zones.get('support', [])
+        resistance_zones = sr_zones.get('resistance', [])
         
         if support_zones or resistance_zones:
             col_sr1, col_sr2 = st.columns(2)
@@ -550,17 +552,23 @@ if df is not None and len(df) > 0:
             with col_sr1:
                 st.markdown("**🟢 Support Levels:**")
                 if support_zones and len(support_zones) > 0:
-                    # Handle both tuple format (level, strength) and single value format
                     for i, zone in enumerate(support_zones[:3], 1):
                         try:
-                            if isinstance(zone, (tuple, list)) and len(zone) >= 2:
-                                level, strength = zone[0], zone[1]
+                            # Handle dictionary format from find_support_resistance_zones
+                            if isinstance(zone, dict):
+                                level = zone['price']
+                                touches = zone.get('touches', 1)
+                                strength = zone.get('strength', 'MEDIUM')
+                            elif isinstance(zone, (tuple, list)) and len(zone) >= 2:
+                                level, touches = zone[0], zone[1]
+                                strength = 'STRONG' if touches >= 3 else 'MEDIUM'
                             else:
                                 level = float(zone)
-                                strength = 1.0
+                                touches = 1
+                                strength = 'MEDIUM'
                             
                             distance_pct = ((current_price - level) / current_price) * 100
-                            st.caption(f"{i}. ${level:.2f} ({distance_pct:+.1f}%) - Strength: {strength:.1f}")
+                            st.caption(f"{i}. ${level:.2f} ({distance_pct:+.1f}%) - {strength} ({touches} touches)")
                         except Exception as e:
                             if debug_mode:
                                 st.error(f"Error displaying support zone: {e}")
@@ -570,17 +578,23 @@ if df is not None and len(df) > 0:
             with col_sr2:
                 st.markdown("**🔴 Resistance Levels:**")
                 if resistance_zones and len(resistance_zones) > 0:
-                    # Handle both tuple format (level, strength) and single value format
                     for i, zone in enumerate(resistance_zones[:3], 1):
                         try:
-                            if isinstance(zone, (tuple, list)) and len(zone) >= 2:
-                                level, strength = zone[0], zone[1]
+                            # Handle dictionary format from find_support_resistance_zones
+                            if isinstance(zone, dict):
+                                level = zone['price']
+                                touches = zone.get('touches', 1)
+                                strength = zone.get('strength', 'MEDIUM')
+                            elif isinstance(zone, (tuple, list)) and len(zone) >= 2:
+                                level, touches = zone[0], zone[1]
+                                strength = 'STRONG' if touches >= 3 else 'MEDIUM'
                             else:
                                 level = float(zone)
-                                strength = 1.0
+                                touches = 1
+                                strength = 'MEDIUM'
                             
                             distance_pct = ((level - current_price) / current_price) * 100
-                            st.caption(f"{i}. ${level:.2f} ({distance_pct:+.1f}%) - Strength: {strength:.1f}")
+                            st.caption(f"{i}. ${level:.2f} ({distance_pct:+.1f}%) - {strength} ({touches} touches)")
                         except Exception as e:
                             if debug_mode:
                                 st.error(f"Error displaying resistance zone: {e}")
@@ -622,7 +636,10 @@ if df is not None and len(df) > 0:
         if support_zones and len(support_zones) > 0:
             for zone in support_zones[:3]:
                 try:
-                    if isinstance(zone, (tuple, list)) and len(zone) >= 2:
+                    # Handle dictionary format from find_support_resistance_zones
+                    if isinstance(zone, dict):
+                        level = zone['price']
+                    elif isinstance(zone, (tuple, list)) and len(zone) >= 2:
                         level = zone[0]
                     else:
                         level = float(zone)
@@ -630,19 +647,24 @@ if df is not None and len(df) > 0:
                     fig.add_hline(
                         y=level,
                         line_dash="dash",
-                        line_color="green",
-                        opacity=0.5,
+                        line_color="blue",
+                        line_width=2,
+                        opacity=0.6,
                         annotation_text=f"Support ${level:.2f}",
                         annotation_position="right",
                         row=1, col=1
                     )
-                except:
-                    pass
+                except Exception as e:
+                    if debug_mode:
+                        st.write(f"Error plotting support: {e}")
         
         if resistance_zones and len(resistance_zones) > 0:
             for zone in resistance_zones[:3]:
                 try:
-                    if isinstance(zone, (tuple, list)) and len(zone) >= 2:
+                    # Handle dictionary format from find_support_resistance_zones
+                    if isinstance(zone, dict):
+                        level = zone['price']
+                    elif isinstance(zone, (tuple, list)) and len(zone) >= 2:
                         level = zone[0]
                     else:
                         level = float(zone)
@@ -651,13 +673,15 @@ if df is not None and len(df) > 0:
                         y=level,
                         line_dash="dash",
                         line_color="red",
-                        opacity=0.5,
+                        line_width=2,
+                        opacity=0.6,
                         annotation_text=f"Resistance ${level:.2f}",
                         annotation_position="right",
                         row=1, col=1
                     )
-                except:
-                    pass
+                except Exception as e:
+                    if debug_mode:
+                        st.write(f"Error plotting resistance: {e}")
         
         # Add Entry/Target/Stop Loss if not NEUTRAL
         if meeting_result['position'] != 'NEUTRAL':
