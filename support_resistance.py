@@ -225,3 +225,67 @@ def calculate_risk_reward(entry_price, target_price, stop_loss):
     reward = abs(target_price - entry_price)
     
     return reward / risk if risk > 0 else 0
+
+
+def check_support_resistance_barriers(df, predicted_price, current_price):
+    """Check if predicted price needs to break through major support/resistance levels"""
+    high_20 = df['high'].tail(20).max()
+    low_20 = df['low'].tail(20).min()
+    
+    recent_highs = df['high'].tail(50).nlargest(5).mean()
+    recent_lows = df['low'].tail(50).nsmallest(5).mean()
+    
+    barriers = []
+    
+    if current_price < predicted_price:
+        if predicted_price > high_20:
+            barriers.append(('resistance', high_20, abs(predicted_price - high_20)))
+        if predicted_price > recent_highs:
+            barriers.append(('strong_resistance', recent_highs, abs(predicted_price - recent_highs)))
+    else:
+        if predicted_price < low_20:
+            barriers.append(('support', low_20, abs(predicted_price - low_20)))
+        if predicted_price < recent_lows:
+            barriers.append(('strong_support', recent_lows, abs(predicted_price - recent_lows)))
+    
+    return barriers
+
+
+def analyze_timeframe_volatility(df, predicted_change_pct, timeframe_hours):
+    """Check if the predicted change is realistic for the given timeframe"""
+    recent_changes = df['close'].pct_change().tail(50)
+    
+    avg_hourly_change = abs(recent_changes).mean() * 100
+    max_hourly_change = abs(recent_changes).max() * 100
+    
+    predicted_hourly_rate = abs(predicted_change_pct) / timeframe_hours
+    
+    is_realistic = predicted_hourly_rate <= (avg_hourly_change * 2)
+    
+    volatility_context = {
+        'avg_hourly_change': avg_hourly_change,
+        'max_hourly_change': max_hourly_change,
+        'predicted_hourly_rate': predicted_hourly_rate,
+        'is_realistic': is_realistic
+    }
+    
+    return volatility_context
+
+
+def adjust_confidence_for_barriers(base_confidence, barriers, volatility_context):
+    """Adjust AI confidence based on barriers and volatility"""
+    adjusted_confidence = base_confidence
+    
+    for barrier_type, price_level, distance in barriers:
+        if barrier_type == 'strong_resistance' or barrier_type == 'strong_support':
+            adjusted_confidence *= 0.7
+        else:
+            adjusted_confidence *= 0.85
+    
+    if not volatility_context['is_realistic']:
+        adjusted_confidence *= 0.6
+    
+    adjusted_confidence = max(adjusted_confidence, 30.0)
+    adjusted_confidence = min(adjusted_confidence, 95.0)
+    
+    return adjusted_confidence
