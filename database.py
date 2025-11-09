@@ -502,13 +502,20 @@ def revalidate_all_indicators(cursor):
         prediction_id, profit_loss, indicator_snapshot, position_type = trade
         trade_won = profit_loss > 0
         
-        indicators = parse_indicator_snapshot(indicator_snapshot)
+        try:
+            indicators = parse_indicator_snapshot(indicator_snapshot)
+        except Exception as e:
+            print(f"  ⚠️ Error parsing snapshot for trade {prediction_id}: {e}")
+            indicators = {}
         
         # DEBUG: Print first trade's indicators
-        if trade == all_trades[0]:
-            print(f"  📊 Sample snapshot from first trade:")
-            print(f"     Raw: {str(indicator_snapshot)[:100]}...")
-            print(f"     Parsed: {indicators}")
+        try:
+            if trade == all_trades[0]:
+                print(f"  📊 Sample snapshot from first trade:")
+                print(f"     Raw: {str(indicator_snapshot)[:100] if indicator_snapshot else 'None'}...")
+                print(f"     Parsed: {indicators}")
+        except Exception as e:
+            print(f"  ⚠️ Debug print error: {e}")
         
         for indicator_name in indicator_stats.keys():
             # Try multiple possible keys (case-insensitive, with/without spaces/underscores)
@@ -529,10 +536,13 @@ def revalidate_all_indicators(cursor):
             
             # If still not found, try case-insensitive search
             if indicator_value is None:
-                for key in indicators.keys():
-                    if key.lower() == indicator_name.lower().replace('_', '').replace(' ', ''):
-                        indicator_value = indicators[key]
-                        break
+                try:
+                    for key in indicators.keys():
+                        if key.lower() == indicator_name.lower().replace('_', '').replace(' ', ''):
+                            indicator_value = indicators[key]
+                            break
+                except:
+                    pass
             
             was_correct = evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won)
             
@@ -593,15 +603,6 @@ def revalidate_all_indicators(cursor):
                   datetime.now().isoformat(), indicator_name))
             
             print(f"  {indicator_name}: {stats['correct']}/{stats['total']} ({accuracy*100:.1f}%) → Weight: {weight}")
-    
-    # Commit changes and close connection
-    conn.commit()
-    conn.close()
-    
-    learned_count = len(all_trades)
-    print(f"✅ AI Learning: Analyzed {learned_count} past trades!")
-    return learned_count
-
 
 
 def get_indicator_weights():
