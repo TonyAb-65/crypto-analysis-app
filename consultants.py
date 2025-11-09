@@ -688,11 +688,22 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, asset_type=None
             position = "LONG"
             confidence = min((c1_strength + c2_strength) / 20 * 100, 90)
             reasoning_parts.append(f"✅ Confirmed bullish reversal at support")
-        elif c2_signal == 'BEARISH' and c2_strength >= 7:
-            # STRONG BEARISH = BREAKDOWN ATTEMPT
-            position = "SHORT"
-            confidence = c2_strength * 10 * 0.8  # 20% penalty for support
-            reasoning_parts.append(f"📉 Breakdown attempt at support (high confidence)")
+        elif c2_signal == 'BEARISH' and c2_strength >= 8:  # Higher threshold (was 7)
+            # VERY STRONG BEARISH = POTENTIAL BREAKDOWN
+            # Additional safety checks:
+            obv_analysis = c2.get('obv_analysis', {})
+            obv_trend = obv_analysis.get('trend', 'STABLE')
+            
+            # Require OBV confirmation for breakdowns
+            if obv_trend == "DETERIORATING":
+                position = "SHORT"
+                confidence = c2_strength * 10 * 0.7  # 30% penalty (was 20%)
+                reasoning_parts.append(f"📉 Strong breakdown attempt (OBV confirms)")
+            else:
+                # OBV not supporting - TOO RISKY
+                position = "NEUTRAL"
+                confidence = 0
+                reasoning_parts.append(f"⚠️ At support, momentum weak but OBV not confirming - WAIT")
         else:
             # NO CONFIRMATION - WAIT
             position = "NEUTRAL"
@@ -706,11 +717,22 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, asset_type=None
             position = "SHORT"
             confidence = min((c1_strength + c2_strength) / 20 * 100, 90)
             reasoning_parts.append(f"✅ Confirmed bearish reversal at resistance")
-        elif c2_signal == 'BULLISH' and c2_strength >= 7:
-            # STRONG BULLISH = BREAKOUT ATTEMPT
-            position = "LONG"
-            confidence = c2_strength * 10 * 0.8  # 20% penalty for resistance
-            reasoning_parts.append(f"🚀 Breakout attempt at resistance (high confidence)")
+        elif c2_signal == 'BULLISH' and c2_strength >= 8:  # Higher threshold (was 7)
+            # VERY STRONG BULLISH = POTENTIAL BREAKOUT
+            # Additional safety checks:
+            obv_analysis = c2.get('obv_analysis', {})
+            obv_trend = obv_analysis.get('trend', 'STABLE')
+            
+            # Require OBV confirmation for breakouts
+            if obv_trend == "IMPROVING":
+                position = "LONG"
+                confidence = c2_strength * 10 * 0.7  # 30% penalty (was 20%)
+                reasoning_parts.append(f"🚀 Strong breakout attempt (OBV confirms)")
+            else:
+                # OBV not supporting - TOO RISKY
+                position = "NEUTRAL"
+                confidence = 0
+                reasoning_parts.append(f"⚠️ At resistance, momentum strong but OBV weak - WAIT")
         else:
             # NO CONFIRMATION - WAIT
             position = "NEUTRAL"
