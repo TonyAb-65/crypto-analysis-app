@@ -247,11 +247,15 @@ def consultant_c1_pattern_structure(df, symbol):
 
 # ==================== CONSULTANT C2: MOMENTUM CONFIRMATION ====================
 
-def consultant_c2_trend_momentum(df, symbol, c1_result=None):
+def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
     """
     C2: Momentum Confirmation Analyst
     Focus: Confirms if momentum is ACTUALLY reversing at support/resistance
     Uses: RSI reversal patterns, Volume spikes, Historical success rate
+    
+    Args:
+        timeframe_hours: Trading timeframe in hours (1 for 1H, 4 for 4H, etc.)
+                        Used to dynamically adjust OBV lookback period
     """
     if df is None or len(df) < 50:
         return {
@@ -269,32 +273,50 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None):
     macd = latest.get('macd', 0)
     macd_signal = latest.get('macd_signal', 0)
     
-    # === NEW: OBV HISTORY TRACKING ===
+    # === NEW: DYNAMIC OBV HISTORY TRACKING BASED ON TIMEFRAME ===
+    # Match OBV lookback to trading timeframe for relevance
+    
+    # Calculate candle lookbacks based on timeframe
+    # For recent trend: Look back 1-2 candles
+    # For medium trend: Look back 4-5 candles  
+    # For overall trend: Look back 20-25 candles
+    
+    recent_candles = 2  # Always 1-2 candles for recent
+    medium_candles = min(5, len(df) - 1)  # 4-5 candles for medium
+    overall_candles = min(25, len(df) - 1)  # 20-25 candles for overall
+    
     obv_now = df['obv'].iloc[-1] if 'obv' in df.columns else 0
-    obv_1h = df['obv'].iloc[-2] if len(df) > 1 and 'obv' in df.columns else obv_now
-    obv_4h = df['obv'].iloc[-5] if len(df) > 4 and 'obv' in df.columns else obv_now
-    obv_24h = df['obv'].iloc[-25] if len(df) > 24 and 'obv' in df.columns else obv_now
+    obv_recent = df['obv'].iloc[-recent_candles] if len(df) > recent_candles and 'obv' in df.columns else obv_now
+    obv_medium = df['obv'].iloc[-medium_candles] if len(df) > medium_candles and 'obv' in df.columns else obv_now
+    obv_overall = df['obv'].iloc[-overall_candles] if len(df) > overall_candles and 'obv' in df.columns else obv_now
     
     # Calculate OBV changes
-    obv_change_4h = obv_now - obv_4h
-    obv_change_24h = obv_now - obv_24h
+    obv_change_recent = obv_now - obv_recent  # Last 1-2 candles
+    obv_change_medium = obv_now - obv_medium  # Last 4-5 candles
+    obv_change_overall = obv_now - obv_overall  # Last 20-25 candles
     
-    # Determine OBV trend
-    if obv_change_4h > 0 and obv_change_24h > 0:
+    # Determine OBV trend (using RECENT for timing decisions!)
+    if obv_change_recent > 0 and obv_change_medium > 0:
         obv_trend = "IMPROVING"
         obv_trend_score = +2
-    elif obv_change_4h < 0 and obv_change_24h < 0:
+    elif obv_change_recent < 0 and obv_change_medium < 0:
         obv_trend = "DETERIORATING"
         obv_trend_score = -2
     else:
         obv_trend = "STABLE"
         obv_trend_score = 0
     
-    # Measure OBV velocity (rate of change)
-    obv_velocity_per_hour = abs(obv_change_24h) / 24 if obv_change_24h != 0 else 0
-    if obv_velocity_per_hour > 2000:
+    # Measure OBV velocity (rate of change per candle)
+    obv_velocity_per_candle = abs(obv_change_medium) / medium_candles if medium_candles > 0 else 0
+    
+    # Velocity thresholds scale with timeframe
+    # Smaller timeframes = smaller absolute changes per candle
+    velocity_threshold_fast = 2000 / max(timeframe_hours, 0.25)  # Scale down for smaller timeframes
+    velocity_threshold_medium = 800 / max(timeframe_hours, 0.25)
+    
+    if obv_velocity_per_candle > velocity_threshold_fast:
         obv_velocity = "FAST"
-    elif obv_velocity_per_hour > 800:
+    elif obv_velocity_per_candle > velocity_threshold_medium:
         obv_velocity = "MEDIUM"
     else:
         obv_velocity = "SLOW"
@@ -345,10 +367,15 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None):
             # Check #5: OBV Trend Support (NEW!)
             if obv_trend == "IMPROVING":
                 confirmation_score += 2
-                reasoning.append(f"OBV improving: {obv_4h:.0f}→{obv_now:.0f}")
+                reasoning.append(f"✅ OBV recovering: {obv_medium:.0f}→{obv_now:.0f} (buyers catching up)")
             elif obv_trend == "DETERIORATING" and obv_velocity == "FAST":
                 confirmation_score -= 2
-                reasoning.append(f"⚠️ OBV collapsing fast ({obv_velocity})")
+                # Clarify: Getting MORE negative (worse)
+                reasoning.append(f"⚠️ OBV worsening: {obv_medium:.0f}→{obv_now:.0f} (selling accelerating)")
+            elif obv_trend == "DETERIORATING":
+                # Mention but less severe if slow
+                reasoning.append(f"⚪ OBV weakening: {obv_medium:.0f}→{obv_now:.0f} (recent trend)")
+
             
             # Decision for Support
             if confirmation_score >= 6:
@@ -400,10 +427,11 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None):
             # Check #5: OBV Trend Support (NEW!)
             if obv_trend == "DETERIORATING":
                 confirmation_score += 2
-                reasoning.append(f"OBV declining: {obv_4h:.0f}→{obv_now:.0f}")
+                reasoning.append(f"✅ OBV declining: {obv_medium:.0f}→{obv_now:.0f} (selling pressure)")
             elif obv_trend == "IMPROVING" and obv_velocity == "FAST":
                 confirmation_score -= 2
-                reasoning.append(f"⚠️ OBV rising fast ({obv_velocity})")
+                # Getting LESS negative (better) - contradicts bearish
+                reasoning.append(f"⚠️ OBV recovering: {obv_medium:.0f}→{obv_now:.0f} (buyers entering)")
             
             # Decision for Resistance
             if confirmation_score >= 6:
@@ -497,13 +525,15 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None):
         "confirmation_score": confirmation_score,
         "obv_analysis": {
             "current": float(obv_now),
-            "1h_ago": float(obv_1h),
-            "4h_ago": float(obv_4h),
-            "24h_ago": float(obv_24h),
-            "change_4h": float(obv_change_4h),
-            "change_24h": float(obv_change_24h),
+            "recent": float(obv_recent),
+            "medium": float(obv_medium),
+            "overall": float(obv_overall),
+            "change_recent": float(obv_change_recent),
+            "change_medium": float(obv_change_medium),
+            "change_overall": float(obv_change_overall),
             "trend": obv_trend,
-            "velocity": obv_velocity
+            "velocity": obv_velocity,
+            "timeframe_hours": timeframe_hours
         }
     }
 
@@ -799,14 +829,26 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, asset_type=None
 
 # ==================== MAIN ENTRY POINT ====================
 
-def run_consultant_meeting(symbol, asset_type, current_price, warning_details):
+def run_consultant_meeting(symbol, asset_type, current_price, warning_details, timeframe_hours=1):
     """
     Main function called by app.py
     Runs the full consultant meeting process
+    
+    Args:
+        timeframe_hours: Trading timeframe in hours (default 1 for 1H)
     """
     
-    # Fetch 1H data for analysis
-    timeframe_config = {'binance': '1h', 'okx': '1H', 'limit': 100}
+    # Map timeframe hours to API format
+    timeframe_map = {
+        0.0833: {'binance': '5m', 'okx': '5m', 'limit': 100},  # 5 minutes
+        0.25: {'binance': '15m', 'okx': '15m', 'limit': 100},  # 15 minutes
+        0.5: {'binance': '30m', 'okx': '30m', 'limit': 100},   # 30 minutes
+        1: {'binance': '1h', 'okx': '1H', 'limit': 100},       # 1 hour
+        4: {'binance': '4h', 'okx': '4H', 'limit': 100},       # 4 hours
+        24: {'binance': '1d', 'okx': '1D', 'limit': 100}       # 1 day
+    }
+    
+    timeframe_config = timeframe_map.get(timeframe_hours, {'binance': '1h', 'okx': '1H', 'limit': 100})
     df, source = fetch_data(symbol, asset_type, timeframe_config)
     
     if df is None or len(df) < 50:
@@ -824,7 +866,7 @@ def run_consultant_meeting(symbol, asset_type, current_price, warning_details):
     
     # Run all 4 consultants
     c1_result = consultant_c1_pattern_structure(df, symbol)
-    c2_result = consultant_c2_trend_momentum(df, symbol, c1_result)  # Pass C1 result!
+    c2_result = consultant_c2_trend_momentum(df, symbol, c1_result, timeframe_hours)  # Pass C1 result and timeframe!
     c3_result = consultant_c3_risk_warnings(df, symbol, warning_details)
     c4_result = consultant_c4_news_sentiment(symbol, news_data=None)
     
