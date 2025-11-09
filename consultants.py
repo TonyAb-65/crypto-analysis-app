@@ -323,6 +323,47 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
     else:
         obv_velocity = "SLOW"
     
+    # === NEW: WHALE/SMART MONEY DETECTION ===
+    # Professional whale detection based on volume spikes and OBV divergence
+    
+    avg_volume_20 = df['volume'].tail(20).mean() if len(df) >= 20 else volume
+    volume_ratio = volume / avg_volume_20 if avg_volume_20 > 0 else 1.0
+    
+    whale_detected = False
+    whale_type = None
+    whale_strength = 0
+    
+    # Whale thresholds (senior analyst recommended)
+    if volume_ratio >= 5.0:
+        whale_detected = True
+        whale_type = "MEGA_WHALE"
+        whale_strength = 3  # Strong signal
+    elif volume_ratio >= 3.0:
+        whale_detected = True
+        whale_type = "WHALE"
+        whale_strength = 2  # Medium signal
+    
+    # Determine whale direction (accumulation vs distribution)
+    whale_signal = None
+    if whale_detected:
+        price_change = (close - df['close'].iloc[-2]) / df['close'].iloc[-2] if len(df) > 1 else 0
+        
+        if obv_change_recent > 0:
+            # Whale buying
+            if price_change < 0.005:  # Price flat or slightly down
+                whale_signal = "ACCUMULATION"  # Smart money accumulating quietly
+            else:
+                whale_signal = "BUYING"  # Whale buying aggressively
+        elif obv_change_recent < 0:
+            # Whale selling
+            if price_change > -0.005:  # Price holding despite selling
+                whale_signal = "DISTRIBUTION"  # Smart money distributing quietly
+            else:
+                whale_signal = "SELLING"  # Whale dumping
+        else:
+            whale_signal = "NEUTRAL"  # Large volume but unclear direction
+
+    
     signal = "NO_CONFIRMATION"
     strength = 0
     reasoning = []
@@ -377,7 +418,16 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
             elif obv_trend == "DETERIORATING":
                 # Mention but less severe if slow
                 reasoning.append(f"⚪ OBV weakening: {obv_medium:.0f}→{obv_now:.0f} (recent trend)")
-
+            
+            # Check #6: Whale/Smart Money Detection
+            if whale_detected and whale_signal in ["ACCUMULATION", "BUYING"]:
+                confirmation_score += whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"{whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
+            elif whale_detected and whale_signal in ["DISTRIBUTION", "SELLING"]:
+                confirmation_score -= whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"⚠️ {whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
             
             # Decision for Support
             if confirmation_score >= 6:
@@ -434,6 +484,16 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
                 confirmation_score -= 2
                 # Getting LESS negative (better) - contradicts bearish
                 reasoning.append(f"⚠️ OBV recovering: {obv_medium:.0f}→{obv_now:.0f} (buyers entering)")
+            
+            # Check #6: Whale/Smart Money Detection
+            if whale_detected and whale_signal in ["DISTRIBUTION", "SELLING"]:
+                confirmation_score += whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"{whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
+            elif whale_detected and whale_signal in ["ACCUMULATION", "BUYING"]:
+                confirmation_score -= whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"⚠️ {whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
             
             # Decision for Resistance
             if confirmation_score >= 6:
@@ -539,6 +599,13 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
             "trend": obv_trend,
             "velocity": obv_velocity,
             "timeframe_hours": timeframe_hours
+        },
+        "whale_analysis": {
+            "detected": whale_detected,
+            "type": whale_type,
+            "signal": whale_signal,
+            "strength": whale_strength,
+            "volume_ratio": float(volume_ratio)
         }
     }
 
