@@ -77,9 +77,26 @@ def init_database():
             profit_loss_pct REAL NOT NULL,
             prediction_error REAL NOT NULL,
             notes TEXT,
+            predicted_entry_price REAL,
+            predicted_exit_price REAL,
+            entry_slippage REAL,
+            exit_slippage REAL,
             FOREIGN KEY (prediction_id) REFERENCES predictions (id)
         )
     ''')
+    
+    # Add new columns if they don't exist
+    cursor.execute("PRAGMA table_info(trade_results)")
+    trade_columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'predicted_entry_price' not in trade_columns:
+        cursor.execute("ALTER TABLE trade_results ADD COLUMN predicted_entry_price REAL")
+    if 'predicted_exit_price' not in trade_columns:
+        cursor.execute("ALTER TABLE trade_results ADD COLUMN predicted_exit_price REAL")
+    if 'entry_slippage' not in trade_columns:
+        cursor.execute("ALTER TABLE trade_results ADD COLUMN entry_slippage REAL")
+    if 'exit_slippage' not in trade_columns:
+        cursor.execute("ALTER TABLE trade_results ADD COLUMN exit_slippage REAL")
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS indicator_accuracy (
@@ -357,20 +374,62 @@ def save_trade_result(prediction_id, entry_price, exit_price, profit_loss,
     Save trade result AND update AI learning
     This function now includes automatic learning from trade outcomes!
     Also triggers periodic revalidation every 25 trades.
+    NOW TRACKS: Predicted vs Actual Entry/Exit for slippage analysis!
     """
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
     trade_date = datetime.now().isoformat()
     
-    # Save trade result
+    # Get predicted entry and exit from original prediction
+    cursor.execute("""
+        SELECT current_price, target_price, stop_loss, position_type
+        FROM predictions WHERE id = ?
+    """, (prediction_id,))
+    pred_data = cursor.fetchone()
+    
+    predicted_entry = None
+    predicted_exit = None
+    entry_slippage = None
+    exit_slippage = None
+    
+    if pred_data:
+        predicted_entry = pred_data[0]  # current_price at time of prediction
+        target = pred_data[1]
+        stop = pred_data[2]
+        position_type = pred_data[3]
+        
+        # Determine predicted exit (target or stop, depending on trade outcome)
+        if profit_loss > 0:
+            # Win: predicted exit was target
+            predicted_exit = target
+        else:
+            # Loss: predicted exit was stop
+            predicted_exit = stop
+        
+        # Calculate slippages
+        if predicted_entry:
+            entry_slippage = entry_price - predicted_entry  # Positive = worse fill
+        
+        if predicted_exit:
+            if position_type == 'LONG':
+                # For LONG: positive slippage = worse exit (got less)
+                exit_slippage = predicted_exit - exit_price
+            else:  # SHORT
+                # For SHORT: positive slippage = worse exit (paid more)
+                exit_slippage = exit_price - predicted_exit
+    
+    # Save trade result with predicted vs actual tracking
     cursor.execute('''
         INSERT INTO trade_results (
             prediction_id, entry_price, exit_price, trade_date, 
-            profit_loss, profit_loss_pct, prediction_error, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            profit_loss, profit_loss_pct, prediction_error, notes,
+            predicted_entry_price, predicted_exit_price,
+            entry_slippage, exit_slippage
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (prediction_id, entry_price, exit_price, trade_date, 
-          profit_loss, profit_loss_pct, prediction_error, notes))
+          profit_loss, profit_loss_pct, prediction_error, notes,
+          predicted_entry, predicted_exit, entry_slippage, exit_slippage))
     
     # Update prediction status
     cursor.execute('''
@@ -397,7 +456,12 @@ def save_trade_result(prediction_id, entry_price, exit_price, profit_loss,
     conn.commit()
     conn.close()
     
+    # Print summary with predicted vs actual
     print(f"✅ Trade saved and AI learning updated for prediction #{prediction_id}")
+    if predicted_entry and entry_slippage is not None:
+        print(f"   Entry: Predicted ${predicted_entry:.2f} → Actual ${entry_price:.2f} (Slippage: ${entry_slippage:+.2f})")
+    if predicted_exit and exit_slippage is not None:
+        print(f"   Exit: Predicted ${predicted_exit:.2f} → Actual ${exit_price:.2f} (Slippage: ${exit_slippage:+.2f})")
     if total_trades % 25 == 0:
         print(f"🎯 Milestone reached: {total_trades} trades! Full revalidation completed.")
     
