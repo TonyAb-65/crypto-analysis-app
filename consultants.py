@@ -873,7 +873,7 @@ def run_consultant_meeting(symbol, asset_type, current_price, warning_details, t
     # Resolve their votes
     meeting_result = consultant_meeting_resolution(
         c1_result, c2_result, c3_result, c4_result,
-        current_price, asset_type, timeframe_hours=1
+        current_price, asset_type, timeframe_hours=timeframe_hours  # Use actual parameter!
     )
     
     return meeting_result
