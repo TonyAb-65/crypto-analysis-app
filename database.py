@@ -504,8 +504,36 @@ def revalidate_all_indicators(cursor):
         
         indicators = parse_indicator_snapshot(indicator_snapshot)
         
+        # DEBUG: Print first trade's indicators
+        if trade == all_trades[0]:
+            print(f"  📊 Sample snapshot from first trade:")
+            print(f"     Raw: {str(indicator_snapshot)[:100]}...")
+            print(f"     Parsed: {indicators}")
+        
         for indicator_name in indicator_stats.keys():
-            indicator_value = indicators.get(indicator_name.lower(), indicators.get(indicator_name))
+            # Try multiple possible keys (case-insensitive, with/without spaces/underscores)
+            indicator_value = None
+            possible_keys = [
+                indicator_name,  # Exact: 'OBV'
+                indicator_name.lower(),  # Lower: 'obv'
+                indicator_name.upper(),  # Upper: 'OBV'
+                indicator_name.replace(' ', '_'),  # With underscore
+                indicator_name.replace('_', ' '),  # With space
+                indicator_name.replace('_', ''),  # No separator
+            ]
+            
+            for key in possible_keys:
+                if key in indicators:
+                    indicator_value = indicators[key]
+                    break
+            
+            # If still not found, try case-insensitive search
+            if indicator_value is None:
+                for key in indicators.keys():
+                    if key.lower() == indicator_name.lower().replace('_', '').replace(' ', ''):
+                        indicator_value = indicators[key]
+                        break
+            
             was_correct = evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won)
             
             if was_correct is not None:
@@ -597,42 +625,24 @@ def get_indicator_weights():
 def relearn_from_past_trades():
     """
     Retroactively learn from all completed trades
-    Use this to teach the AI from your 49 existing trades!
+    Use this to teach the AI from your existing trades!
     """
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
-    # Reset indicator counts
+    # Get trade count for return value
     cursor.execute("""
-        UPDATE indicator_accuracy
-        SET correct_count = 0,
-            wrong_count = 0,
-            accuracy_rate = 0,
-            weight_multiplier = 1.0
-    """)
-    
-    # Get all completed trades with their prediction data
-    cursor.execute("""
-        SELECT 
-            tr.prediction_id,
-            tr.profit_loss,
-            p.indicator_snapshot,
-            p.position_type
+        SELECT COUNT(*) 
         FROM trade_results tr
         JOIN predictions p ON tr.prediction_id = p.id
         WHERE p.status = 'completed'
     """)
+    learned_count = cursor.fetchone()[0]
     
-    trades = cursor.fetchall()
-    learned_count = 0
+    print(f"\n🔄 Relearning from {learned_count} past trades...")
     
-    for trade in trades:
-        prediction_id, profit_loss, indicator_snapshot, position_type = trade
-        trade_won = profit_loss > 0
-        
-        # Evaluate and learn from this trade
-        evaluate_and_learn_from_trade(prediction_id, trade_won, cursor)
-        learned_count += 1
+    # Use the revalidate function which properly resets and recalculates everything
+    revalidate_all_indicators(cursor)
     
     conn.commit()
     conn.close()
