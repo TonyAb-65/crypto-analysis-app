@@ -270,6 +270,8 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
     rsi = latest.get('rsi', 50)
     volume = latest.get('volume', 0)
     adx = latest.get('adx', 20)
+    plus_di = latest.get('plus_di', 0)
+    minus_di = latest.get('minus_di', 0)
     macd = latest.get('macd', 0)
     macd_signal = latest.get('macd_signal', 0)
     
@@ -452,39 +454,42 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
         # Standard momentum analysis (when not at S/R)
         # ENHANCED: Apply ADX+OBV mix (user's discovery!)
         
-        if adx > 60:
-            # Strong ADX - check OBV for quality
-            if close > df['sma_20'].iloc[-1]:
-                # Bullish direction
+        # Calculate directional strength
+        di_ratio = plus_di / minus_di if minus_di > 0.1 else 999
+        strong_directional = (di_ratio > 4.0 or di_ratio < 0.25)  # 4:1 ratio or better
+        
+        if adx > 60 or (adx > 25 and strong_directional):
+            # Strong ADX OR strong directional movement - check OBV for quality
+            if plus_di > minus_di:  # Bullish direction
                 if obv_trend == "IMPROVING":
                     signal = "BULLISH"
                     strength = 9
-                    reasoning.append(f"ADX {adx:.1f} strong + OBV improving")
+                    reasoning.append(f"ADX {adx:.1f} +DI:{plus_di:.1f}>{minus_di:.1f} + OBV improving")
                 elif obv_trend == "STABLE" or (obv_trend == "DETERIORATING" and obv_velocity == "SLOW"):
                     signal = "BULLISH"
                     strength = 7
-                    reasoning.append(f"ADX {adx:.1f} strong, OBV {obv_trend.lower()}")
+                    reasoning.append(f"ADX {adx:.1f} +DI:{plus_di:.1f}>{minus_di:.1f}, OBV {obv_trend.lower()}")
                     reasoning.append(f"⚠️ Short-term momentum - OBV: {obv_medium:.0f}→{obv_now:.0f}")
                 elif obv_trend == "DETERIORATING" and obv_velocity in ["MEDIUM", "FAST"]:
                     signal = "CAUTION_BULLISH"
                     strength = 5
-                    reasoning.append(f"⚠️ ADX {adx:.1f} but OBV declining {obv_velocity.lower()}")
+                    reasoning.append(f"⚠️ +DI:{plus_di:.1f}>{minus_di:.1f} but OBV declining {obv_velocity.lower()}")
                     reasoning.append(f"High risk - OBV: {obv_overall:.0f}→{obv_now:.0f}")
             else:
-                # Bearish direction
+                # Bearish direction (-DI > +DI)
                 if obv_trend == "DETERIORATING":
                     signal = "BEARISH"
                     strength = 9
-                    reasoning.append(f"ADX {adx:.1f} strong + OBV declining")
+                    reasoning.append(f"ADX {adx:.1f} -DI:{minus_di:.1f}>{plus_di:.1f} + OBV declining")
                 elif obv_trend == "STABLE" or (obv_trend == "IMPROVING" and obv_velocity == "SLOW"):
                     signal = "BEARISH"
                     strength = 7
-                    reasoning.append(f"ADX {adx:.1f} strong, OBV {obv_trend.lower()}")
+                    reasoning.append(f"ADX {adx:.1f} -DI:{minus_di:.1f}>{plus_di:.1f}, OBV {obv_trend.lower()}")
                     reasoning.append(f"⚠️ Short-term momentum - OBV: {obv_medium:.0f}→{obv_now:.0f}")
                 elif obv_trend == "IMPROVING" and obv_velocity in ["MEDIUM", "FAST"]:
                     signal = "CAUTION_BEARISH"
                     strength = 5
-                    reasoning.append(f"⚠️ ADX {adx:.1f} but OBV rising {obv_velocity.lower()}")
+                    reasoning.append(f"⚠️ -DI:{minus_di:.1f}>{plus_di:.1f} but OBV rising {obv_velocity.lower()}")
                     reasoning.append(f"High risk - OBV: {obv_overall:.0f}→{obv_now:.0f}")
         
         elif adx > 40:
