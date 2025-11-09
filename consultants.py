@@ -688,11 +688,16 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, asset_type=None
             position = "LONG"
             confidence = min((c1_strength + c2_strength) / 20 * 100, 90)
             reasoning_parts.append(f"✅ Confirmed bullish reversal at support")
+        elif c2_signal == 'BEARISH' and c2_strength >= 7:
+            # STRONG BEARISH = BREAKDOWN ATTEMPT
+            position = "SHORT"
+            confidence = c2_strength * 10 * 0.8  # 20% penalty for support
+            reasoning_parts.append(f"📉 Breakdown attempt at support (high confidence)")
         else:
             # NO CONFIRMATION - WAIT
             position = "NEUTRAL"
             confidence = 0
-            reasoning_parts.append(f"⏸️ At support but no reversal confirmation - WAIT")
+            reasoning_parts.append(f"⏸️ At support but no clear signal - WAIT")
     
     # === CASE 2: AT RESISTANCE ===
     elif c1_signal in ['AT_RESISTANCE', 'NEAR_RESISTANCE']:
@@ -701,11 +706,16 @@ def consultant_meeting_resolution(c1, c2, c3, c4, current_price, asset_type=None
             position = "SHORT"
             confidence = min((c1_strength + c2_strength) / 20 * 100, 90)
             reasoning_parts.append(f"✅ Confirmed bearish reversal at resistance")
+        elif c2_signal == 'BULLISH' and c2_strength >= 7:
+            # STRONG BULLISH = BREAKOUT ATTEMPT
+            position = "LONG"
+            confidence = c2_strength * 10 * 0.8  # 20% penalty for resistance
+            reasoning_parts.append(f"🚀 Breakout attempt at resistance (high confidence)")
         else:
             # NO CONFIRMATION - WAIT
             position = "NEUTRAL"
             confidence = 0
-            reasoning_parts.append(f"⏸️ At resistance but no reversal confirmation - WAIT")
+            reasoning_parts.append(f"⏸️ At resistance but no clear signal - WAIT")
     
     # === CASE 3: MID-RANGE ===
     else:
