@@ -196,7 +196,7 @@ try:
             st.sidebar.markdown("---")
             st.sidebar.markdown("### 🧠 AI Learning")
             if st.sidebar.button("🔄 Relearn from Past Trades", help=f"Analyze {trade_count} completed trades to update indicator weights"):
-                with st.sidebar.spinner("Learning..."):
+                with st.spinner("Learning from past trades..."):
                     learned = relearn_from_past_trades()
                     st.sidebar.success(f"✅ Learned from {learned} trades!")
                     st.sidebar.info("🔄 Refresh page to see updated weights")
@@ -630,17 +630,62 @@ if df is not None and len(df) > 0:
                     
                     if result:
                         pred_id, curr_price, pos_type, target, stop = result
-                        mark_prediction_for_trading(
-                            prediction_id=pred_id,
-                            actual_entry_price=curr_price,
-                            entry_timestamp=datetime.now().isoformat(),
-                            position_type=pos_type,
-                            target_price=target,
-                            stop_loss=stop
-                        )
-                        st.success(f"✅ Marked for trading!")
+                        
+                        # Show entry price form
+                        st.session_state[f'marking_trade_{pred_id}'] = True
                     else:
                         st.warning("⚠️ Save prediction first")
+            
+            # Entry price form (if marking for trading)
+            if 'marking_trade' in str(st.session_state):
+                for key in list(st.session_state.keys()):
+                    if key.startswith('marking_trade_') and st.session_state[key]:
+                        pred_id = int(key.replace('marking_trade_', ''))
+                        
+                        conn = sqlite3.connect(str(DB_PATH))
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            SELECT id, current_price, position_type, target_price, stop_loss FROM predictions 
+                            WHERE id = ?
+                        """, (pred_id,))
+                        result = cursor.fetchone()
+                        conn.close()
+                        
+                        if result:
+                            pred_id_form, curr_price, pos_type, target, stop = result
+                            
+                            with st.form(key=f"entry_form_{pred_id}"):
+                                st.markdown("### 📝 Enter Trade Details")
+                                
+                                actual_entry = st.number_input(
+                                    "Actual Entry Price ($)",
+                                    min_value=0.0,
+                                    value=float(curr_price),
+                                    step=0.01,
+                                    help="Enter the actual price you entered the trade at",
+                                    key=f"entry_input_{pred_id}"
+                                )
+                                
+                                col_e1, col_e2 = st.columns(2)
+                                with col_e1:
+                                    if st.form_submit_button("✅ Confirm Entry", use_container_width=True):
+                                        mark_prediction_for_trading(
+                                            prediction_id=pred_id,
+                                            actual_entry_price=actual_entry,
+                                            entry_timestamp=datetime.now().isoformat(),
+                                            position_type=pos_type,
+                                            target_price=target,
+                                            stop_loss=stop
+                                        )
+                                        st.success(f"✅ Trade marked! Entry: ${actual_entry:.2f}")
+                                        st.session_state[f'marking_trade_{pred_id}'] = False
+                                        time.sleep(1)
+                                        st.rerun()
+                                
+                                with col_e2:
+                                    if st.form_submit_button("❌ Cancel", use_container_width=True):
+                                        st.session_state[f'marking_trade_{pred_id}'] = False
+                                        st.rerun()
         
         # ==================== SUPPORT/RESISTANCE ZONES ====================
         st.markdown("---")
@@ -1157,13 +1202,14 @@ if df is not None and len(df) > 0:
                                         # Show close trade form
                                         if st.session_state.get(f'closing_{pred["id"]}', False):
                                             with st.form(key=f"form_close_{pred['id']}"):
-                                                st.markdown(f"**Close Trade #{pred['id']}**")
+                                                st.markdown(f"**📊 Close Trade #{pred['id']}**")
                                                 
                                                 exit_price = st.number_input(
-                                                    "Exit Price ($)",
+                                                    "💰 Actual Exit Price ($)",
                                                     min_value=0.0,
                                                     value=float(current_price),
                                                     step=0.01,
+                                                    help="Enter the actual price you exited at (you can modify this)",
                                                     key=f"exit_{pred['id']}"
                                                 )
                                                 
