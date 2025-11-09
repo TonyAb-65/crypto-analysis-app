@@ -565,6 +565,14 @@ def revalidate_all_indicators(cursor):
                   datetime.now().isoformat(), indicator_name))
             
             print(f"  {indicator_name}: {stats['correct']}/{stats['total']} ({accuracy*100:.1f}%) → Weight: {weight}")
+    
+    # Commit changes and close connection
+    conn.commit()
+    conn.close()
+    
+    learned_count = len(all_trades)
+    print(f"✅ AI Learning: Analyzed {learned_count} past trades!")
+    return learned_count
 
 
 
