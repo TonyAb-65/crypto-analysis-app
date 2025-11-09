@@ -195,17 +195,41 @@ def get_all_recent_predictions(limit=50):
 def evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won):
     """
     Evaluate if an indicator correctly predicted the trade outcome
-    Returns True if indicator was correct, False otherwise
+    Returns True if indicator was correct, False if wrong, None if neutral/skip
+    
+    Handles BOTH formats:
+    - Old: {"value": 123.45, "signal": "bullish"}
+    - New: 123.45 (just the value)
     """
     if indicator_value is None or pd.isna(indicator_value):
         return None  # Skip if no data
     
+    # Handle nested dict format (old format with 'signal')
+    if isinstance(indicator_value, dict):
+        signal = indicator_value.get('signal', 'neutral')
+        
+        # If we have explicit signal, use it directly
+        if signal == 'bullish':
+            # Bullish signal was correct if: LONG won OR SHORT lost
+            predicted_bullish = True
+            actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
+            return predicted_bullish == actual_bullish
+        elif signal == 'bearish':
+            # Bearish signal was correct if: SHORT won OR LONG lost
+            predicted_bearish = True
+            actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
+            return predicted_bearish == actual_bearish
+        else:
+            # Neutral - skip
+            return None
+    
+    # Handle flat value format (new format - just a number)
     try:
         indicator_value = float(indicator_value)
     except:
         return None
     
-    # Indicator prediction rules
+    # Indicator prediction rules based on VALUE
     if indicator_name == 'OBV':
         # OBV > 0 = bullish, < 0 = bearish
         predicted_bullish = indicator_value > 0
@@ -259,7 +283,8 @@ def evaluate_indicator_prediction(indicator_name, indicator_value, position_type
         else:
             return None  # Neutral zone, skip
     
-    return None  # Unknown indicator
+    # Unknown indicator or pattern indicators (Hammer, Doji, etc.)
+    return None
 
 
 def parse_indicator_snapshot(snapshot_str):
