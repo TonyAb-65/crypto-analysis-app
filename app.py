@@ -20,7 +20,6 @@ from database import (
     relearn_from_past_trades, DB_PATH
 )
 from utils import (
-    should_retrain, trigger_ai_retraining, analyze_indicator_accuracy,
     backup_database, export_trades_to_csv
 )
 from news import (
@@ -1261,14 +1260,6 @@ if df is not None and len(df) > 0:
                                                             )
                                                             
                                                             if success:
-                                                                # Analyze indicator accuracy
-                                                                analyze_indicator_accuracy(pred['id'])
-                                                                
-                                                                # Check if retraining needed
-                                                                if should_retrain():
-                                                                    with st.spinner("🧠 Retraining AI..."):
-                                                                        trigger_ai_retraining()
-                                                                
                                                                 st.success(f"✅ Trade closed! P/L: ${pl:.2f} ({pl_pct:+.2f}%)")
                                                                 st.session_state[f'closing_{pred["id"]}'] = False
                                                                 time.sleep(1)
