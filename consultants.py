@@ -464,12 +464,12 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
                     signal = "BULLISH"
                     strength = 7
                     reasoning.append(f"ADX {adx:.1f} strong, OBV {obv_trend.lower()}")
-                    reasoning.append(f"⚠️ Short-term momentum - OBV: {obv_4h:.0f}→{obv_now:.0f}")
+                    reasoning.append(f"⚠️ Short-term momentum - OBV: {obv_medium:.0f}→{obv_now:.0f}")
                 elif obv_trend == "DETERIORATING" and obv_velocity in ["MEDIUM", "FAST"]:
                     signal = "CAUTION_BULLISH"
                     strength = 5
                     reasoning.append(f"⚠️ ADX {adx:.1f} but OBV declining {obv_velocity.lower()}")
-                    reasoning.append(f"High risk - OBV: {obv_24h:.0f}→{obv_now:.0f}")
+                    reasoning.append(f"High risk - OBV: {obv_overall:.0f}→{obv_now:.0f}")
             else:
                 # Bearish direction
                 if obv_trend == "DETERIORATING":
@@ -480,12 +480,12 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
                     signal = "BEARISH"
                     strength = 7
                     reasoning.append(f"ADX {adx:.1f} strong, OBV {obv_trend.lower()}")
-                    reasoning.append(f"⚠️ Short-term momentum - OBV: {obv_4h:.0f}→{obv_now:.0f}")
+                    reasoning.append(f"⚠️ Short-term momentum - OBV: {obv_medium:.0f}→{obv_now:.0f}")
                 elif obv_trend == "IMPROVING" and obv_velocity in ["MEDIUM", "FAST"]:
                     signal = "CAUTION_BEARISH"
                     strength = 5
                     reasoning.append(f"⚠️ ADX {adx:.1f} but OBV rising {obv_velocity.lower()}")
-                    reasoning.append(f"High risk - OBV: {obv_24h:.0f}→{obv_now:.0f}")
+                    reasoning.append(f"High risk - OBV: {obv_overall:.0f}→{obv_now:.0f}")
         
         elif adx > 40:
             # Moderate ADX - standard logic but note OBV
