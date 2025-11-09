@@ -322,8 +322,8 @@ use_cci = st.sidebar.checkbox("CCI (20)", value=True, help="Commodity Channel In
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🎓 AI Learning System")
-show_learning_dashboard = st.sidebar.checkbox("📊 Show Trades Table on Page", value=False,
-                                              help="✅ Enable to see your tracked trades table")
+show_learning_dashboard = st.sidebar.checkbox("📊 Show Trades Table on Page", value=True,
+                                              help="✅ Shows your tracked trades and predictions")
 
 # ==================== AI LEARNING DASHBOARD (Sidebar) ====================
 st.sidebar.markdown("---")
@@ -1186,14 +1186,17 @@ if df is not None and len(df) > 0:
                             with col5:
                                 # Get position type, treating None as NEUTRAL
                                 pos_type = pred.get('position_type')
-                                if not pos_type or pos_type == 'NEUTRAL' or pd.isna(pos_type):
-                                    st.caption("Closed" if pred['status'] == 'completed' else "N/A")
-                                elif pred['status'] != 'completed':
+                                
+                                # Show close button if trade has entry price (regardless of position type)
+                                if pred['status'] == 'completed':
+                                    st.caption("Closed")
+                                elif pred['status'] == 'will_trade':
                                     # Check if we have valid entry price
                                     entry_check = pred.get('actual_entry_price')
                                     if pd.isna(entry_check) or entry_check is None:
                                         st.caption("⚠️ No entry price")
                                     else:
+                                        # Allow closing for ANY position (including NEUTRAL/manual trades)
                                         if st.button(f"Close Trade", key=f"close_{pred['id']}", use_container_width=True):
                                             st.session_state[f'closing_{pred["id"]}'] = True
                                             st.rerun()
@@ -1235,6 +1238,10 @@ if df is not None and len(df) > 0:
                                                         st.error("❌ Cannot close trade: No valid entry price")
                                                     else:
                                                         pos_type_confirmed = pred.get('position_type', 'LONG')
+                                                        
+                                                        # If NEUTRAL or None, ask user or default to LONG for manual trades
+                                                        if not pos_type_confirmed or pos_type_confirmed == 'NEUTRAL' or pd.isna(pos_type_confirmed):
+                                                            pos_type_confirmed = 'LONG'  # Default to LONG for manual trades
                                                         
                                                         if pos_type_confirmed == 'LONG':
                                                             pl = exit_price - entry
