@@ -1406,15 +1406,13 @@ if df is not None and len(df) > 0:
                     else:
                         st.info("📊 Indicator data initialized. Close trades or click 'Relearn from Past Trades' to see performance!")
                 else:
-                        # Show message based on whether we have trades
-                        if trade_count > 0:
-                            st.warning(f"📊 You have {trade_count} closed trades!")
-                            st.info("👆 Click the '🔄 Relearn from Past Trades' button in the sidebar to analyze them and populate indicator performance!")
-                        else:
-                            st.info("💡 No closed trades yet. Close some trades to see AI learning in action!")
-                            st.caption("The system will automatically track which indicators are accurate as you trade.")
-                else:
-                    st.warning("⚠️ Indicator accuracy table not initialized. Restarting the app should fix this.")
+                    # Show message - no indicators in table at all
+                    if trade_count > 0:
+                        st.warning(f"📊 You have {trade_count} closed trades!")
+                        st.info("👆 Click the '🔄 Relearn from Past Trades' button in the sidebar to analyze them and populate indicator performance!")
+                    else:
+                        st.info("💡 No closed trades yet. Close some trades to see AI learning in action!")
+                        st.caption("The system will automatically track which indicators are accurate as you trade.")
             
             except Exception as e:
                 st.error(f"Error loading indicator performance: {str(e)}")
