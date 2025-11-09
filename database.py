@@ -195,95 +195,93 @@ def get_all_recent_predictions(limit=50):
 def evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won):
     """
     Evaluate if an indicator correctly predicted the trade outcome
-    Returns True if indicator was correct, False if wrong, None if neutral/skip
     
-    Handles BOTH formats:
-    - Old: {"value": 123.45, "signal": "bullish"}
-    - New: 123.45 (just the value)
+    NEW LOGIC: Indicators learn from COMMITTEE recommendations!
+    - If committee recommended LONG and won → all indicators correct
+    - If committee recommended SHORT and won → all indicators correct
+    - If committee recommended LONG and lost → all indicators wrong
+    - If committee recommended SHORT and lost → all indicators wrong
+    
+    Individual indicator signals don't matter - we evaluate based on 
+    whether they contributed to a winning or losing committee decision.
+    
+    Returns True if correct, False if wrong, None if neutral/skip
     """
     if indicator_value is None or pd.isna(indicator_value):
         return None  # Skip if no data
     
-    # Handle nested dict format (old format with 'signal')
+    # Handle nested dict format - extract signal to check if neutral
     if isinstance(indicator_value, dict):
         signal = indicator_value.get('signal', 'neutral')
         
-        # If we have explicit signal, use it directly
-        if signal == 'bullish':
-            # Bullish signal was correct if: LONG won OR SHORT lost
-            predicted_bullish = True
-            actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
-            return predicted_bullish == actual_bullish
-        elif signal == 'bearish':
-            # Bearish signal was correct if: SHORT won OR LONG lost
-            predicted_bearish = True
-            actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
-            return predicted_bearish == actual_bearish
-        else:
-            # Neutral - skip
+        # Skip neutral signals - they didn't contribute to decision
+        if signal == 'neutral':
             return None
+        
+        # For non-neutral signals, evaluate based on committee outcome
+        # If committee won, indicator was correct (contributed to good decision)
+        # If committee lost, indicator was wrong (contributed to bad decision)
+        return trade_won
     
-    # Handle flat value format (new format - just a number)
+    # Handle flat value format (for non-signal based indicators)
     try:
         indicator_value = float(indicator_value)
     except:
         return None
     
-    # Indicator prediction rules based on VALUE
+    # For value-based indicators, use the original logic
+    # (These are not part of committee, evaluated independently)
+    
     if indicator_name == 'OBV':
-        # OBV > 0 = bullish, < 0 = bearish
+        if indicator_value == 0:
+            return None  # Neutral
         predicted_bullish = indicator_value > 0
         actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
         return predicted_bullish == actual_bullish
     
     elif indicator_name == 'MFI':
-        # MFI > 80 = overbought (bearish), < 20 = oversold (bullish)
+        if 20 <= indicator_value <= 80:
+            return None  # Neutral zone
         if indicator_value > 80:
             predicted_bearish = True
             actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
             return predicted_bearish == actual_bearish
-        elif indicator_value < 20:
+        else:  # < 20
             predicted_bullish = True
             actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
             return predicted_bullish == actual_bullish
-        else:
-            return None  # Neutral zone, skip
     
     elif indicator_name == 'ADX':
-        # ADX > 25 = strong trend (trust the position)
-        if indicator_value > 25:
-            # Strong trend indicator - if trade won, ADX was correct about trend strength
-            return trade_won
-        else:
+        if indicator_value <= 25:
             return None  # Weak trend, skip
+        # Strong trend - if trade won, ADX was correct about trend strength
+        return trade_won
     
     elif indicator_name == 'Stochastic':
-        # Stoch > 80 = overbought (bearish), < 20 = oversold (bullish)
+        if 20 <= indicator_value <= 80:
+            return None  # Neutral zone
         if indicator_value > 80:
             predicted_bearish = True
             actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
             return predicted_bearish == actual_bearish
-        elif indicator_value < 20:
+        else:  # < 20
             predicted_bullish = True
             actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
             return predicted_bullish == actual_bullish
-        else:
-            return None  # Neutral zone, skip
     
     elif indicator_name == 'CCI':
-        # CCI > 100 = overbought (bearish), < -100 = oversold (bullish)
+        if -100 <= indicator_value <= 100:
+            return None  # Neutral zone
         if indicator_value > 100:
             predicted_bearish = True
             actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
             return predicted_bearish == actual_bearish
-        elif indicator_value < -100:
+        else:  # < -100
             predicted_bullish = True
             actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
             return predicted_bullish == actual_bullish
-        else:
-            return None  # Neutral zone, skip
     
-    # Unknown indicator or pattern indicators (Hammer, Doji, etc.)
+    # Unknown indicator
     return None
 
 
@@ -523,9 +521,14 @@ def revalidate_all_indicators(cursor):
     }
     
     # Analyze each trade
+    trades_processed = 0
+    indicators_found = 0
+    signals_evaluated = 0
+    
     for trade in all_trades:
         prediction_id, profit_loss, indicator_snapshot, position_type = trade
         trade_won = profit_loss > 0
+        trades_processed += 1
         
         try:
             indicators = parse_indicator_snapshot(indicator_snapshot)
@@ -536,11 +539,20 @@ def revalidate_all_indicators(cursor):
         # DEBUG: Print first trade's indicators
         try:
             if trade == all_trades[0]:
-                print(f"  📊 Sample snapshot from first trade:")
-                print(f"     Raw: {str(indicator_snapshot)[:100] if indicator_snapshot else 'None'}...")
-                print(f"     Parsed: {indicators}")
+                print(f"\n  📊 DETAILED DEBUG - First Trade:")
+                print(f"     Prediction ID: {prediction_id}")
+                print(f"     Position: {position_type}")
+                print(f"     Won: {trade_won}")
+                print(f"     P/L: ${profit_loss:.2f}")
+                print(f"     Raw snapshot type: {type(indicator_snapshot)}")
+                print(f"     Raw snapshot: {str(indicator_snapshot)[:200]}...")
+                print(f"     Parsed indicators count: {len(indicators)}")
+                print(f"     Parsed indicators: {indicators}")
         except Exception as e:
             print(f"  ⚠️ Debug print error: {e}")
+        
+        if indicators:
+            indicators_found += 1
         
         for indicator_name in indicator_stats.keys():
             # Try multiple possible keys (case-insensitive, with/without spaces/underscores)
@@ -563,20 +575,32 @@ def revalidate_all_indicators(cursor):
             if indicator_value is None:
                 try:
                     for key in indicators.keys():
-                        if key.lower() == indicator_name.lower().replace('_', '').replace(' ', ''):
+                        if key.lower().replace('_', '').replace(' ', '') == indicator_name.lower().replace('_', '').replace(' ', ''):
                             indicator_value = indicators[key]
                             break
                 except:
                     pass
             
+            # DEBUG: Print what we found for first trade
+            if trade == all_trades[0] and indicator_value is not None:
+                print(f"     {indicator_name}: {indicator_value} (type: {type(indicator_value)})")
+            
             was_correct = evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won)
             
             if was_correct is not None:
+                signals_evaluated += 1
                 indicator_stats[indicator_name]['total'] += 1
                 if was_correct:
                     indicator_stats[indicator_name]['correct'] += 1
                 else:
                     indicator_stats[indicator_name]['wrong'] += 1
+    
+    # Print summary
+    print(f"\n  📈 RELEARN SUMMARY:")
+    print(f"     Total trades processed: {trades_processed}")
+    print(f"     Trades with indicators: {indicators_found}")
+    print(f"     Total signals evaluated: {signals_evaluated}")
+    print(f"     Signals per trade avg: {signals_evaluated/trades_processed if trades_processed > 0 else 0:.1f}")
     
     # Update database with comprehensive statistics
     for indicator_name, stats in indicator_stats.items():
