@@ -68,27 +68,37 @@ def find_support_resistance_zones(df, lookback=100):
             support_prices.append(lows[i])
     
     # Group and count touches
+    current_price = closes[-1]  # Get most recent price
+    
     resistance_groups = group_levels(resistance_prices)
     for group in resistance_groups:
         avg_price = np.mean(group)
-        touches = len(group)
-        strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
-        resistance_zones.append({
-            'price': avg_price,
-            'touches': touches,
-            'strength': strength
-        })
+        
+        # Keep resistance levels AT or ABOVE current price
+        # Changed from 0.5% to 0.2% to catch levels we're currently testing
+        if avg_price >= current_price * 0.998:  # Within 0.2% or above
+            touches = len(group)
+            strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
+            resistance_zones.append({
+                'price': avg_price,
+                'touches': touches,
+                'strength': strength
+            })
     
     support_groups = group_levels(support_prices)
     for group in support_groups:
         avg_price = np.mean(group)
-        touches = len(group)
-        strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
-        support_zones.append({
-            'price': avg_price,
-            'touches': touches,
-            'strength': strength
-        })
+        
+        # Keep support levels AT or BELOW current price
+        # Changed from 0.5% to 0.2% to catch levels we're currently testing
+        if avg_price <= current_price * 1.002:  # Within 0.2% or below
+            touches = len(group)
+            strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
+            support_zones.append({
+                'price': avg_price,
+                'touches': touches,
+                'strength': strength
+            })
     
     # Sort by strength (touches)
     support_zones.sort(key=lambda x: x['touches'], reverse=True)
@@ -227,6 +237,15 @@ def consultant_c1_pattern_structure(df, symbol):
     
     # Build detailed reasoning with targets
     reasoning_text = " ".join(reasoning) if reasoning else "Mid-range"
+    
+    # DEBUG: Show detected resistance levels for troubleshooting
+    if sr_zones.get('resistance'):
+        top_resistance = sr_zones['resistance'][0] if len(sr_zones['resistance']) > 0 else None
+        if top_resistance:
+            reasoning_text += f" (Resistance detected: ${top_resistance['price']:,.2f} - {top_resistance['touches']} tests)"
+    
+    # Add current price for verification
+    reasoning_text = f"(Current: ${close:,.2f}) " + reasoning_text
     
     # Add price targets to reasoning
     if targets['next_resistance']:
