@@ -1,322 +1,876 @@
 """
-Support & Resistance Module - TWELVE DATA API
-Uses professional S/R levels directly from Twelve Data pivot points
-NO internal calculation - professional grade data only
+Consultants Module - Advanced Committee-Based Trading Decisions
+Implements full brainstorming session logic with C1/C2 collaboration
 """
-import requests
+import pandas as pd
 import numpy as np
+from datetime import datetime
+
+# Import from other modules
+from data_api import fetch_data
+from indicators import calculate_technical_indicators
+
+# Import S/R functions from support_resistance module (uses Twelve Data API)
+from support_resistance import (
+    find_support_resistance_zones,
+    get_price_targets_based_on_sr,
+    check_at_key_level
+)
 
 
-def find_support_resistance_zones(df, symbol=None, interval='1h'):
+# ==================== CONSULTANT C1: PATTERN & STRUCTURE ====================
+
+def consultant_c1_pattern_structure(df, symbol, interval='1h'):
     """
-    Fetch Support/Resistance from Twelve Data API
-    Uses professional pivot points calculation
+    C1: Pattern & Structure Analysis
+    Focus: Identifies LOCATION (Support/Resistance/Mid-range)
+    DOES NOT predict direction - only identifies WHERE price is
     
     Args:
-        df: Price dataframe (for fallback only)
-        symbol: Trading symbol (e.g., 'BTC/USD', 'EUR/USD', 'XRP/USD')
-        interval: Timeframe ('1h', '4h', '1d', etc.)
-    
-    Returns:
-        Dictionary with resistance and support arrays
+        df: Price dataframe
+        symbol: Trading symbol (e.g., 'BTC/USD', 'EUR/USD')
+        interval: Timeframe (e.g., '1h', '4h', '1d') for Twelve Data API
     """
-    
-    if symbol is None:
-        print("⚠️ No symbol provided, using fallback S/R")
-        return fallback_sr_from_chart(df)
-    
-    print(f"\n{'='*60}")
-    print(f"📊 FETCHING S/R FROM TWELVE DATA API")
-    print(f"{'='*60}")
-    print(f"Symbol: {symbol}")
-    print(f"Interval: {interval}")
-    
-    # Try to fetch from Twelve Data
-    sr_data = fetch_pivot_points_from_twelvedata(symbol, interval)
-    
-    if sr_data:
-        resistance_levels = sr_data['resistance']
-        support_levels = sr_data['support']
-        
-        print(f"✅ SUCCESS - Got {len(resistance_levels)} resistance, {len(support_levels)} support levels")
-        print(f"{'='*60}\n")
-        
+    if df is None or len(df) < 50:
         return {
-            'resistance': resistance_levels,
-            'support': support_levels
+            "signal": "MID_RANGE", 
+            "strength": 5, 
+            "reasoning": "Insufficient data", 
+            "targets": None,
+            "at_key_level": False,
+            "level_type": None
         }
     
-    # Fallback if API fails
-    print(f"⚠️ Twelve Data API unavailable, using fallback")
-    print(f"{'='*60}\n")
-    return fallback_sr_from_chart(df)
-
-
-def fetch_pivot_points_from_twelvedata(symbol, interval='1h'):
-    """
-    Fetch pivot points from Twelve Data API
-    Returns R1/R2/R3 (resistance) and S1/S2/S3 (support)
+    latest = df.iloc[-1]
+    close = latest.get('close', 0)
     
-    Twelve Data provides professional pivot point calculations
-    """
-    try:
-        # Twelve Data pivot points endpoint
-        # Note: This endpoint may require specific plan level
-        url = "https://api.twelvedata.com/pivot_points"
+    signal = "MID_RANGE"
+    strength = 5
+    reasoning = []
+    at_key_level = False
+    level_type = None
+    
+    # Professional S/R Analysis from Twelve Data API
+    sr_zones = find_support_resistance_zones(df, symbol=symbol, interval=interval)
+    targets = get_price_targets_based_on_sr(close, sr_zones)
+    at_level, detected_level_type, level_info = check_at_key_level(close, sr_zones)
+    
+    # Check if AT a key level
+    if at_level:
+        at_key_level = True
+        level_type = detected_level_type
         
-        params = {
-            'symbol': symbol,
-            'interval': interval,
-            'outputsize': 1
+        if detected_level_type == 'RESISTANCE':
+            signal = "AT_RESISTANCE"
+            if level_info['strength'] == 'STRONG':
+                strength = 9
+                reasoning.append(f"At STRONG resistance ${level_info['price']:,.2f} ({level_info['touches']} rejections)")
+            else:
+                strength = 7
+                reasoning.append(f"At resistance ${level_info['price']:,.2f} ({level_info['touches']} tests)")
+        
+        elif detected_level_type == 'SUPPORT':
+            signal = "AT_SUPPORT"
+            if level_info['strength'] == 'STRONG':
+                strength = 9
+                reasoning.append(f"At STRONG support ${level_info['price']:,.2f} ({level_info['touches']} bounces)")
+            else:
+                strength = 7
+                reasoning.append(f"At support ${level_info['price']:,.2f} ({level_info['touches']} tests)")
+    
+    # If not at key level, check proximity
+    else:
+        if targets['next_resistance']:
+            next_r = targets['next_resistance']
+            distance_pct = ((next_r['price'] - close) / close) * 100
+            
+            if distance_pct < 2:  # Very close to resistance
+                signal = "NEAR_RESISTANCE"
+                strength = 6
+                reasoning.append(f"Near resistance ${next_r['price']:,.2f}")
+        
+        if targets['next_support']:
+            next_s = targets['next_support']
+            distance_pct = ((close - next_s['price']) / close) * 100
+            
+            if distance_pct < 2:  # Very close to support
+                signal = "NEAR_SUPPORT"
+                strength = 6
+                reasoning.append(f"Near support ${next_s['price']:,.2f}")
+    
+    # Build detailed reasoning with targets
+    reasoning_text = " ".join(reasoning) if reasoning else "Mid-range"
+    
+    # DEBUG: Show detected resistance levels for troubleshooting
+    if sr_zones.get('resistance'):
+        top_resistance = sr_zones['resistance'][0] if len(sr_zones['resistance']) > 0 else None
+        if top_resistance:
+            reasoning_text += f" (Resistance detected: ${top_resistance['price']:,.2f} - {top_resistance['touches']} tests)"
+    
+    # Add current price for verification
+    reasoning_text = f"(Current: ${close:,.2f}) " + reasoning_text
+    
+    # Add price targets to reasoning
+    if targets['next_resistance']:
+        reasoning_text += f" | Next R: ${targets['next_resistance']['price']:,.2f}"
+    if targets['next_support']:
+        reasoning_text += f" | Next S: ${targets['next_support']['price']:,.2f}"
+    
+    return {
+        "signal": signal,  # AT_SUPPORT, AT_RESISTANCE, NEAR_SUPPORT, NEAR_RESISTANCE, or MID_RANGE
+        "strength": strength,
+        "reasoning": reasoning_text,
+        "targets": targets,
+        "sr_zones": sr_zones,
+        "at_key_level": at_key_level,
+        "level_type": level_type
+    }
+
+
+# ==================== CONSULTANT C2: MOMENTUM CONFIRMATION ====================
+
+def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
+    """
+    C2: Momentum Confirmation Analyst
+    Focus: Confirms if momentum is ACTUALLY reversing at support/resistance
+    Uses: RSI reversal patterns, Volume spikes, Historical success rate
+    
+    Args:
+        timeframe_hours: Trading timeframe in hours (1 for 1H, 4 for 4H, etc.)
+                        Used to dynamically adjust OBV lookback period
+    """
+    if df is None or len(df) < 50:
+        return {
+            "signal": "NO_CONFIRMATION", 
+            "strength": 0, 
+            "reasoning": "Insufficient data",
+            "reversal_confirmed": False
         }
+    
+    latest = df.iloc[-1]
+    close = latest.get('close', 0)
+    rsi = latest.get('rsi', 50)
+    volume = latest.get('volume', 0)
+    adx = latest.get('adx', 20)
+    plus_di = latest.get('plus_di', 0)
+    minus_di = latest.get('minus_di', 0)
+    macd = latest.get('macd', 0)
+    macd_signal = latest.get('macd_signal', 0)
+    
+    # === NEW: DYNAMIC OBV HISTORY TRACKING BASED ON TIMEFRAME ===
+    # Match OBV lookback to trading timeframe for relevance
+    
+    # Calculate candle lookbacks based on timeframe
+    # For recent trend: Look back 1-2 candles
+    # For medium trend: Look back 4-5 candles  
+    # For overall trend: Look back 20-25 candles
+    
+    recent_candles = 2  # Always 1-2 candles for recent
+    medium_candles = min(5, len(df) - 1)  # 4-5 candles for medium
+    overall_candles = min(25, len(df) - 1)  # 20-25 candles for overall
+    
+    obv_now = df['obv'].iloc[-1] if 'obv' in df.columns else 0
+    obv_recent = df['obv'].iloc[-recent_candles] if len(df) > recent_candles and 'obv' in df.columns else obv_now
+    obv_medium = df['obv'].iloc[-medium_candles] if len(df) > medium_candles and 'obv' in df.columns else obv_now
+    obv_overall = df['obv'].iloc[-overall_candles] if len(df) > overall_candles and 'obv' in df.columns else obv_now
+    
+    # Calculate OBV changes
+    obv_change_recent = obv_now - obv_recent  # Last 1-2 candles
+    obv_change_medium = obv_now - obv_medium  # Last 4-5 candles
+    obv_change_overall = obv_now - obv_overall  # Last 20-25 candles
+    
+    # Determine OBV trend (using RECENT for timing decisions!)
+    if obv_change_recent > 0 and obv_change_medium > 0:
+        obv_trend = "IMPROVING"
+        obv_trend_score = +2
+    elif obv_change_recent < 0 and obv_change_medium < 0:
+        obv_trend = "DETERIORATING"
+        obv_trend_score = -2
+    else:
+        obv_trend = "STABLE"
+        obv_trend_score = 0
+    
+    # Measure OBV velocity (rate of change per candle)
+    obv_velocity_per_candle = abs(obv_change_medium) / medium_candles if medium_candles > 0 else 0
+    
+    # Velocity thresholds scale with timeframe
+    # Smaller timeframes = smaller absolute changes per candle
+    velocity_threshold_fast = 2000 / max(timeframe_hours, 0.25)  # Scale down for smaller timeframes
+    velocity_threshold_medium = 800 / max(timeframe_hours, 0.25)
+    
+    if obv_velocity_per_candle > velocity_threshold_fast:
+        obv_velocity = "FAST"
+    elif obv_velocity_per_candle > velocity_threshold_medium:
+        obv_velocity = "MEDIUM"
+    else:
+        obv_velocity = "SLOW"
+    
+    # === NEW: WHALE/SMART MONEY DETECTION ===
+    # Professional whale detection based on volume spikes and OBV divergence
+    
+    avg_volume_20 = df['volume'].tail(20).mean() if len(df) >= 20 else volume
+    volume_ratio = volume / avg_volume_20 if avg_volume_20 > 0 else 1.0
+    
+    whale_detected = False
+    whale_type = None
+    whale_strength = 0
+    
+    # Whale thresholds (senior analyst recommended)
+    if volume_ratio >= 5.0:
+        whale_detected = True
+        whale_type = "MEGA_WHALE"
+        whale_strength = 3  # Strong signal
+    elif volume_ratio >= 3.0:
+        whale_detected = True
+        whale_type = "WHALE"
+        whale_strength = 2  # Medium signal
+    
+    # Determine whale direction (accumulation vs distribution)
+    whale_signal = None
+    if whale_detected:
+        price_change = (close - df['close'].iloc[-2]) / df['close'].iloc[-2] if len(df) > 1 else 0
         
-        print(f"🔍 Calling Twelve Data API...")
-        print(f"   URL: {url}")
-        print(f"   Params: {params}")
-        
-        response = requests.get(url, params=params, timeout=10)
-        
-        print(f"   Response Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            print(f"   Response Data: {data}")
-            
-            # Check for error in response
-            if 'code' in data and data['code'] != 200:
-                print(f"❌ API Error: {data.get('message', 'Unknown error')}")
-                return None
-            
-            if 'values' in data and len(data['values']) > 0:
-                pivots = data['values'][0]
-                
-                resistance_levels = []
-                support_levels = []
-                
-                # Extract resistance levels (R1, R2, R3)
-                if 'classic_resistance_1' in pivots:
-                    resistance_levels.append({
-                        'price': float(pivots['classic_resistance_1']),
-                        'touches': 1,
-                        'strength': 'MEDIUM',
-                        'status': 'INTACT',
-                        'source': 'Twelve Data R1'
-                    })
-                
-                if 'classic_resistance_2' in pivots:
-                    resistance_levels.append({
-                        'price': float(pivots['classic_resistance_2']),
-                        'touches': 2,
-                        'strength': 'STRONG',
-                        'status': 'INTACT',
-                        'source': 'Twelve Data R2'
-                    })
-                
-                if 'classic_resistance_3' in pivots:
-                    resistance_levels.append({
-                        'price': float(pivots['classic_resistance_3']),
-                        'touches': 3,
-                        'strength': 'STRONG',
-                        'status': 'INTACT',
-                        'source': 'Twelve Data R3'
-                    })
-                
-                # Extract support levels (S1, S2, S3)
-                if 'classic_support_1' in pivots:
-                    support_levels.append({
-                        'price': float(pivots['classic_support_1']),
-                        'touches': 1,
-                        'strength': 'MEDIUM',
-                        'status': 'INTACT',
-                        'source': 'Twelve Data S1'
-                    })
-                
-                if 'classic_support_2' in pivots:
-                    support_levels.append({
-                        'price': float(pivots['classic_support_2']),
-                        'touches': 2,
-                        'strength': 'STRONG',
-                        'status': 'INTACT',
-                        'source': 'Twelve Data S2'
-                    })
-                
-                if 'classic_support_3' in pivots:
-                    support_levels.append({
-                        'price': float(pivots['classic_support_3']),
-                        'touches': 3,
-                        'strength': 'STRONG',
-                        'status': 'INTACT',
-                        'source': 'Twelve Data S3'
-                    })
-                
-                # Filter by current price if available
-                if len(resistance_levels) > 0 or len(support_levels) > 0:
-                    # Get current price from pivot point
-                    current_price = float(pivots.get('classic_pivot_point', 0))
-                    
-                    if current_price > 0:
-                        # Keep only resistance ABOVE current price
-                        resistance_levels = [r for r in resistance_levels if r['price'] > current_price]
-                        # Keep only support BELOW current price
-                        support_levels = [s for s in support_levels if s['price'] < current_price]
-                    
-                    print(f"   ✅ Extracted {len(resistance_levels)} resistance, {len(support_levels)} support")
-                    
-                    return {
-                        'resistance': resistance_levels,
-                        'support': support_levels
-                    }
-        
-        print(f"❌ No valid data in response")
-        return None
-        
-    except Exception as e:
-        print(f"❌ Error fetching from Twelve Data: {e}")
-        return None
-
-
-def fallback_sr_from_chart(df):
-    """
-    SIMPLE FALLBACK: Use recent highs/lows if API fails
-    This is NOT professional calculation - just emergency backup
-    """
-    
-    if df is None or len(df) < 20:
-        return {'support': [], 'resistance': []}
-    
-    current_price = df['close'].iloc[-1]
-    
-    # Simple: Recent 50-period high/low
-    recent_high = df['high'].tail(50).max()
-    recent_low = df['low'].tail(50).min()
-    
-    resistance_levels = []
-    support_levels = []
-    
-    # Only add if in correct direction
-    if recent_high > current_price * 1.01:  # At least 1% above
-        resistance_levels.append({
-            'price': recent_high,
-            'touches': 1,
-            'strength': 'WEAK',
-            'status': 'INTACT',
-            'source': 'Recent High (Fallback)'
-        })
-    
-    if recent_low < current_price * 0.99:  # At least 1% below
-        support_levels.append({
-            'price': recent_low,
-            'touches': 1,
-            'strength': 'WEAK',
-            'status': 'INTACT',
-            'source': 'Recent Low (Fallback)'
-        })
-    
-    return {
-        'resistance': resistance_levels,
-        'support': support_levels
-    }
-
-
-def check_at_key_level(current_price, sr_zones, threshold=0.01):
-    """
-    Check if price is AT a key S/R level (within 1%)
-    """
-    for r in sr_zones.get('resistance', []):
-        if abs(current_price - r['price']) / current_price < threshold:
-            return True, 'RESISTANCE', r
-    
-    for s in sr_zones.get('support', []):
-        if abs(current_price - s['price']) / current_price < threshold:
-            return True, 'SUPPORT', s
-    
-    return False, None, None
-
-
-def get_price_targets_based_on_sr(current_price, sr_zones):
-    """
-    Get next S/R levels for targets
-    """
-    supports = sr_zones.get('support', [])
-    resistances = sr_zones.get('resistance', [])
-    
-    # Next resistance (closest above current price)
-    next_resistance = None
-    if resistances:
-        valid_resistance = [r for r in resistances if r['price'] > current_price]
-        if valid_resistance:
-            next_resistance = min(valid_resistance, key=lambda x: x['price'])
-    
-    # Next support (closest below current price)
-    next_support = None
-    if supports:
-        valid_support = [s for s in supports if s['price'] < current_price]
-        if valid_support:
-            next_support = max(valid_support, key=lambda x: x['price'])
-    
-    return {
-        'next_resistance': next_resistance,
-        'next_support': next_support,
-        'nearest_support': next_support,
-        'nearest_resistance': next_resistance
-    }
-
-
-def calculate_risk_reward(entry_price, target_price, stop_loss):
-    """Calculate risk-reward ratio"""
-    if entry_price == stop_loss:
-        return 0
-    
-    risk = abs(entry_price - stop_loss)
-    reward = abs(target_price - entry_price)
-    
-    return reward / risk if risk > 0 else 0
-
-
-def check_support_resistance_barriers(df, predicted_price, current_price):
-    """Check if predicted price faces S/R barriers"""
-    high_20 = df['high'].tail(20).max()
-    low_20 = df['low'].tail(20).min()
-    
-    barriers = []
-    
-    if current_price < predicted_price and predicted_price > high_20:
-        barriers.append(('resistance', high_20, abs(predicted_price - high_20)))
-    elif current_price > predicted_price and predicted_price < low_20:
-        barriers.append(('support', low_20, abs(predicted_price - low_20)))
-    
-    return barriers
-
-
-def analyze_timeframe_volatility(df, predicted_change_pct, timeframe_hours):
-    """Check if predicted change is realistic"""
-    recent_changes = df['close'].pct_change().tail(50)
-    
-    avg_hourly_change = abs(recent_changes).mean() * 100
-    max_hourly_change = abs(recent_changes).max() * 100
-    predicted_hourly_rate = abs(predicted_change_pct) / timeframe_hours
-    is_realistic = predicted_hourly_rate <= (avg_hourly_change * 2)
-    
-    return {
-        'avg_hourly_change': avg_hourly_change,
-        'max_hourly_change': max_hourly_change,
-        'predicted_hourly_rate': predicted_hourly_rate,
-        'is_realistic': is_realistic
-    }
-
-
-def adjust_confidence_for_barriers(base_confidence, barriers, volatility_context):
-    """Adjust confidence based on barriers"""
-    adjusted_confidence = base_confidence
-    
-    for barrier_type, price_level, distance in barriers:
-        if 'strong' in barrier_type:
-            adjusted_confidence *= 0.7
+        if obv_change_recent > 0:
+            # Whale buying
+            if price_change < 0.005:  # Price flat or slightly down
+                whale_signal = "ACCUMULATION"  # Smart money accumulating quietly
+            else:
+                whale_signal = "BUYING"  # Whale buying aggressively
+        elif obv_change_recent < 0:
+            # Whale selling
+            if price_change > -0.005:  # Price holding despite selling
+                whale_signal = "DISTRIBUTION"  # Smart money distributing quietly
+            else:
+                whale_signal = "SELLING"  # Whale dumping
         else:
-            adjusted_confidence *= 0.85
+            whale_signal = "NEUTRAL"  # Large volume but unclear direction
+
     
-    if not volatility_context['is_realistic']:
-        adjusted_confidence *= 0.6
+    signal = "NO_CONFIRMATION"
+    strength = 0
+    reasoning = []
+    reversal_confirmed = False
+    confirmation_score = 0
     
-    return max(30.0, min(95.0, adjusted_confidence))
+    # === IF C1 IS AT SUPPORT OR RESISTANCE, CHECK FOR REVERSAL ===
+    if c1_result and c1_result.get('at_key_level'):
+        level_type = c1_result.get('level_type')
+        
+        if level_type == 'SUPPORT':
+            # === CHECK FOR BULLISH REVERSAL AT SUPPORT ===
+            
+            # Check #1: RSI Reversal Pattern (Most Important)
+            rsi_prev_5 = [df['rsi'].iloc[i] for i in range(-6, -1) if i >= -len(df)]
+            if len(rsi_prev_5) >= 4:
+                rsi_low = min(rsi_prev_5)
+                if rsi < 40 and rsi > rsi_low + 3:
+                    # RSI forming higher low (reversal pattern!)
+                    confirmation_score += 4
+                    reasoning.append(f"RSI reversal: {rsi_low:.0f}→{rsi:.0f}")
+            
+            # Check #2: Volume Spike
+            avg_volume = df['volume'].tail(20).mean()
+            volume_ratio = volume / avg_volume if avg_volume > 0 else 1.0
+            if volume_ratio > 1.5:
+                confirmation_score += 3
+                reasoning.append(f"Volume spike: {volume_ratio:.1f}x")
+            elif volume_ratio > 1.2:
+                confirmation_score += 1
+                reasoning.append(f"Volume elevated: {volume_ratio:.1f}x")
+            
+            # Check #3: MACD Turning Up
+            macd_prev = df['macd'].iloc[-2] if len(df) > 1 else macd
+            if macd > macd_prev and macd > macd_signal:
+                confirmation_score += 1
+                reasoning.append("MACD turning bullish")
+            
+            # Check #4: ADX (Trend Strength)
+            if adx > 25:
+                confirmation_score += 1
+                reasoning.append(f"Strong trend ADX:{adx:.0f}")
+            
+            # Check #5: OBV Trend Support (NEW!)
+            if obv_trend == "IMPROVING":
+                confirmation_score += 2
+                reasoning.append(f"✅ OBV recovering: {obv_medium:.0f}→{obv_now:.0f} (buyers catching up)")
+            elif obv_trend == "DETERIORATING" and obv_velocity == "FAST":
+                confirmation_score -= 2
+                # Clarify: Getting MORE negative (worse)
+                reasoning.append(f"⚠️ OBV worsening: {obv_medium:.0f}→{obv_now:.0f} (selling accelerating)")
+            elif obv_trend == "DETERIORATING":
+                # Mention but less severe if slow
+                reasoning.append(f"⚪ OBV weakening: {obv_medium:.0f}→{obv_now:.0f} (recent trend)")
+            
+            # Check #6: Whale/Smart Money Detection
+            if whale_detected and whale_signal in ["ACCUMULATION", "BUYING"]:
+                confirmation_score += whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"{whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
+            elif whale_detected and whale_signal in ["DISTRIBUTION", "SELLING"]:
+                confirmation_score -= whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"⚠️ {whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
+            
+            # Decision for Support
+            if confirmation_score >= 6:
+                signal = "BULLISH_REVERSAL_CONFIRMED"
+                strength = min(confirmation_score, 10)
+                reversal_confirmed = True
+            elif confirmation_score >= 3:
+                signal = "POSSIBLE_BULLISH_REVERSAL"
+                strength = confirmation_score
+                reversal_confirmed = False
+            else:
+                signal = "NO_BULLISH_CONFIRMATION"
+                strength = confirmation_score
+                reversal_confirmed = False
+        
+        elif level_type == 'RESISTANCE':
+            # === CHECK FOR BEARISH REVERSAL AT RESISTANCE ===
+            
+            # Check #1: RSI Reversal Pattern
+            rsi_prev_5 = [df['rsi'].iloc[i] for i in range(-6, -1) if i >= -len(df)]
+            if len(rsi_prev_5) >= 4:
+                rsi_high = max(rsi_prev_5)
+                if rsi > 60 and rsi < rsi_high - 3:
+                    # RSI forming lower high (reversal pattern!)
+                    confirmation_score += 4
+                    reasoning.append(f"RSI reversal: {rsi_high:.0f}→{rsi:.0f}")
+            
+            # Check #2: Volume Spike
+            avg_volume = df['volume'].tail(20).mean()
+            volume_ratio = volume / avg_volume if avg_volume > 0 else 1.0
+            if volume_ratio > 1.5:
+                confirmation_score += 3
+                reasoning.append(f"Volume spike: {volume_ratio:.1f}x")
+            elif volume_ratio > 1.2:
+                confirmation_score += 1
+                reasoning.append(f"Volume elevated: {volume_ratio:.1f}x")
+            
+            # Check #3: MACD Turning Down
+            macd_prev = df['macd'].iloc[-2] if len(df) > 1 else macd
+            if macd < macd_prev and macd < macd_signal:
+                confirmation_score += 1
+                reasoning.append("MACD turning bearish")
+            
+            # Check #4: ADX (Trend Strength)
+            if adx > 25:
+                confirmation_score += 1
+                reasoning.append(f"Strong trend ADX:{adx:.0f}")
+            
+            # Check #5: OBV Trend Support (NEW!)
+            if obv_trend == "DETERIORATING":
+                confirmation_score += 2
+                reasoning.append(f"✅ OBV declining: {obv_medium:.0f}→{obv_now:.0f} (selling pressure)")
+            elif obv_trend == "IMPROVING" and obv_velocity == "FAST":
+                confirmation_score -= 2
+                # Getting LESS negative (better) - contradicts bearish
+                reasoning.append(f"⚠️ OBV recovering: {obv_medium:.0f}→{obv_now:.0f} (buyers entering)")
+            
+            # Check #6: Whale/Smart Money Detection
+            if whale_detected and whale_signal in ["DISTRIBUTION", "SELLING"]:
+                confirmation_score += whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"{whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
+            elif whale_detected and whale_signal in ["ACCUMULATION", "BUYING"]:
+                confirmation_score -= whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"⚠️ {whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
+            
+            # Decision for Resistance
+            if confirmation_score >= 6:
+                signal = "BEARISH_REVERSAL_CONFIRMED"
+                strength = min(confirmation_score, 10)
+                reversal_confirmed = True
+            elif confirmation_score >= 3:
+                signal = "POSSIBLE_BEARISH_REVERSAL"
+                strength = confirmation_score
+                reversal_confirmed = False
+            else:
+                signal = "NO_BEARISH_CONFIRMATION"
+                strength = confirmation_score
+                reversal_confirmed = False
+    
+    # === IF C1 IS MID-RANGE, CHECK MOMENTUM DIRECTION ===
+    else:
+        # Standard momentum analysis (when not at S/R)
+        # ENHANCED: Apply ADX+OBV mix (user's discovery!)
+        
+        # Calculate directional strength
+        di_ratio = plus_di / minus_di if minus_di > 0.1 else 999
+        strong_directional = (di_ratio > 4.0 or di_ratio < 0.25)  # 4:1 ratio or better
+        
+        if adx > 60 or (adx > 25 and strong_directional):
+            # Strong ADX OR strong directional movement - check OBV for quality
+            if plus_di > minus_di:  # Bullish direction
+                if obv_trend == "IMPROVING":
+                    signal = "BULLISH"
+                    strength = 9
+                    reasoning.append(f"ADX {adx:.1f} +DI:{plus_di:.1f}>{minus_di:.1f} + OBV improving")
+                elif obv_trend == "STABLE" or (obv_trend == "DETERIORATING" and obv_velocity == "SLOW"):
+                    signal = "BULLISH"
+                    strength = 7
+                    reasoning.append(f"ADX {adx:.1f} +DI:{plus_di:.1f}>{minus_di:.1f}, OBV {obv_trend.lower()}")
+                    reasoning.append(f"⚠️ Short-term momentum - OBV: {obv_medium:.0f}→{obv_now:.0f}")
+                elif obv_trend == "DETERIORATING" and obv_velocity in ["MEDIUM", "FAST"]:
+                    signal = "CAUTION_BULLISH"
+                    strength = 5
+                    reasoning.append(f"⚠️ +DI:{plus_di:.1f}>{minus_di:.1f} but OBV declining {obv_velocity.lower()}")
+                    reasoning.append(f"High risk - OBV: {obv_overall:.0f}→{obv_now:.0f}")
+            else:
+                # Bearish direction (-DI > +DI)
+                if obv_trend == "DETERIORATING":
+                    signal = "BEARISH"
+                    strength = 9
+                    reasoning.append(f"ADX {adx:.1f} -DI:{minus_di:.1f}>{plus_di:.1f} + OBV declining")
+                elif obv_trend == "STABLE" or (obv_trend == "IMPROVING" and obv_velocity == "SLOW"):
+                    signal = "BEARISH"
+                    strength = 7
+                    reasoning.append(f"ADX {adx:.1f} -DI:{minus_di:.1f}>{plus_di:.1f}, OBV {obv_trend.lower()}")
+                    reasoning.append(f"⚠️ Short-term momentum - OBV: {obv_medium:.0f}→{obv_now:.0f}")
+                elif obv_trend == "IMPROVING" and obv_velocity in ["MEDIUM", "FAST"]:
+                    signal = "CAUTION_BEARISH"
+                    strength = 5
+                    reasoning.append(f"⚠️ -DI:{minus_di:.1f}>{plus_di:.1f} but OBV rising {obv_velocity.lower()}")
+                    reasoning.append(f"High risk - OBV: {obv_overall:.0f}→{obv_now:.0f}")
+        
+        elif adx > 40:
+            # Moderate ADX - standard logic but note OBV
+            if close > df['sma_20'].iloc[-1]:
+                signal = "BULLISH"
+                strength = 6
+                reasoning.append(f"ADX {adx:.1f} uptrend")
+                if obv_trend == "DETERIORATING":
+                    reasoning.append(f"⚠️ OBV negative ({obv_trend.lower()})")
+            else:
+                signal = "BEARISH"
+                strength = 6
+                reasoning.append(f"ADX {adx:.1f} downtrend")
+                if obv_trend == "IMPROVING":
+                    reasoning.append(f"⚠️ OBV positive ({obv_trend.lower()})")
+        
+        elif macd > macd_signal and macd > 0:
+            signal = "BULLISH"
+            strength = 5
+            reasoning.append("MACD bullish")
+        
+        elif macd < macd_signal and macd < 0:
+            signal = "BEARISH"
+            strength = 5
+            reasoning.append("MACD bearish")
+        
+        else:
+            signal = "NEUTRAL"
+            strength = 5
+            reasoning.append("No clear momentum")
+    
+    return {
+        "signal": signal,
+        "strength": strength,
+        "reasoning": " | ".join(reasoning) if reasoning else "neutral",
+        "reversal_confirmed": reversal_confirmed,
+        "confirmation_score": confirmation_score,
+        "obv_analysis": {
+            "current": float(obv_now),
+            "recent": float(obv_recent),
+            "medium": float(obv_medium),
+            "overall": float(obv_overall),
+            "change_recent": float(obv_change_recent),
+            "change_medium": float(obv_change_medium),
+            "change_overall": float(obv_change_overall),
+            "trend": obv_trend,
+            "velocity": obv_velocity,
+            "timeframe_hours": timeframe_hours
+        },
+        "whale_analysis": {
+            "detected": whale_detected,
+            "type": whale_type,
+            "signal": whale_signal,
+            "strength": whale_strength,
+            "volume_ratio": float(volume_ratio)
+        }
+    }
+
+
+# ==================== CONSULTANT C3: RISK & WARNINGS ====================
+
+def consultant_c3_risk_warnings(df, symbol, warnings):
+    """
+    C3: Risk & Warning Analysis
+    Focus: Counts warnings and assesses risk level
+    """
+    if df is None or len(df) < 50:
+        return {"signal": "ACCEPTABLE", "strength": 5, "reasoning": "Insufficient data"}
+    
+    # Count active warnings
+    warning_count = 0
+    warning_types = []
+    
+    if warnings:
+        if warnings.get('news_warning'):
+            warning_count += 1
+            warning_types.append("news")
+        if warnings.get('price_warning'):
+            warning_count += 1
+            warning_types.append("price")
+        if warnings.get('volume_warning'):
+            warning_count += 1
+            warning_types.append("volume")
+        if warnings.get('momentum_warning'):
+            warning_count += 1
+            warning_types.append("momentum")
+    
+    # Risk assessment
+    if warning_count == 0:
+        signal = "ACCEPTABLE"
+        strength = 8
+        reasoning = "0 warnings"
+    elif warning_count == 1:
+        signal = "CAUTION"
+        strength = 6
+        reasoning = f"1 warning ({warning_types[0]})"
+    elif warning_count == 2:
+        signal = "HIGH_RISK"
+        strength = 5
+        reasoning = f"2 warnings ({','.join(warning_types)})"
+    else:
+        signal = "EXTREME_RISK"
+        strength = 1
+        reasoning = f"{warning_count} warnings - DO_NOT_TRADE"
+    
+    return {
+        "signal": signal,
+        "strength": strength,
+        "reasoning": reasoning
+    }
+
+
+# ==================== CONSULTANT C4: NEWS & SENTIMENT ====================
+
+def consultant_c4_news_sentiment(symbol, news_data=None):
+    """
+    C4: News & Sentiment Analysis
+    Focus: Critical and Major news only
+    """
+    if not news_data:
+        return {
+            "signal": "NO_NEWS",
+            "strength": 5,
+            "weight": 5,  # Low weight when no news
+            "reasoning": "No significant news"
+        }
+    
+    # Classify news importance
+    critical_keywords = ['sec lawsuit', 'government ban', 'exchange hack', 'bankruptcy', 'fraud', 'investigation']
+    major_keywords = ['partnership', 'listing', 'institutional', 'adoption', 'regulation approved']
+    
+    has_critical = any(keyword in str(news_data).lower() for keyword in critical_keywords)
+    has_major = any(keyword in str(news_data).lower() for keyword in major_keywords)
+    
+    if has_critical:
+        # Critical news - very high weight
+        sentiment = news_data.get('sentiment', 'neutral')
+        return {
+            "signal": "BULLISH" if sentiment == 'positive' else "BEARISH",
+            "strength": 9,
+            "weight": 70,  # Critical news gets 70% weight
+            "reasoning": "CRITICAL_NEWS_OVERRIDE"
+        }
+    elif has_major:
+        # Major news - moderate weight
+        sentiment = news_data.get('sentiment', 'neutral')
+        return {
+            "signal": "BULLISH" if sentiment == 'positive' else "BEARISH",
+            "strength": 7,
+            "weight": 40,  # Major news gets 40% weight
+            "reasoning": "MAJOR_NEWS_IMPACT"
+        }
+    else:
+        # Regular news - ignored
+        return {
+            "signal": "NO_NEWS",
+            "strength": 5,
+            "weight": 5,  # Regular news basically ignored
+            "reasoning": "Regular news (ignored)"
+        }
+
+
+# ==================== MEETING RESOLUTION ====================
+
+def consultant_meeting_resolution(c1, c2, c3, c4, current_price, asset_type=None, timeframe_hours=4):
+    """
+    NEW LOGIC: C1 identifies location, C2 confirms reversal
+    Only trades when BOTH agree on confirmed reversals
+    """
+    
+    # If C3 shows extreme risk (3+ warnings), DO NOT TRADE
+    if c3['strength'] <= 2:
+        return {
+            "position": "NEUTRAL",
+            "entry": current_price,
+            "target": current_price,
+            "stop_loss": current_price,
+            "hold_hours": 0,
+            "confidence": 0,
+            "reasoning": f"DO NOT TRADE - {c3['reasoning']}",
+            "risk_reward": 0
+        }
+    
+    # ==================== NEW DECISION LOGIC ====================
+    # C1 identifies WHERE (support/resistance/mid-range)
+    # C2 confirms IF momentum is reversing
+    
+    c1_signal = c1['signal']
+    c1_strength = c1['strength']
+    c2_confirmed = c2.get('reversal_confirmed', False)
+    c2_signal = c2['signal']
+    c2_strength = c2['strength']
+    
+    position = "NEUTRAL"
+    confidence = 0
+    reasoning_parts = []
+    
+    # === CASE 1: AT SUPPORT ===
+    if c1_signal in ['AT_SUPPORT', 'NEAR_SUPPORT']:
+        if c2_confirmed and 'BULLISH' in c2_signal:
+            # CONFIRMED BULLISH REVERSAL
+            position = "LONG"
+            confidence = min((c1_strength + c2_strength) / 20 * 100, 90)
+            reasoning_parts.append(f"✅ Confirmed bullish reversal at support")
+        elif c2_signal == 'BEARISH' and c2_strength >= 8:  # Higher threshold (was 7)
+            # VERY STRONG BEARISH = POTENTIAL BREAKDOWN
+            # Additional safety checks:
+            obv_analysis = c2.get('obv_analysis', {})
+            obv_trend = obv_analysis.get('trend', 'STABLE')
+            
+            # Require OBV confirmation for breakdowns
+            if obv_trend == "DETERIORATING":
+                position = "SHORT"
+                confidence = c2_strength * 10 * 0.7  # 30% penalty (was 20%)
+                reasoning_parts.append(f"📉 Strong breakdown attempt (OBV confirms)")
+            else:
+                # OBV not supporting - TOO RISKY
+                position = "NEUTRAL"
+                confidence = 0
+                reasoning_parts.append(f"⚠️ At support, momentum weak but OBV not confirming - WAIT")
+        else:
+            # NO CONFIRMATION - WAIT
+            position = "NEUTRAL"
+            confidence = 0
+            reasoning_parts.append(f"⏸️ At support but no clear signal - WAIT")
+    
+    # === CASE 2: AT RESISTANCE ===
+    elif c1_signal in ['AT_RESISTANCE', 'NEAR_RESISTANCE']:
+        if c2_confirmed and 'BEARISH' in c2_signal:
+            # CONFIRMED BEARISH REVERSAL
+            position = "SHORT"
+            confidence = min((c1_strength + c2_strength) / 20 * 100, 90)
+            reasoning_parts.append(f"✅ Confirmed bearish reversal at resistance")
+        elif c2_signal == 'BULLISH' and c2_strength >= 8:  # Higher threshold (was 7)
+            # VERY STRONG BULLISH = POTENTIAL BREAKOUT
+            # Additional safety checks:
+            obv_analysis = c2.get('obv_analysis', {})
+            obv_trend = obv_analysis.get('trend', 'STABLE')
+            
+            # Require OBV confirmation for breakouts
+            if obv_trend == "IMPROVING":
+                position = "LONG"
+                confidence = c2_strength * 10 * 0.7  # 30% penalty (was 20%)
+                reasoning_parts.append(f"🚀 Strong breakout attempt (OBV confirms)")
+            else:
+                # OBV not supporting - TOO RISKY
+                position = "NEUTRAL"
+                confidence = 0
+                reasoning_parts.append(f"⚠️ At resistance, momentum strong but OBV weak - WAIT")
+        else:
+            # NO CONFIRMATION - WAIT
+            position = "NEUTRAL"
+            confidence = 0
+            reasoning_parts.append(f"⏸️ At resistance but no clear signal - WAIT")
+    
+    # === CASE 3: MID-RANGE ===
+    else:
+        # Follow C2 momentum when not at S/R
+        if c2_signal == 'BULLISH' and c2_strength >= 6:
+            position = "LONG"
+            confidence = c2_strength * 10
+            reasoning_parts.append(f"📈 Mid-range bullish momentum")
+        elif c2_signal == 'BEARISH' and c2_strength >= 6:
+            position = "SHORT"
+            confidence = c2_strength * 10
+            reasoning_parts.append(f"📉 Mid-range bearish momentum")
+        else:
+            position = "NEUTRAL"
+            confidence = 0
+            reasoning_parts.append(f"⚪ Mid-range, no clear momentum")
+    
+    # === APPLY RISK PENALTY (C3) ===
+    risk_multiplier = c3['strength'] / 10.0
+    if c3['signal'] == 'HIGH_RISK':
+        confidence *= max(risk_multiplier, 0.7)  # Max 30% reduction
+    else:
+        confidence *= risk_multiplier
+    
+    # === APPLY NEWS WEIGHT (C4) ===
+    if c4['weight'] >= 70:  # Critical news
+        if c4['signal'] == 'BULLISH' and position == 'SHORT':
+            confidence *= 0.5  # Cut in half if against critical news
+        elif c4['signal'] == 'BEARISH' and position == 'LONG':
+            confidence *= 0.5
+    
+    # === MINIMUM CONFIDENCE CHECK ===
+    if confidence < 20:
+        position = "NEUTRAL"
+        confidence = 0
+        reasoning_parts.append(f"⚠️ Confidence too low")
+    
+    # ==================== CALCULATE TARGETS ====================
+    # Hold duration - 1 candle prediction
+    if c4['weight'] >= 70:
+        hold_hours = timeframe_hours * 2  # Critical news: 2 candles
+    else:
+        hold_hours = timeframe_hours  # Normal: 1 candle
+    
+    entry = current_price
+    
+    # Asset-aware max move
+    if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
+        if hold_hours <= 12:
+            max_move_pct = 0.01  # 1% for forex
+        else:
+            max_move_pct = 0.015  # 1.5% for forex daily
+    else:
+        if hold_hours <= 8:
+            max_move_pct = 0.03  # 3% for crypto
+        else:
+            max_move_pct = 0.05  # 5% for crypto daily
+    
+    if position == "LONG":
+        # Get S/R target
+        targets_sr = c1.get('targets', {})
+        next_resistance = targets_sr.get('next_resistance')
+        
+        if next_resistance and next_resistance['price'] > entry * 1.01:
+            target = min(next_resistance['price'] * 0.98, entry * (1 + max_move_pct))
+        else:
+            target = entry * (1 + max_move_pct)
+        
+        if target <= entry:
+            target = entry * (1 + max_move_pct)
+        
+        # Stop loss with minimum distance
+        min_stop_pct = 0.015 if "Forex" not in str(asset_type) else 0.008
+        stop_loss = entry * (1 - max(0.02, min_stop_pct))
+    
+    elif position == "SHORT":
+        # Get S/R target
+        targets_sr = c1.get('targets', {})
+        next_support = targets_sr.get('next_support')
+        
+        if next_support and next_support['price'] < entry * 0.99:
+            target = max(next_support['price'] * 1.02, entry * (1 - max_move_pct))
+        else:
+            target = entry * (1 - max_move_pct)
+        
+        if target >= entry:
+            target = entry * (1 - max_move_pct)
+        
+        # Stop loss with minimum distance
+        min_stop_pct = 0.015 if "Forex" not in str(asset_type) else 0.008
+        stop_loss = entry * (1 + max(0.02, min_stop_pct))
+    
+    else:
+        target = current_price
+        stop_loss = current_price
+    
+    # Calculate risk/reward
+    if position != "NEUTRAL":
+        risk = abs(entry - stop_loss)
+        reward = abs(target - entry)
+        risk_reward = reward / risk if risk > 0 else 0
+    else:
+        risk_reward = 0
+    
+    # Build full reasoning
+    full_reasoning = [
+        f"C1: {c1['signal']} {c1['strength']}/10 ({c1['reasoning']})",
+        f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
+        f"C3: {c3['signal']} ({c3['reasoning']})",
+        f"C4: {c4['signal']} (weight: {c4['weight']}%)"
+    ]
+    
+    full_reasoning.extend(reasoning_parts)
+    
+    return {
+        "position": position,
+        "entry": entry,
+        "target": target,
+        "stop_loss": stop_loss,
+        "hold_hours": hold_hours,
+        "confidence": int(confidence),
+        "reasoning": " | ".join(full_reasoning),
+        "risk_reward": round(risk_reward, 2)
+    }
+
+
+# ==================== MAIN ENTRY POINT ====================
+
+def run_consultant_meeting(symbol, asset_type, current_price, warning_details, timeframe_hours=1):
+    """
+    Main function called by app.py
+    Runs the full consultant meeting process
+    
+    Args:
+        timeframe_hours: Trading timeframe in hours (default 1 for 1H)
+    """
+    
+    # Map timeframe hours to API format
+    timeframe_map = {
+        0.0833: {'binance': '5m', 'okx': '5m', 'limit': 100},  # 5 minutes
+        0.25: {'binance': '15m', 'okx': '15m', 'limit': 100},  # 15 minutes
+        0.5: {'binance': '30m', 'okx': '30m', 'limit': 100},   # 30 minutes
+        1: {'binance': '1h', 'okx': '1H', 'limit': 100},       # 1 hour
+        4: {'binance': '4h', 'okx': '4H', 'limit': 100},       # 4 hours
+        24: {'binance': '1d', 'okx': '1D', 'limit': 100}       # 1 day
+    }
+    
+    timeframe_config = timeframe_map.get(timeframe_hours, {'binance': '1h', 'okx': '1H', 'limit': 100})
+    df, source = fetch_data(symbol, asset_type, timeframe_config)
+    
+    if df is None or len(df) < 50:
+        return {
+            'position': 'NEUTRAL',
+            'entry': current_price,
+            'target': current_price,
+            'stop_loss': current_price,
+            'reasoning': 'Insufficient data for analysis',
+            'confidence': 0
+        }
+    
+    # Calculate indicators
+    df = calculate_technical_indicators(df)
+    
+    # Convert timeframe to Twelve Data format for S/R API
+    twelvedata_interval_map = {
+        0.0833: '5min',
+        0.25: '15min',
+        0.5: '30min',
+        1: '1h',
+        4: '4h',
+        24: '1day'
+    }
+    twelvedata_interval = twelvedata_interval_map.get(timeframe_hours, '1h')
+    
+    # Run all 4 consultants
+    c1_result = consultant_c1_pattern_structure(df, symbol, interval=twelvedata_interval)
+    c2_result = consultant_c2_trend_momentum(df, symbol, c1_result, timeframe_hours)  # Pass C1 result and timeframe!
+    c3_result = consultant_c3_risk_warnings(df, symbol, warning_details)
+    c4_result = consultant_c4_news_sentiment(symbol, news_data=None)
+    
+    # Resolve their votes
+    meeting_result = consultant_meeting_resolution(
+        c1_result, c2_result, c3_result, c4_result,
+        current_price, asset_type, timeframe_hours=timeframe_hours  # Use actual parameter!
+    )
+    
+    return meeting_result
