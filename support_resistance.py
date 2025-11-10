@@ -1,6 +1,6 @@
 """
-Support & Resistance Module - DYNAMIC S/R with role reversal
-Based on original working code with full dynamic behavior
+Support & Resistance Module - PROFESSIONAL TRADER APPROACH
+Uses REAL trading methodology - not academic algorithms
 """
 import numpy as np
 import pandas as pd
@@ -8,34 +8,42 @@ import pandas as pd
 
 def find_support_resistance_zones(df, lookback=100):
     """
-    Find S/R levels where price reversed multiple times
-    DYNAMIC: Updates when levels are broken (support becomes resistance and vice versa)
+    Professional S/R detection based on REAL trading methodology
+    
+    How Real Traders Find S/R:
+    1. Recent swing highs/lows (20+ candle window)
+    2. Multiple touches at same price level
+    3. Clear visual rejection zones
+    4. Price must have REACTED at these levels
     """
     
-    if df is None or len(df) < 20:
+    if df is None or len(df) < 50:
         return {'support': [], 'resistance': []}
     
-    if len(df) < lookback:
-        lookback = len(df)
+    # Use reasonable lookback
+    lookback = min(lookback, len(df))
+    df_recent = df.tail(lookback).copy()
+    current_price = df_recent['close'].iloc[-1]
     
-    current_price = df['close'].iloc[-1]
-    highs = df['high'].tail(lookback)
-    lows = df['low'].tail(lookback)
+    # ==================== STEP 1: Find Swing Points ====================
+    # Use LARGER window (20 candles) - real traders don't look at every tiny wiggle
+    window = 20
     
-    # Find local peaks (resistance candidates)
-    resistance_zones = []
-    for i in range(5, len(highs) - 5):
-        if highs.iloc[i] == highs.iloc[i-5:i+5].max():
-            resistance_zones.append(highs.iloc[i])
+    swing_highs = []
+    swing_lows = []
     
-    # Find local bottoms (support candidates)
-    support_zones = []
-    for i in range(5, len(lows) - 5):
-        if lows.iloc[i] == lows.iloc[i-5:i+5].min():
-            support_zones.append(lows.iloc[i])
+    for i in range(window, len(df_recent) - window):
+        # Swing High: Highest point in 20-candle window on both sides
+        if df_recent['high'].iloc[i] == df_recent['high'].iloc[i-window:i+window+1].max():
+            swing_highs.append(df_recent['high'].iloc[i])
+        
+        # Swing Low: Lowest point in 20-candle window on both sides
+        if df_recent['low'].iloc[i] == df_recent['low'].iloc[i-window:i+window+1].min():
+            swing_lows.append(df_recent['low'].iloc[i])
     
-    # Group nearby levels (within 2% = same zone)
-    def cluster_levels(levels, tolerance=0.02):
+    # ==================== STEP 2: Cluster Nearby Levels ====================
+    # Group levels within 1.5% - real support/resistance are zones, not exact prices
+    def cluster_levels(levels, tolerance=0.015):
         if not levels:
             return []
         
@@ -44,150 +52,90 @@ def find_support_resistance_zones(df, lookback=100):
         current_cluster = [levels[0]]
         
         for level in levels[1:]:
-            if level <= current_cluster[-1] * (1 + tolerance):
+            # If within 1.5% of cluster, add to it
+            if level <= np.mean(current_cluster) * (1 + tolerance):
                 current_cluster.append(level)
             else:
-                clusters.append(np.mean(current_cluster))
+                # Finalize cluster as average
+                if len(current_cluster) >= 1:  # At least 1 touch
+                    clusters.append({
+                        'price': np.mean(current_cluster),
+                        'touches': len(current_cluster)
+                    })
                 current_cluster = [level]
         
-        clusters.append(np.mean(current_cluster))
+        # Don't forget last cluster
+        if len(current_cluster) >= 1:
+            clusters.append({
+                'price': np.mean(current_cluster),
+                'touches': len(current_cluster)
+            })
+        
         return clusters
     
-    # Get strongest S/R levels (price tested multiple times)
-    strong_resistance = cluster_levels(resistance_zones)
-    strong_support = cluster_levels(support_zones)
+    resistance_clusters = cluster_levels(swing_highs)
+    support_clusters = cluster_levels(swing_lows)
     
-    # Count how many times each level was tested
-    def count_touches(price_level, df_subset, tolerance=0.02):
-        touches = 0
-        for i in range(len(df_subset)):
-            high = df_subset['high'].iloc[i]
-            low = df_subset['low'].iloc[i]
-            if (abs(high - price_level) / price_level < tolerance or 
-                abs(low - price_level) / price_level < tolerance):
-                touches += 1
-        return touches
+    # ==================== STEP 3: Filter by Direction ====================
+    # RESISTANCE must be ABOVE current price
+    # SUPPORT must be BELOW current price
     
-    # Check if level was broken (role reversal)
-    def is_level_broken(price_level, df, current_price):
-        """
-        Detect if price broke through a level
-        - If price is now ABOVE old resistance → resistance became support (FLIPPED)
-        - If price is now BELOW old support → support became resistance (FLIPPED)
-        """
-        # Check recent price action (last 20 candles)
-        recent_lows = df['low'].tail(20)
-        recent_highs = df['high'].tail(20)
+    valid_resistance = []
+    for cluster in resistance_clusters:
+        level = cluster['price']
+        touches = cluster['touches']
         
-        # Level was support, but price broke below it
-        if current_price < price_level * 0.98:  # 2% below
-            if any(recent_lows > price_level * 0.98):  # Was above recently
-                return 'SUPPORT_BROKEN'
-        
-        # Level was resistance, but price broke above it
-        if current_price > price_level * 1.02:  # 2% above
-            if any(recent_highs < price_level * 1.02):  # Was below recently
-                return 'RESISTANCE_BROKEN'
-        
-        return 'INTACT'
-    
-    # Build resistance list with role reversal logic
-    resistance_strength = []
-    for level in strong_resistance:
-        touches = count_touches(level, df.tail(lookback))
-        status = is_level_broken(level, df, current_price)
-        
-        # If resistance was broken, it becomes support (skip here, add to support later)
-        if status == 'RESISTANCE_BROKEN':
-            continue
-        
-        if touches >= 2:
-            resistance_strength.append({
-                'price': level,
-                'touches': touches,
-                'strength': 'STRONG' if touches >= 3 else 'MEDIUM',
-                'status': status
-            })
-    
-    # Build support list with role reversal logic
-    support_strength = []
-    for level in strong_support:
-        touches = count_touches(level, df.tail(lookback))
-        status = is_level_broken(level, df, current_price)
-        
-        # If support was broken, it becomes resistance (skip here, add to resistance later)
-        if status == 'SUPPORT_BROKEN':
-            continue
-        
-        if touches >= 2:
-            support_strength.append({
-                'price': level,
-                'touches': touches,
-                'strength': 'STRONG' if touches >= 3 else 'MEDIUM',
-                'status': status
-            })
-    
-    # Add broken levels to opposite list (role reversal)
-    # Broken resistance becomes support
-    for level in strong_resistance:
-        status = is_level_broken(level, df, current_price)
-        if status == 'RESISTANCE_BROKEN':
-            touches = count_touches(level, df.tail(lookback))
-            if touches >= 2:
-                support_strength.append({
+        # Must be above current price
+        if level > current_price * 1.002:  # At least 0.2% above
+            # Must be within reasonable range (not too far away)
+            if level < current_price * 1.20:  # Within 20%
+                strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
+                valid_resistance.append({
                     'price': level,
                     'touches': touches,
-                    'strength': 'FLIPPED',  # Was resistance, now support
-                    'status': 'FLIPPED'
+                    'strength': strength,
+                    'status': 'INTACT'
                 })
     
-    # Broken support becomes resistance
-    for level in strong_support:
-        status = is_level_broken(level, df, current_price)
-        if status == 'SUPPORT_BROKEN':
-            touches = count_touches(level, df.tail(lookback))
-            if touches >= 2:
-                resistance_strength.append({
+    valid_support = []
+    for cluster in support_clusters:
+        level = cluster['price']
+        touches = cluster['touches']
+        
+        # Must be below current price
+        if level < current_price * 0.998:  # At least 0.2% below
+            # Must be within reasonable range
+            if level > current_price * 0.80:  # Within 20%
+                strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
+                valid_support.append({
                     'price': level,
                     'touches': touches,
-                    'strength': 'FLIPPED',  # Was support, now resistance
-                    'status': 'FLIPPED'
+                    'strength': strength,
+                    'status': 'INTACT'
                 })
     
-    # Filter to show RELEVANT levels
-    # Resistance: Must be ABOVE current price (within reasonable range)
-    # Support: Must be BELOW current price (within reasonable range)
-    # Keep within 15% range for visibility but enforce direction
-    relevant_resistance = [r for r in resistance_strength 
-                          if current_price * 1.001 <= r['price'] <= current_price * 1.15]
-    relevant_support = [s for s in support_strength 
-                       if current_price * 0.85 <= s['price'] <= current_price * 0.999]
+    # ==================== STEP 4: Sort by Proximity ====================
+    # Nearest levels are most important
+    valid_resistance.sort(key=lambda x: x['price'])  # Closest resistance first
+    valid_support.sort(key=lambda x: x['price'], reverse=True)  # Closest support first
     
-    # Sort by price (resistance descending, support descending)
-    relevant_resistance.sort(key=lambda x: x['price'], reverse=True)
-    relevant_support.sort(key=lambda x: x['price'], reverse=True)
-    
+    # Return top 5 of each
     return {
-        'resistance': relevant_resistance,
-        'support': relevant_support
+        'resistance': valid_resistance[:5],
+        'support': valid_support[:5]
     }
 
 
-def check_at_key_level(current_price, sr_zones, threshold=0.005):
+def check_at_key_level(current_price, sr_zones, threshold=0.01):
     """
-    Check if current price is AT a key support or resistance level
-    Returns: (at_level, level_type, level_info)
+    Check if price is AT a key S/R level (within 1%)
     """
-    # Check resistance levels
     for r in sr_zones.get('resistance', []):
-        distance_pct = abs(current_price - r['price']) / current_price
-        if distance_pct < threshold:
+        if abs(current_price - r['price']) / current_price < threshold:
             return True, 'RESISTANCE', r
     
-    # Check support levels
     for s in sr_zones.get('support', []):
-        distance_pct = abs(current_price - s['price']) / current_price
-        if distance_pct < threshold:
+        if abs(current_price - s['price']) / current_price < threshold:
             return True, 'SUPPORT', s
     
     return False, None, None
@@ -195,29 +143,22 @@ def check_at_key_level(current_price, sr_zones, threshold=0.005):
 
 def get_price_targets_based_on_sr(current_price, sr_zones):
     """
-    Trader logic: If price breaks level, next target is the next level
-    Returns nearest S/R levels and price targets
+    Get next S/R levels for targets
     """
     supports = sr_zones.get('support', [])
     resistances = sr_zones.get('resistance', [])
     
-    # Find nearest support (below current price)
-    nearest_support = None
-    for s in supports:
-        if s['price'] < current_price:
-            nearest_support = s
-            break
+    # Next resistance (first one above price)
+    next_resistance = resistances[0] if resistances else None
     
-    # Find nearest resistance (above current price)
-    nearest_resistance = None
-    for r in resistances:
-        if r['price'] > current_price:
-            nearest_resistance = r
-            break
+    # Next support (first one below price)
+    next_support = supports[0] if supports else None
     
     return {
-        'nearest_support': nearest_support,
-        'nearest_resistance': nearest_resistance
+        'next_resistance': next_resistance,
+        'next_support': next_support,
+        'nearest_support': next_support,
+        'nearest_resistance': next_resistance
     }
 
 
@@ -233,31 +174,24 @@ def calculate_risk_reward(entry_price, target_price, stop_loss):
 
 
 def check_support_resistance_barriers(df, predicted_price, current_price):
-    """Check if predicted price needs to break through major support/resistance levels"""
+    """Check if predicted price needs to break through major S/R"""
     high_20 = df['high'].tail(20).max()
     low_20 = df['low'].tail(20).min()
-    
-    recent_highs = df['high'].tail(50).nlargest(5).mean()
-    recent_lows = df['low'].tail(50).nsmallest(5).mean()
     
     barriers = []
     
     if current_price < predicted_price:
         if predicted_price > high_20:
             barriers.append(('resistance', high_20, abs(predicted_price - high_20)))
-        if predicted_price > recent_highs:
-            barriers.append(('strong_resistance', recent_highs, abs(predicted_price - recent_highs)))
     else:
         if predicted_price < low_20:
             barriers.append(('support', low_20, abs(predicted_price - low_20)))
-        if predicted_price < recent_lows:
-            barriers.append(('strong_support', recent_lows, abs(predicted_price - recent_lows)))
     
     return barriers
 
 
 def analyze_timeframe_volatility(df, predicted_change_pct, timeframe_hours):
-    """Check if the predicted change is realistic for the given timeframe"""
+    """Check if predicted change is realistic"""
     recent_changes = df['close'].pct_change().tail(50)
     
     avg_hourly_change = abs(recent_changes).mean() * 100
@@ -267,18 +201,16 @@ def analyze_timeframe_volatility(df, predicted_change_pct, timeframe_hours):
     
     is_realistic = predicted_hourly_rate <= (avg_hourly_change * 2)
     
-    volatility_context = {
+    return {
         'avg_hourly_change': avg_hourly_change,
         'max_hourly_change': max_hourly_change,
         'predicted_hourly_rate': predicted_hourly_rate,
         'is_realistic': is_realistic
     }
-    
-    return volatility_context
 
 
 def adjust_confidence_for_barriers(base_confidence, barriers, volatility_context):
-    """Adjust AI confidence based on barriers and volatility"""
+    """Adjust confidence based on barriers"""
     adjusted_confidence = base_confidence
     
     for barrier_type, price_level, distance in barriers:
@@ -290,7 +222,4 @@ def adjust_confidence_for_barriers(base_confidence, barriers, volatility_context
     if not volatility_context['is_realistic']:
         adjusted_confidence *= 0.6
     
-    adjusted_confidence = max(adjusted_confidence, 30.0)
-    adjusted_confidence = min(adjusted_confidence, 95.0)
-    
-    return adjusted_confidence
+    return max(30.0, min(95.0, adjusted_confidence))
