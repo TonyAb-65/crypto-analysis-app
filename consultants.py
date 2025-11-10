@@ -10,163 +10,26 @@ from datetime import datetime
 from data_api import fetch_data
 from indicators import calculate_technical_indicators
 
-
-# ==================== SUPPORT/RESISTANCE ANALYSIS ====================
-
-def find_support_resistance_zones(df, lookback=100):
-    """
-    Professional S/R zone detection with rejection counting
-    Returns zones with strength ratings based on historical tests
-    """
-    if df is None or len(df) < lookback:
-        return {'support': [], 'resistance': []}
-    
-    # Use last N candles
-    df_analysis = df.tail(lookback).copy()
-    
-    # Find local peaks (resistance) and troughs (support)
-    highs = df_analysis['high'].values
-    lows = df_analysis['low'].values
-    closes = df_analysis['close'].values
-    
-    support_zones = []
-    resistance_zones = []
-    
-    # Group similar price levels (within 1% tolerance)
-    def group_levels(prices, tolerance=0.01):
-        if len(prices) == 0:
-            return []
-        
-        prices_sorted = sorted(prices)
-        groups = []
-        current_group = [prices_sorted[0]]
-        
-        for price in prices_sorted[1:]:
-            if abs(price - current_group[-1]) / current_group[-1] <= tolerance:
-                current_group.append(price)
-            else:
-                groups.append(current_group)
-                current_group = [price]
-        
-        if current_group:
-            groups.append(current_group)
-        
-        return groups
-    
-    # Find resistance (price failed to break above)
-    resistance_prices = []
-    for i in range(2, len(highs) - 2):
-        if highs[i] >= highs[i-1] and highs[i] >= highs[i-2] and \
-           highs[i] >= highs[i+1] and highs[i] >= highs[i+2]:
-            resistance_prices.append(highs[i])
-    
-    # Find support (price failed to break below)
-    support_prices = []
-    for i in range(2, len(lows) - 2):
-        if lows[i] <= lows[i-1] and lows[i] <= lows[i-2] and \
-           lows[i] <= lows[i+1] and lows[i] <= lows[i+2]:
-            support_prices.append(lows[i])
-    
-    # Group and count touches
-    current_price = closes[-1]  # Get most recent price
-    
-    resistance_groups = group_levels(resistance_prices)
-    for group in resistance_groups:
-        avg_price = np.mean(group)
-        
-        # Keep resistance levels ABOVE current price only
-        # Resistance that's been broken through is no longer valid
-        if avg_price > current_price * 1.001:  # At least 0.1% above current price
-            touches = len(group)
-            strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
-            resistance_zones.append({
-                'price': avg_price,
-                'touches': touches,
-                'strength': strength
-            })
-    
-    support_groups = group_levels(support_prices)
-    for group in support_groups:
-        avg_price = np.mean(group)
-        
-        # Keep support levels BELOW current price only
-        # Support that's been broken through is no longer valid
-        if avg_price < current_price * 0.999:  # At least 0.1% below current price
-            touches = len(group)
-            strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
-            support_zones.append({
-                'price': avg_price,
-                'touches': touches,
-                'strength': strength
-            })
-    
-    # Sort by strength (touches)
-    support_zones.sort(key=lambda x: x['touches'], reverse=True)
-    resistance_zones.sort(key=lambda x: x['touches'], reverse=True)
-    
-    return {
-        'support': support_zones[:5],  # Top 5
-        'resistance': resistance_zones[:5]
-    }
-
-
-def get_price_targets_based_on_sr(current_price, sr_zones):
-    """
-    Get next support and resistance targets based on current price
-    """
-    support_levels = sr_zones.get('support', [])
-    resistance_levels = sr_zones.get('resistance', [])
-    
-    # Find next resistance (above current price)
-    next_resistance = None
-    for level in resistance_levels:
-        if level['price'] > current_price:
-            if next_resistance is None or level['price'] < next_resistance['price']:
-                next_resistance = level
-    
-    # Find next support (below current price)
-    next_support = None
-    for level in support_levels:
-        if level['price'] < current_price:
-            if next_support is None or level['price'] > next_support['price']:
-                next_support = level
-    
-    return {
-        'next_support': next_support,
-        'next_resistance': next_resistance
-    }
-
-
-def check_at_key_level(current_price, sr_zones, tolerance=0.01):
-    """
-    Check if current price is AT a key support or resistance level
-    Returns: (is_at_level, level_type, level_info)
-    """
-    support_levels = sr_zones.get('support', [])
-    resistance_levels = sr_zones.get('resistance', [])
-    
-    # Check resistance
-    for level in resistance_levels:
-        distance_pct = abs(current_price - level['price']) / current_price
-        if distance_pct <= tolerance:
-            return True, 'RESISTANCE', level
-    
-    # Check support
-    for level in support_levels:
-        distance_pct = abs(current_price - level['price']) / current_price
-        if distance_pct <= tolerance:
-            return True, 'SUPPORT', level
-    
-    return False, None, None
+# Import S/R functions from support_resistance module (uses Twelve Data API)
+from support_resistance import (
+    find_support_resistance_zones,
+    get_price_targets_based_on_sr,
+    check_at_key_level
+)
 
 
 # ==================== CONSULTANT C1: PATTERN & STRUCTURE ====================
 
-def consultant_c1_pattern_structure(df, symbol):
+def consultant_c1_pattern_structure(df, symbol, interval='1h'):
     """
     C1: Pattern & Structure Analysis
     Focus: Identifies LOCATION (Support/Resistance/Mid-range)
     DOES NOT predict direction - only identifies WHERE price is
+    
+    Args:
+        df: Price dataframe
+        symbol: Trading symbol (e.g., 'BTC/USD', 'EUR/USD')
+        interval: Timeframe (e.g., '1h', '4h', '1d') for Twelve Data API
     """
     if df is None or len(df) < 50:
         return {
@@ -187,8 +50,8 @@ def consultant_c1_pattern_structure(df, symbol):
     at_key_level = False
     level_type = None
     
-    # Professional S/R Analysis
-    sr_zones = find_support_resistance_zones(df, lookback=100)
+    # Professional S/R Analysis from Twelve Data API
+    sr_zones = find_support_resistance_zones(df, symbol=symbol, interval=interval)
     targets = get_price_targets_based_on_sr(close, sr_zones)
     at_level, detected_level_type, level_info = check_at_key_level(close, sr_zones)
     
@@ -987,8 +850,19 @@ def run_consultant_meeting(symbol, asset_type, current_price, warning_details, t
     # Calculate indicators
     df = calculate_technical_indicators(df)
     
+    # Convert timeframe to Twelve Data format for S/R API
+    twelvedata_interval_map = {
+        0.0833: '5min',
+        0.25: '15min',
+        0.5: '30min',
+        1: '1h',
+        4: '4h',
+        24: '1day'
+    }
+    twelvedata_interval = twelvedata_interval_map.get(timeframe_hours, '1h')
+    
     # Run all 4 consultants
-    c1_result = consultant_c1_pattern_structure(df, symbol)
+    c1_result = consultant_c1_pattern_structure(df, symbol, interval=twelvedata_interval)
     c2_result = consultant_c2_trend_momentum(df, symbol, c1_result, timeframe_hours)  # Pass C1 result and timeframe!
     c3_result = consultant_c3_risk_warnings(df, symbol, warning_details)
     c4_result = consultant_c4_news_sentiment(symbol, news_data=None)
