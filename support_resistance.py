@@ -154,11 +154,14 @@ def find_support_resistance_zones(df, lookback=100):
                     'status': 'FLIPPED'
                 })
     
-    # Filter to only show RELEVANT levels
-    # Resistance must be ABOVE current price
-    # Support must be BELOW current price
-    relevant_resistance = [r for r in resistance_strength if r['price'] > current_price * 1.001]  # At least 0.1% above
-    relevant_support = [s for s in support_strength if s['price'] < current_price * 0.999]  # At least 0.1% below
+    # Filter to show RELEVANT levels
+    # Resistance: Must be ABOVE current price (within reasonable range)
+    # Support: Must be BELOW current price (within reasonable range)
+    # Keep within 15% range for visibility but enforce direction
+    relevant_resistance = [r for r in resistance_strength 
+                          if current_price * 1.001 <= r['price'] <= current_price * 1.15]
+    relevant_support = [s for s in support_strength 
+                       if current_price * 0.85 <= s['price'] <= current_price * 0.999]
     
     # Sort by price (resistance descending, support descending)
     relevant_resistance.sort(key=lambda x: x['price'], reverse=True)
