@@ -1510,27 +1510,45 @@ if df is not None and len(df) > 0:
                     styled_df = trades_df.style.applymap(color_pl, subset=['profit_loss', 'profit_loss_pct'])
                     st.dataframe(styled_df, use_container_width=True)
                     
-                    # Summary stats
+                    # Summary stats - Calculate from ALL trades, not just displayed 20
+                    # Get complete stats from database
+                    conn_stats = sqlite3.connect(str(DB_PATH))
+                    cursor_stats = conn_stats.cursor()
+                    
+                    cursor_stats.execute("""
+                        SELECT 
+                            COUNT(*) as total_trades,
+                            COUNT(CASE WHEN profit_loss > 0 THEN 1 END) as wins,
+                            AVG(CASE WHEN profit_loss > 0 THEN profit_loss END) as avg_win,
+                            AVG(CASE WHEN profit_loss < 0 THEN profit_loss END) as avg_loss,
+                            SUM(profit_loss) as total_pl
+                        FROM trade_results
+                    """)
+                    
+                    stats = cursor_stats.fetchone()
+                    conn_stats.close()
+                    
+                    total_all = stats[0] if stats[0] else 0
+                    wins_all = stats[1] if stats[1] else 0
+                    avg_win_all = stats[2] if stats[2] else 0
+                    avg_loss_all = stats[3] if stats[3] else 0
+                    total_pl_all = stats[4] if stats[4] else 0
+                    
                     col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
                     
                     with col_stat1:
-                        wins = len(trades_df[trades_df['profit_loss'] > 0])
-                        total = len(trades_df)
-                        win_rate = (wins / total * 100) if total > 0 else 0
-                        st.metric("Win Rate", f"{win_rate:.1f}%", f"{wins}/{total}")
+                        win_rate = (wins_all / total_all * 100) if total_all > 0 else 0
+                        st.metric("Win Rate", f"{win_rate:.1f}%", f"{wins_all}/{total_all}")
                     
                     with col_stat2:
-                        avg_win = trades_df[trades_df['profit_loss'] > 0]['profit_loss'].mean()
-                        st.metric("Avg Win", f"${avg_win:.2f}" if not pd.isna(avg_win) else "$0.00")
+                        st.metric("Avg Win", f"${avg_win_all:.2f}")
                     
                     with col_stat3:
-                        avg_loss = trades_df[trades_df['profit_loss'] < 0]['profit_loss'].mean()
-                        st.metric("Avg Loss", f"${avg_loss:.2f}" if not pd.isna(avg_loss) else "$0.00")
+                        st.metric("Avg Loss", f"${avg_loss_all:.2f}")
                     
                     with col_stat4:
-                        total_pl = trades_df['profit_loss'].sum()
-                        st.metric("Total P/L", f"${total_pl:.2f}", 
-                                 "🟢" if total_pl > 0 else "🔴" if total_pl < 0 else "⚪")
+                        st.metric("Total P/L", f"${total_pl_all:.2f}", 
+                                 "🟢" if total_pl_all > 0 else "🔴" if total_pl_all < 0 else "⚪")
                 else:
                     st.info("No closed trades yet")
             
