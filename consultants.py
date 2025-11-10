@@ -74,9 +74,9 @@ def find_support_resistance_zones(df, lookback=100):
     for group in resistance_groups:
         avg_price = np.mean(group)
         
-        # Keep resistance levels AT or ABOVE current price
-        # Changed from 0.5% to 0.2% to catch levels we're currently testing
-        if avg_price >= current_price * 0.998:  # Within 0.2% or above
+        # Keep resistance levels ABOVE current price only
+        # Resistance that's been broken through is no longer valid
+        if avg_price > current_price * 1.001:  # At least 0.1% above current price
             touches = len(group)
             strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
             resistance_zones.append({
@@ -89,9 +89,9 @@ def find_support_resistance_zones(df, lookback=100):
     for group in support_groups:
         avg_price = np.mean(group)
         
-        # Keep support levels AT or BELOW current price
-        # Changed from 0.5% to 0.2% to catch levels we're currently testing
-        if avg_price <= current_price * 1.002:  # Within 0.2% or below
+        # Keep support levels BELOW current price only
+        # Support that's been broken through is no longer valid
+        if avg_price < current_price * 0.999:  # At least 0.1% below current price
             touches = len(group)
             strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
             support_zones.append({
