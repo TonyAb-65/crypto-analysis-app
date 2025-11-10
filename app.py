@@ -61,6 +61,38 @@ with st.expander("💾 Database Information", expanded=False):
     
     **Note:** All your trade history and predictions are saved to this database file.
     """)
+    
+    st.markdown("#### 🔧 Database Maintenance")
+    col_db1, col_db2 = st.columns(2)
+    
+    with col_db1:
+        if st.button("🗑️ Delete Bad Trade (ID 59)", help="Remove SOL trade with incorrect -$3,470 loss"):
+            try:
+                conn_fix = sqlite3.connect(str(DB_PATH))
+                cursor_fix = conn_fix.cursor()
+                
+                # Check before
+                cursor_fix.execute("SELECT SUM(profit_loss) FROM trade_results")
+                total_before = cursor_fix.fetchone()[0]
+                
+                # Delete bad trade
+                cursor_fix.execute("DELETE FROM trade_results WHERE id = 59")
+                conn_fix.commit()
+                
+                # Check after
+                cursor_fix.execute("SELECT SUM(profit_loss) FROM trade_results")
+                total_after = cursor_fix.fetchone()[0]
+                
+                conn_fix.close()
+                
+                st.success(f"✅ Deleted! P/L: ${total_before:.2f} → ${total_after:.2f}")
+                time.sleep(1)
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
+    
+    with col_db2:
+        st.caption("Fixes incorrect SOL SHORT exit price ($6 → correct value)")
 
 st.markdown("---")
 
@@ -615,25 +647,48 @@ if df is not None and len(df) > 0:
             
             with col_save3:
                 if st.button("📈 Mark for Trading", use_container_width=True):
-                    # Get latest prediction for this symbol
-                    conn = sqlite3.connect(str(DB_PATH))
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT id, current_price, position_type, target_price, stop_loss FROM predictions 
-                        WHERE pair = ? 
-                        ORDER BY timestamp DESC 
-                        LIMIT 1
-                    """, (symbol,))
-                    result = cursor.fetchone()
-                    conn.close()
-                    
-                    if result:
-                        pred_id, curr_price, pos_type, target, stop = result
+                    # FIRST: Save current analysis as new prediction with TODAY's date
+                    with st.spinner("Creating trade entry..."):
+                        pred_id = save_prediction(
+                            asset_type=asset_type,
+                            pair=symbol,
+                            timeframe=timeframe_name,
+                            current_price=current_price,
+                            predicted_price=predictions[-1],
+                            prediction_horizon=prediction_periods,
+                            confidence=adjusted_confidence,
+                            signal_strength=final_signal_strength,
+                            features=str(features),
+                            status='analysis_only',
+                            actual_entry_price=meeting_result['entry'] if meeting_result['position'] != 'NEUTRAL' else None,
+                            entry_timestamp=None,
+                            indicator_snapshot=str(indicator_snapshot),
+                            position_type=meeting_result['position'],
+                            target_price=meeting_result['target'] if meeting_result['position'] != 'NEUTRAL' else None,
+                            stop_loss=meeting_result['stop_loss'] if meeting_result['position'] != 'NEUTRAL' else None,
+                            committee_position=meeting_result['position'],
+                            committee_confidence=adjusted_confidence,
+                            committee_reasoning=meeting_result['reasoning']
+                        )
                         
-                        # Show entry price form
-                        st.session_state[f'marking_trade_{pred_id}'] = True
-                    else:
-                        st.warning("⚠️ Save prediction first")
+                        if pred_id:
+                            # Now get the fresh prediction data
+                            conn = sqlite3.connect(str(DB_PATH))
+                            cursor = conn.cursor()
+                            cursor.execute("""
+                                SELECT id, current_price, position_type, target_price, stop_loss 
+                                FROM predictions 
+                                WHERE id = ?
+                            """, (pred_id,))
+                            result = cursor.fetchone()
+                            conn.close()
+                            
+                            if result:
+                                pred_id, curr_price, pos_type, target, stop = result
+                                # Show entry price form
+                                st.session_state[f'marking_trade_{pred_id}'] = True
+                        else:
+                            st.error("❌ Failed to create prediction")
             
             # Entry price form (if marking for trading)
             if 'marking_trade' in str(st.session_state):
@@ -1103,8 +1158,9 @@ if df is not None and len(df) > 0:
                 with col_filter1:
                     filter_status = st.selectbox(
                         "Filter by Status",
-                        ["All", "Open", "Closed", "For Trading"],
-                        index=0
+                        ["Active Trades", "All", "For Trading", "Analysis Only", "Closed"],
+                        index=0,
+                        help="Active Trades = For Trading + Analysis Only (not closed)"
                     )
                 
                 with col_filter2:
@@ -1127,12 +1183,15 @@ if df is not None and len(df) > 0:
                 filtered_df = all_predictions_df.copy()
                 
                 if filter_status != "All":
-                    if filter_status == "Open":
+                    if filter_status == "Active Trades":
+                        # Show both will_trade and analysis_only (not completed)
                         filtered_df = filtered_df[filtered_df['status'] != 'completed']
-                    elif filter_status == "Closed":
-                        filtered_df = filtered_df[filtered_df['status'] == 'completed']
                     elif filter_status == "For Trading":
                         filtered_df = filtered_df[filtered_df['status'] == 'will_trade']
+                    elif filter_status == "Analysis Only":
+                        filtered_df = filtered_df[filtered_df['status'] == 'analysis_only']
+                    elif filter_status == "Closed":
+                        filtered_df = filtered_df[filtered_df['status'] == 'completed']
                 
                 if filter_symbol != "All":
                     filtered_df = filtered_df[filtered_df['pair'] == filter_symbol]
@@ -1150,7 +1209,10 @@ if df is not None and len(df) > 0:
                 
                 # Display predictions in a table
                 if len(filtered_df) > 0:
-                    for idx, pred in filtered_df.head(20).iterrows():  # Show top 20
+                    # Show count
+                    st.caption(f"📊 Showing {min(len(filtered_df), 50)} of {len(filtered_df)} total")
+                    
+                    for idx, pred in filtered_df.head(50).iterrows():  # Show top 50 (was 20)
                         with st.container():
                             col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 2])
                             
@@ -1289,7 +1351,130 @@ if df is not None and len(df) > 0:
                 st.info("📝 No predictions yet. Save a prediction to start tracking!")
             
             # ==================== CLOSED TRADES HISTORY ====================
-            st.markdown("### 💰 Closed Trades History")
+            col_title, col_edit_btn = st.columns([3, 1])
+            with col_title:
+                st.markdown("### 💰 Closed Trades History")
+            with col_edit_btn:
+                if st.button("✏️ Edit Trade", key="edit_trade_btn"):
+                    st.session_state['show_edit_form'] = not st.session_state.get('show_edit_form', False)
+            
+            # Edit Trade Form
+            if st.session_state.get('show_edit_form', False):
+                with st.form("edit_trade_form"):
+                    st.markdown("#### 🔍 Search & Delete Trade")
+                    
+                    trade_id_input = st.number_input(
+                        "Trade ID to Delete",
+                        min_value=1,
+                        value=59,
+                        step=1,
+                        help="Enter the ID of the trade you want to delete"
+                    )
+                    
+                    col_search, col_cancel = st.columns(2)
+                    
+                    with col_search:
+                        search_clicked = st.form_submit_button("🔍 Search & Preview", use_container_width=True)
+                    
+                    with col_cancel:
+                        cancel_clicked = st.form_submit_button("❌ Cancel", use_container_width=True)
+                    
+                    if cancel_clicked:
+                        st.session_state['show_edit_form'] = False
+                        st.rerun()
+                    
+                    if search_clicked:
+                        try:
+                            conn_search = sqlite3.connect(str(DB_PATH))
+                            cursor_search = conn_search.cursor()
+                            
+                            # Get trade details
+                            cursor_search.execute("""
+                                SELECT 
+                                    tr.id,
+                                    tr.trade_date,
+                                    p.pair,
+                                    p.position_type,
+                                    tr.entry_price,
+                                    tr.exit_price,
+                                    tr.profit_loss,
+                                    tr.profit_loss_pct,
+                                    tr.notes
+                                FROM trade_results tr
+                                LEFT JOIN predictions p ON tr.prediction_id = p.id
+                                WHERE tr.id = ?
+                            """, (trade_id_input,))
+                            
+                            trade = cursor_search.fetchone()
+                            conn_search.close()
+                            
+                            if trade:
+                                st.success("✅ Trade Found!")
+                                
+                                # Display trade details
+                                st.markdown("**Trade Details:**")
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.info(f"**ID:** {trade[0]}")
+                                    st.info(f"**Symbol:** {trade[2] or 'N/A'}")
+                                    st.info(f"**Position:** {trade[3] or 'N/A'}")
+                                with col2:
+                                    st.info(f"**Entry:** ${trade[4]:.2f}")
+                                    st.info(f"**Exit:** ${trade[5]:.2f}")
+                                with col3:
+                                    pl_color = "🟢" if trade[6] > 0 else "🔴"
+                                    st.info(f"**P/L:** {pl_color} ${trade[6]:.2f}")
+                                    st.info(f"**P/L %:** {trade[7]:.2f}%")
+                                
+                                st.warning(f"**Exit Reason:** {trade[8]}")
+                                
+                                # Store trade ID for deletion
+                                st.session_state['trade_to_delete'] = trade_id_input
+                                
+                            else:
+                                st.error(f"❌ Trade ID {trade_id_input} not found!")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Error: {str(e)}")
+                
+                # Delete button (outside form, only shows if trade found)
+                if st.session_state.get('trade_to_delete'):
+                    if st.button("🗑️ DELETE THIS TRADE", type="primary", use_container_width=True):
+                        try:
+                            trade_id_to_delete = st.session_state['trade_to_delete']
+                            
+                            conn_del = sqlite3.connect(str(DB_PATH))
+                            cursor_del = conn_del.cursor()
+                            
+                            # Get P/L before deletion
+                            cursor_del.execute("SELECT SUM(profit_loss) FROM trade_results")
+                            total_before = cursor_del.fetchone()[0]
+                            
+                            # Delete the trade
+                            cursor_del.execute("DELETE FROM trade_results WHERE id = ?", (trade_id_to_delete,))
+                            conn_del.commit()
+                            
+                            # Get P/L after deletion
+                            cursor_del.execute("SELECT SUM(profit_loss) FROM trade_results")
+                            total_after = cursor_del.fetchone()[0]
+                            
+                            conn_del.close()
+                            
+                            # Clear session state
+                            st.session_state['trade_to_delete'] = None
+                            st.session_state['show_edit_form'] = False
+                            
+                            st.success(f"✅ Trade {trade_id_to_delete} deleted successfully!")
+                            st.info(f"📊 Total P/L updated: ${total_before:.2f} → ${total_after:.2f}")
+                            
+                            time.sleep(2)
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"❌ Error deleting trade: {str(e)}")
+                
+                st.markdown("---")
+
             
             try:
                 conn = sqlite3.connect(str(DB_PATH))
