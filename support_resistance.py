@@ -1,128 +1,221 @@
 """
-Support & Resistance Module - PROFESSIONAL TRADER APPROACH
-Uses REAL trading methodology - not academic algorithms
+Support & Resistance Module - TWELVE DATA API
+Uses professional S/R levels directly from Twelve Data pivot points
+NO internal calculation - professional grade data only
 """
+import requests
 import numpy as np
-import pandas as pd
 
 
-def find_support_resistance_zones(df, lookback=100):
+def find_support_resistance_zones(df, symbol=None, interval='1h'):
     """
-    Professional S/R detection based on REAL trading methodology
+    Fetch Support/Resistance from Twelve Data API
+    Uses professional pivot points calculation
     
-    How Real Traders Find S/R:
-    1. Recent swing highs/lows (20+ candle window)
-    2. Multiple touches at same price level
-    3. Clear visual rejection zones
-    4. Price must have REACTED at these levels
+    Args:
+        df: Price dataframe (for fallback only)
+        symbol: Trading symbol (e.g., 'BTC/USD', 'EUR/USD', 'XRP/USD')
+        interval: Timeframe ('1h', '4h', '1d', etc.)
+    
+    Returns:
+        Dictionary with resistance and support arrays
     """
     
-    if df is None or len(df) < 50:
+    if symbol is None:
+        print("⚠️ No symbol provided, using fallback S/R")
+        return fallback_sr_from_chart(df)
+    
+    print(f"\n{'='*60}")
+    print(f"📊 FETCHING S/R FROM TWELVE DATA API")
+    print(f"{'='*60}")
+    print(f"Symbol: {symbol}")
+    print(f"Interval: {interval}")
+    
+    # Try to fetch from Twelve Data
+    sr_data = fetch_pivot_points_from_twelvedata(symbol, interval)
+    
+    if sr_data:
+        resistance_levels = sr_data['resistance']
+        support_levels = sr_data['support']
+        
+        print(f"✅ SUCCESS - Got {len(resistance_levels)} resistance, {len(support_levels)} support levels")
+        print(f"{'='*60}\n")
+        
+        return {
+            'resistance': resistance_levels,
+            'support': support_levels
+        }
+    
+    # Fallback if API fails
+    print(f"⚠️ Twelve Data API unavailable, using fallback")
+    print(f"{'='*60}\n")
+    return fallback_sr_from_chart(df)
+
+
+def fetch_pivot_points_from_twelvedata(symbol, interval='1h'):
+    """
+    Fetch pivot points from Twelve Data API
+    Returns R1/R2/R3 (resistance) and S1/S2/S3 (support)
+    
+    Twelve Data provides professional pivot point calculations
+    """
+    try:
+        # Twelve Data pivot points endpoint
+        # Note: This endpoint may require specific plan level
+        url = "https://api.twelvedata.com/pivot_points"
+        
+        params = {
+            'symbol': symbol,
+            'interval': interval,
+            'outputsize': 1
+        }
+        
+        print(f"🔍 Calling Twelve Data API...")
+        print(f"   URL: {url}")
+        print(f"   Params: {params}")
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        print(f"   Response Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            print(f"   Response Data: {data}")
+            
+            # Check for error in response
+            if 'code' in data and data['code'] != 200:
+                print(f"❌ API Error: {data.get('message', 'Unknown error')}")
+                return None
+            
+            if 'values' in data and len(data['values']) > 0:
+                pivots = data['values'][0]
+                
+                resistance_levels = []
+                support_levels = []
+                
+                # Extract resistance levels (R1, R2, R3)
+                if 'classic_resistance_1' in pivots:
+                    resistance_levels.append({
+                        'price': float(pivots['classic_resistance_1']),
+                        'touches': 1,
+                        'strength': 'MEDIUM',
+                        'status': 'INTACT',
+                        'source': 'Twelve Data R1'
+                    })
+                
+                if 'classic_resistance_2' in pivots:
+                    resistance_levels.append({
+                        'price': float(pivots['classic_resistance_2']),
+                        'touches': 2,
+                        'strength': 'STRONG',
+                        'status': 'INTACT',
+                        'source': 'Twelve Data R2'
+                    })
+                
+                if 'classic_resistance_3' in pivots:
+                    resistance_levels.append({
+                        'price': float(pivots['classic_resistance_3']),
+                        'touches': 3,
+                        'strength': 'STRONG',
+                        'status': 'INTACT',
+                        'source': 'Twelve Data R3'
+                    })
+                
+                # Extract support levels (S1, S2, S3)
+                if 'classic_support_1' in pivots:
+                    support_levels.append({
+                        'price': float(pivots['classic_support_1']),
+                        'touches': 1,
+                        'strength': 'MEDIUM',
+                        'status': 'INTACT',
+                        'source': 'Twelve Data S1'
+                    })
+                
+                if 'classic_support_2' in pivots:
+                    support_levels.append({
+                        'price': float(pivots['classic_support_2']),
+                        'touches': 2,
+                        'strength': 'STRONG',
+                        'status': 'INTACT',
+                        'source': 'Twelve Data S2'
+                    })
+                
+                if 'classic_support_3' in pivots:
+                    support_levels.append({
+                        'price': float(pivots['classic_support_3']),
+                        'touches': 3,
+                        'strength': 'STRONG',
+                        'status': 'INTACT',
+                        'source': 'Twelve Data S3'
+                    })
+                
+                # Filter by current price if available
+                if len(resistance_levels) > 0 or len(support_levels) > 0:
+                    # Get current price from pivot point
+                    current_price = float(pivots.get('classic_pivot_point', 0))
+                    
+                    if current_price > 0:
+                        # Keep only resistance ABOVE current price
+                        resistance_levels = [r for r in resistance_levels if r['price'] > current_price]
+                        # Keep only support BELOW current price
+                        support_levels = [s for s in support_levels if s['price'] < current_price]
+                    
+                    print(f"   ✅ Extracted {len(resistance_levels)} resistance, {len(support_levels)} support")
+                    
+                    return {
+                        'resistance': resistance_levels,
+                        'support': support_levels
+                    }
+        
+        print(f"❌ No valid data in response")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error fetching from Twelve Data: {e}")
+        return None
+
+
+def fallback_sr_from_chart(df):
+    """
+    SIMPLE FALLBACK: Use recent highs/lows if API fails
+    This is NOT professional calculation - just emergency backup
+    """
+    
+    if df is None or len(df) < 20:
         return {'support': [], 'resistance': []}
     
-    # Use reasonable lookback
-    lookback = min(lookback, len(df))
-    df_recent = df.tail(lookback).copy()
-    current_price = df_recent['close'].iloc[-1]
+    current_price = df['close'].iloc[-1]
     
-    # ==================== STEP 1: Find Swing Points ====================
-    # Use LARGER window (20 candles) - real traders don't look at every tiny wiggle
-    window = 20
+    # Simple: Recent 50-period high/low
+    recent_high = df['high'].tail(50).max()
+    recent_low = df['low'].tail(50).min()
     
-    swing_highs = []
-    swing_lows = []
+    resistance_levels = []
+    support_levels = []
     
-    for i in range(window, len(df_recent) - window):
-        # Swing High: Highest point in 20-candle window on both sides
-        if df_recent['high'].iloc[i] == df_recent['high'].iloc[i-window:i+window+1].max():
-            swing_highs.append(df_recent['high'].iloc[i])
-        
-        # Swing Low: Lowest point in 20-candle window on both sides
-        if df_recent['low'].iloc[i] == df_recent['low'].iloc[i-window:i+window+1].min():
-            swing_lows.append(df_recent['low'].iloc[i])
+    # Only add if in correct direction
+    if recent_high > current_price * 1.01:  # At least 1% above
+        resistance_levels.append({
+            'price': recent_high,
+            'touches': 1,
+            'strength': 'WEAK',
+            'status': 'INTACT',
+            'source': 'Recent High (Fallback)'
+        })
     
-    # ==================== STEP 2: Cluster Nearby Levels ====================
-    # Group levels within 1.5% - real support/resistance are zones, not exact prices
-    def cluster_levels(levels, tolerance=0.015):
-        if not levels:
-            return []
-        
-        levels = sorted(levels)
-        clusters = []
-        current_cluster = [levels[0]]
-        
-        for level in levels[1:]:
-            # If within 1.5% of cluster, add to it
-            if level <= np.mean(current_cluster) * (1 + tolerance):
-                current_cluster.append(level)
-            else:
-                # Finalize cluster as average
-                if len(current_cluster) >= 1:  # At least 1 touch
-                    clusters.append({
-                        'price': np.mean(current_cluster),
-                        'touches': len(current_cluster)
-                    })
-                current_cluster = [level]
-        
-        # Don't forget last cluster
-        if len(current_cluster) >= 1:
-            clusters.append({
-                'price': np.mean(current_cluster),
-                'touches': len(current_cluster)
-            })
-        
-        return clusters
+    if recent_low < current_price * 0.99:  # At least 1% below
+        support_levels.append({
+            'price': recent_low,
+            'touches': 1,
+            'strength': 'WEAK',
+            'status': 'INTACT',
+            'source': 'Recent Low (Fallback)'
+        })
     
-    resistance_clusters = cluster_levels(swing_highs)
-    support_clusters = cluster_levels(swing_lows)
-    
-    # ==================== STEP 3: Filter by Direction ====================
-    # RESISTANCE must be ABOVE current price
-    # SUPPORT must be BELOW current price
-    
-    valid_resistance = []
-    for cluster in resistance_clusters:
-        level = cluster['price']
-        touches = cluster['touches']
-        
-        # Must be above current price
-        if level > current_price * 1.002:  # At least 0.2% above
-            # Must be within reasonable range (not too far away)
-            if level < current_price * 1.20:  # Within 20%
-                strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
-                valid_resistance.append({
-                    'price': level,
-                    'touches': touches,
-                    'strength': strength,
-                    'status': 'INTACT'
-                })
-    
-    valid_support = []
-    for cluster in support_clusters:
-        level = cluster['price']
-        touches = cluster['touches']
-        
-        # Must be below current price
-        if level < current_price * 0.998:  # At least 0.2% below
-            # Must be within reasonable range
-            if level > current_price * 0.80:  # Within 20%
-                strength = 'STRONG' if touches >= 3 else 'MEDIUM' if touches >= 2 else 'WEAK'
-                valid_support.append({
-                    'price': level,
-                    'touches': touches,
-                    'strength': strength,
-                    'status': 'INTACT'
-                })
-    
-    # ==================== STEP 4: Sort by Proximity ====================
-    # Nearest levels are most important
-    valid_resistance.sort(key=lambda x: x['price'])  # Closest resistance first
-    valid_support.sort(key=lambda x: x['price'], reverse=True)  # Closest support first
-    
-    # Return top 5 of each
     return {
-        'resistance': valid_resistance[:5],
-        'support': valid_support[:5]
+        'resistance': resistance_levels,
+        'support': support_levels
     }
 
 
@@ -148,11 +241,19 @@ def get_price_targets_based_on_sr(current_price, sr_zones):
     supports = sr_zones.get('support', [])
     resistances = sr_zones.get('resistance', [])
     
-    # Next resistance (first one above price)
-    next_resistance = resistances[0] if resistances else None
+    # Next resistance (closest above current price)
+    next_resistance = None
+    if resistances:
+        valid_resistance = [r for r in resistances if r['price'] > current_price]
+        if valid_resistance:
+            next_resistance = min(valid_resistance, key=lambda x: x['price'])
     
-    # Next support (first one below price)
-    next_support = supports[0] if supports else None
+    # Next support (closest below current price)
+    next_support = None
+    if supports:
+        valid_support = [s for s in supports if s['price'] < current_price]
+        if valid_support:
+            next_support = max(valid_support, key=lambda x: x['price'])
     
     return {
         'next_resistance': next_resistance,
@@ -174,18 +275,16 @@ def calculate_risk_reward(entry_price, target_price, stop_loss):
 
 
 def check_support_resistance_barriers(df, predicted_price, current_price):
-    """Check if predicted price needs to break through major S/R"""
+    """Check if predicted price faces S/R barriers"""
     high_20 = df['high'].tail(20).max()
     low_20 = df['low'].tail(20).min()
     
     barriers = []
     
-    if current_price < predicted_price:
-        if predicted_price > high_20:
-            barriers.append(('resistance', high_20, abs(predicted_price - high_20)))
-    else:
-        if predicted_price < low_20:
-            barriers.append(('support', low_20, abs(predicted_price - low_20)))
+    if current_price < predicted_price and predicted_price > high_20:
+        barriers.append(('resistance', high_20, abs(predicted_price - high_20)))
+    elif current_price > predicted_price and predicted_price < low_20:
+        barriers.append(('support', low_20, abs(predicted_price - low_20)))
     
     return barriers
 
@@ -196,9 +295,7 @@ def analyze_timeframe_volatility(df, predicted_change_pct, timeframe_hours):
     
     avg_hourly_change = abs(recent_changes).mean() * 100
     max_hourly_change = abs(recent_changes).max() * 100
-    
     predicted_hourly_rate = abs(predicted_change_pct) / timeframe_hours
-    
     is_realistic = predicted_hourly_rate <= (avg_hourly_change * 2)
     
     return {
@@ -214,7 +311,7 @@ def adjust_confidence_for_barriers(base_confidence, barriers, volatility_context
     adjusted_confidence = base_confidence
     
     for barrier_type, price_level, distance in barriers:
-        if barrier_type == 'strong_resistance' or barrier_type == 'strong_support':
+        if 'strong' in barrier_type:
             adjusted_confidence *= 0.7
         else:
             adjusted_confidence *= 0.85
