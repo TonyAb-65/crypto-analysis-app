@@ -745,7 +745,27 @@ if df is not None and len(df) > 0:
         st.markdown("---")
         st.markdown("### 🎯 Support & Resistance Zones")
         
-        sr_zones = find_support_resistance_zones(df)
+        # Convert timeframe to Twelve Data format
+        timeframe_map = {
+            "5 Minutes": "5min",
+            "15 Minutes": "15min",
+            "30 Minutes": "30min",
+            "1 Hour": "1h",
+            "4 Hours": "4h",
+            "1 Day": "1day"
+        }
+        twelvedata_interval = timeframe_map.get(timeframe_name, "1h")
+        
+        # Format symbol for Twelve Data
+        # Crypto: BTC/USD, ETH/USD (add /USD if not present)
+        # Forex: EUR/USD (already correct format)
+        if asset_type == "💰 Cryptocurrency":
+            twelvedata_symbol = f"{symbol}/USD" if '/' not in symbol else symbol
+        else:
+            twelvedata_symbol = symbol
+        
+        # Fetch S/R from Twelve Data API
+        sr_zones = find_support_resistance_zones(df, symbol=twelvedata_symbol, interval=twelvedata_interval)
         support_zones = sr_zones.get('support', [])
         resistance_zones = sr_zones.get('resistance', [])
         
