@@ -1172,105 +1172,110 @@ if df is not None and len(df) > 0:
             if all_predictions_df is not None and len(all_predictions_df) > 0:
                 
                 # ==================== ACTIVE TRADES MONITORING SECTION ====================
-                # Import active trade monitor
-                from active_trade_monitor import (
-                    get_active_trades_for_monitoring,
-                    calculate_trade_progress,
-                    calculate_profit_pct,
-                    get_exit_recommendation,
-                    get_next_check_countdown,
-                    format_countdown
-                )
-                
-                # Get active trades for monitoring
-                active_trades_df = get_active_trades_for_monitoring()
-                
-                if active_trades_df is not None and len(active_trades_df) > 0:
-                    st.markdown("### 🎯 Active Trade Monitor")
-                    st.caption("Auto-refreshes every 15 minutes with trend analysis")
+                # Import active trade monitor (gracefully handle if module not yet deployed)
+                try:
+                    from active_trade_monitor import (
+                        get_active_trades_for_monitoring,
+                        calculate_trade_progress,
+                        calculate_profit_pct,
+                        get_exit_recommendation,
+                        get_next_check_countdown,
+                        format_countdown
+                    )
                     
-                    # Show countdown to next check
-                    countdown_seconds = get_next_check_countdown()
-                    st.info(f"⏱️ Next analysis in: {format_countdown(countdown_seconds)}")
+                    # Get active trades for monitoring
+                    active_trades_df = get_active_trades_for_monitoring()
                     
-                    # Display each active trade as a card
-                    for idx, trade in active_trades_df.iterrows():
-                        # Fetch current price for this pair
-                        from data_api import fetch_data
+                    if active_trades_df is not None and len(active_trades_df) > 0:
+                        st.markdown("### 🎯 Active Trade Monitor")
+                        st.caption("Auto-refreshes every 15 minutes with trend analysis")
                         
-                        symbol_base = trade['symbol'].replace('/USD', '').replace('-USD', '')
-                        current_df, source = fetch_data(symbol_base, "💰 Cryptocurrency", {"binance": "1h", "okx": "1H", "limit": 100})
+                        # Show countdown to next check
+                        countdown_seconds = get_next_check_countdown()
+                        st.info(f"⏱️ Next analysis in: {format_countdown(countdown_seconds)}")
                         
-                        if current_df is not None and len(current_df) > 0:
-                            current_price = current_df['close'].iloc[-1]
+                        # Display each active trade as a card
+                        for idx, trade in active_trades_df.iterrows():
+                            # Fetch current price for this pair
+                            from data_api import fetch_data
                             
-                            # Calculate metrics
-                            progress_pct = calculate_trade_progress(
-                                trade['entry_price'],
-                                current_price,
-                                trade['target_price'],
-                                trade['position_type']
-                            )
+                            symbol_base = trade['symbol'].replace('/USD', '').replace('-USD', '')
+                            current_df, source = fetch_data(symbol_base, "💰 Cryptocurrency", {"binance": "1h", "okx": "1H", "limit": 100})
                             
-                            profit_pct = calculate_profit_pct(
-                                trade['entry_price'],
-                                current_price,
-                                trade['position_type']
-                            )
-                            
-                            # Get recommendation
-                            action, message, alert_type = get_exit_recommendation(
-                                progress_pct,
-                                trade['position_type'],
-                                current_df
-                            )
-                            
-                            # Display card
-                            with st.container():
-                                # Card border color based on action
-                                if action == "EXIT":
-                                    card_color = "🔴"
-                                else:
-                                    card_color = "🟢"
+                            if current_df is not None and len(current_df) > 0:
+                                current_price = current_df['close'].iloc[-1]
                                 
-                                st.markdown(f"### {card_color} {trade['symbol']} - {trade['position_type']}")
+                                # Calculate metrics
+                                progress_pct = calculate_trade_progress(
+                                    trade['entry_price'],
+                                    current_price,
+                                    trade['target_price'],
+                                    trade['position_type']
+                                )
                                 
-                                col1, col2, col3 = st.columns(3)
+                                profit_pct = calculate_profit_pct(
+                                    trade['entry_price'],
+                                    current_price,
+                                    trade['position_type']
+                                )
                                 
-                                with col1:
-                                    st.metric("Entry", f"${trade['entry_price']:.4f}")
-                                    st.metric("Current", f"${current_price:.4f}")
+                                # Get recommendation
+                                action, message, alert_type = get_exit_recommendation(
+                                    progress_pct,
+                                    trade['position_type'],
+                                    current_df
+                                )
                                 
-                                with col2:
-                                    st.metric("Target", f"${trade['target_price']:.4f}")
-                                    st.metric("Progress", f"{progress_pct:.1f}%")
-                                
-                                with col3:
-                                    profit_color = "normal" if profit_pct >= 0 else "inverse"
-                                    st.metric("Profit", f"{profit_pct:+.2f}%", delta=None)
-                                    
-                                    # Action button
+                                # Display card
+                                with st.container():
+                                    # Card border color based on action
                                     if action == "EXIT":
-                                        st.error(f"**⚠️ RECOMMENDATION: EXIT**")
+                                        card_color = "🔴"
                                     else:
-                                        st.success(f"**💪 RECOMMENDATION: HOLD**")
-                                
-                                # Show detailed message
-                                if alert_type == "success":
-                                    st.success(message)
-                                elif alert_type == "warning":
-                                    st.warning(message)
-                                elif alert_type == "error":
-                                    st.error(message)
-                                else:
-                                    st.info(message)
-                                
-                                st.markdown("---")
-                    
-                    # Auto-refresh every 15 minutes
-                    if countdown_seconds <= 5:  # Refresh when countdown near zero
-                        time.sleep(2)
-                        st.rerun()
+                                        card_color = "🟢"
+                                    
+                                    st.markdown(f"### {card_color} {trade['symbol']} - {trade['position_type']}")
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    
+                                    with col1:
+                                        st.metric("Entry", f"${trade['entry_price']:.4f}")
+                                        st.metric("Current", f"${current_price:.4f}")
+                                    
+                                    with col2:
+                                        st.metric("Target", f"${trade['target_price']:.4f}")
+                                        st.metric("Progress", f"{progress_pct:.1f}%")
+                                    
+                                    with col3:
+                                        profit_color = "normal" if profit_pct >= 0 else "inverse"
+                                        st.metric("Profit", f"{profit_pct:+.2f}%", delta=None)
+                                        
+                                        # Action button
+                                        if action == "EXIT":
+                                            st.error(f"**⚠️ RECOMMENDATION: EXIT**")
+                                        else:
+                                            st.success(f"**💪 RECOMMENDATION: HOLD**")
+                                    
+                                    # Show detailed message
+                                    if alert_type == "success":
+                                        st.success(message)
+                                    elif alert_type == "warning":
+                                        st.warning(message)
+                                    elif alert_type == "error":
+                                        st.error(message)
+                                    else:
+                                        st.info(message)
+                                    
+                                    st.markdown("---")
+                        
+                        # Auto-refresh every 15 minutes
+                        if countdown_seconds <= 5:  # Refresh when countdown near zero
+                            time.sleep(2)
+                            st.rerun()
+                
+                except ImportError:
+                    # Module not yet deployed - show placeholder
+                    st.info("🔄 Active Trade Monitor will be available after deploying active_trade_monitor.py")
                 
                 # ==================== REST OF TRADE TRACKING ====================
                 st.markdown("### 🎯 Recent Predictions & Trades")
