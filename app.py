@@ -1312,8 +1312,8 @@ if df is not None and len(df) > 0:
                 
                 if filter_status != "All":
                     if filter_status == "Active Trades":
-                        # Show both will_trade and analysis_only (not completed)
-                        filtered_df = filtered_df[filtered_df['status'] != 'completed']
+                        # Show only will_trade (marked for trading)
+                        filtered_df = filtered_df[filtered_df['status'] == 'will_trade']
                     elif filter_status == "For Trading":
                         filtered_df = filtered_df[filtered_df['status'] == 'will_trade']
                     elif filter_status == "Analysis Only":
