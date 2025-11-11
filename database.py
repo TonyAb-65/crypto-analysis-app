@@ -202,62 +202,65 @@ def get_all_recent_predictions(limit=50):
 
 def evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won):
     """
-    Evaluate if an indicator correctly predicted the trade outcome
+    Evaluate if an indicator CORRECTLY predicted the trade direction
     
-    NEW LOGIC: Indicators learn from COMMITTEE recommendations!
-    - If committee recommended LONG and won → all indicators correct
-    - If committee recommended SHORT and won → all indicators correct
-    - If committee recommended LONG and lost → all indicators wrong
-    - If committee recommended SHORT and lost → all indicators wrong
+    FIXED LOGIC: Each indicator evaluated on ITS OWN signal!
+    - RSI < 30 + LONG won = RSI correct
+    - OBV rising + LONG won = OBV correct  
+    - MACD bullish + LONG won = MACD correct
     
-    Individual indicator signals don't matter - we evaluate based on 
-    whether they contributed to a winning or losing committee decision.
-    
-    Returns True if correct, False if wrong, None if neutral/skip
+    Returns: 
+        True if correct, False if wrong, None if neutral
     """
     if indicator_value is None or pd.isna(indicator_value):
         return None  # Skip if no data
     
-    # Handle nested dict format - extract signal to check if neutral
-    if isinstance(indicator_value, dict):
-        signal = indicator_value.get('signal', 'neutral')
-        
-        # Skip neutral signals - they didn't contribute to decision
-        if signal == 'neutral':
-            return None
-        
-        # For non-neutral signals, evaluate based on committee outcome
-        # If committee won, indicator was correct (contributed to good decision)
-        # If committee lost, indicator was wrong (contributed to bad decision)
-        return trade_won
+    # Calculate if trade was actually bullish or bearish
+    actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
+    actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
     
-    # Handle flat value format (for non-signal based indicators)
+    # Handle flat value format
     try:
         indicator_value = float(indicator_value)
     except:
-        return None
+        # Handle dict format
+        if isinstance(indicator_value, dict):
+            indicator_value = indicator_value.get('value', None)
+            if indicator_value is None:
+                return None
+            try:
+                indicator_value = float(indicator_value)
+            except:
+                return None
+        else:
+            return None
     
-    # For value-based indicators, use the original logic
-    # (These are not part of committee, evaluated independently)
+    # Evaluate each indicator based on its own signal
+    if indicator_name == 'RSI':
+        if indicator_value < 30:
+            # RSI oversold (bullish signal)
+            return actual_bullish
+        elif indicator_value > 70:
+            # RSI overbought (bearish signal)
+            return actual_bearish
+        else:
+            return None  # Neutral 30-70
     
-    if indicator_name == 'OBV':
+    elif indicator_name == 'OBV':
         if indicator_value == 0:
             return None  # Neutral
         predicted_bullish = indicator_value > 0
-        actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
         return predicted_bullish == actual_bullish
     
     elif indicator_name == 'MFI':
         if 20 <= indicator_value <= 80:
             return None  # Neutral zone
         if indicator_value > 80:
-            predicted_bearish = True
-            actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
-            return predicted_bearish == actual_bearish
+            # Overbought (bearish)
+            return actual_bearish
         else:  # < 20
-            predicted_bullish = True
-            actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
-            return predicted_bullish == actual_bullish
+            # Oversold (bullish)
+            return actual_bullish
     
     elif indicator_name == 'ADX':
         if indicator_value <= 25:
@@ -269,25 +272,28 @@ def evaluate_indicator_prediction(indicator_name, indicator_value, position_type
         if 20 <= indicator_value <= 80:
             return None  # Neutral zone
         if indicator_value > 80:
-            predicted_bearish = True
-            actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
-            return predicted_bearish == actual_bearish
+            # Overbought (bearish)
+            return actual_bearish
         else:  # < 20
-            predicted_bullish = True
-            actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
-            return predicted_bullish == actual_bullish
+            # Oversold (bullish)
+            return actual_bullish
     
     elif indicator_name == 'CCI':
         if -100 <= indicator_value <= 100:
             return None  # Neutral zone
         if indicator_value > 100:
-            predicted_bearish = True
-            actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
-            return predicted_bearish == actual_bearish
+            # Overbought (bearish)
+            return actual_bearish
         else:  # < -100
-            predicted_bullish = True
-            actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
-            return predicted_bullish == actual_bullish
+            # Oversold (bullish)
+            return actual_bullish
+    
+    elif indicator_name == 'MACD':
+        # MACD value represents distance from signal line
+        if abs(indicator_value) < 0.001:
+            return None  # Too close to signal line
+        predicted_bullish = indicator_value > 0  # Above signal = bullish
+        return predicted_bullish == actual_bullish
     
     # Unknown indicator
     return None
@@ -467,47 +473,9 @@ def save_trade_result(prediction_id, entry_price, exit_price, profit_loss,
         UPDATE predictions SET status = 'completed' WHERE id = ?
     ''', (prediction_id,))
     
-    # ✅ ADVANCED LEARNING SYSTEM - Evaluate indicators properly
-    from indicator_learning import update_indicator_learning, generate_trade_insights, analyze_trade_indicators
-    
-    # Get prediction data for analysis
-    cursor.execute("""
-        SELECT position_type, rsi, macd, obv, mfi, adx, stochastic, cci, pair
-        FROM predictions WHERE id = ?
-    """, (prediction_id,))
-    pred_data_full = cursor.fetchone()
-    
-    if pred_data_full:
-        prediction_data = {
-            'position_type': pred_data_full[0],
-            'rsi': pred_data_full[1],
-            'macd': pred_data_full[2],
-            'obv': pred_data_full[3],
-            'mfi': pred_data_full[4],
-            'adx': pred_data_full[5],
-            'stochastic': pred_data_full[6],
-            'cci': pred_data_full[7],
-            'pair': pred_data_full[8]
-        }
-        
-        trade_result_data = {
-            'entry_price': entry_price,
-            'exit_price': exit_price,
-            'profit_loss': profit_loss,
-            'profit_loss_pct': profit_loss_pct
-        }
-        
-        # Run analysis and update learning
-        conn.commit()  # Commit current changes first
-        analysis = update_indicator_learning(trade_result_data, prediction_data)
-        
-        # Generate insights
-        insights = generate_trade_insights(analysis)
-        print(f"\n{'='*60}")
-        print(f"📊 TRADE #{prediction_id} ANALYSIS")
-        print(f"{'='*60}")
-        print(insights)
-        print(f"{'='*60}\n")
+    # ✅ INCREMENTAL LEARNING - Evaluate this single trade with FIXED logic
+    trade_won = profit_loss > 0
+    evaluate_and_learn_from_trade(prediction_id, trade_won, cursor)
     
     # ✅ PERIODIC REVALIDATION - Every 25 trades, show summary
     cursor.execute("SELECT COUNT(*) FROM trade_results")
