@@ -405,6 +405,216 @@ def evaluate_and_learn_from_trade(prediction_id, trade_won, cursor):
     """)
 
 
+def analyze_losing_trade(prediction_id, entry_price, exit_price, cursor):
+    """
+    POST-MORTEM ANALYSIS: Deep dive into WHY trade lost
+    
+    Analyzes:
+    1. What indicators said at entry
+    2. What actually happened (trend shift, reversal failure, etc.)
+    3. Which indicators warned us (but committee ignored)
+    4. Actionable lessons for committee
+    """
+    # Get prediction data
+    cursor.execute("""
+        SELECT position_type, pair, rsi, macd, adx, obv, mfi, stochastic, cci,
+               current_price, target_price, stop_loss, confidence, reasoning, timestamp
+        FROM predictions WHERE id = ?
+    """, (prediction_id,))
+    
+    pred = cursor.fetchone()
+    if not pred:
+        return "No prediction data found"
+    
+    (position_type, pair, rsi, macd, adx, obv, mfi, stoch, cci,
+     pred_price, target, stop, confidence, reasoning, timestamp) = pred
+    
+    # Calculate loss magnitude
+    if position_type == 'LONG':
+        loss_pct = ((exit_price - entry_price) / entry_price) * 100
+        price_direction = "FELL" if exit_price < entry_price else "rose slightly"
+        expected_move = "UP"
+    else:  # SHORT
+        loss_pct = ((entry_price - exit_price) / entry_price) * 100
+        price_direction = "ROSE" if exit_price > entry_price else "fell slightly"
+        expected_move = "DOWN"
+    
+    analysis = []
+    analysis.append(f"📊 TRADE DETAILS:")
+    analysis.append(f"   Position: {position_type} on {pair}")
+    analysis.append(f"   Entry: ${entry_price:.4f} → Exit: ${exit_price:.4f}")
+    analysis.append(f"   Loss: {abs(loss_pct):.2f}%")
+    analysis.append(f"   Expected: Price to go {expected_move}")
+    analysis.append(f"   Reality: Price {price_direction}")
+    analysis.append(f"   Committee Confidence: {confidence}%")
+    analysis.append("")
+    
+    # Analyze what indicators said at entry
+    analysis.append("🔍 WHAT INDICATORS SAID AT ENTRY:")
+    analysis.append("")
+    
+    wrong_indicators = []
+    warning_indicators = []
+    neutral_indicators = []
+    
+    # RSI Analysis
+    if rsi is not None:
+        try:
+            rsi_val = float(rsi)
+            if position_type == 'LONG':
+                if rsi_val < 30:
+                    wrong_indicators.append(("RSI", f"RSI {rsi_val:.0f} said OVERSOLD (buy signal) but price kept falling"))
+                elif rsi_val > 70:
+                    warning_indicators.append(("RSI", f"RSI {rsi_val:.0f} was OVERBOUGHT - warned AGAINST buying!"))
+                else:
+                    neutral_indicators.append(("RSI", f"RSI {rsi_val:.0f} was neutral"))
+            else:  # SHORT
+                if rsi_val > 70:
+                    wrong_indicators.append(("RSI", f"RSI {rsi_val:.0f} said OVERBOUGHT (sell signal) but price kept rising"))
+                elif rsi_val < 30:
+                    warning_indicators.append(("RSI", f"RSI {rsi_val:.0f} was OVERSOLD - warned AGAINST shorting!"))
+                else:
+                    neutral_indicators.append(("RSI", f"RSI {rsi_val:.0f} was neutral"))
+        except:
+            pass
+    
+    # OBV Analysis
+    if obv is not None:
+        try:
+            obv_val = float(obv)
+            if position_type == 'LONG':
+                if obv_val > 0:
+                    wrong_indicators.append(("OBV", f"OBV +{obv_val:.1f}% showed accumulation but price fell anyway"))
+                elif obv_val < 0:
+                    warning_indicators.append(("OBV", f"OBV {obv_val:.1f}% showed DISTRIBUTION - warned against LONG!"))
+            else:  # SHORT
+                if obv_val < 0:
+                    wrong_indicators.append(("OBV", f"OBV {obv_val:.1f}% showed distribution but price rose anyway"))
+                elif obv_val > 0:
+                    warning_indicators.append(("OBV", f"OBV +{obv_val:.1f}% showed ACCUMULATION - warned against SHORT!"))
+        except:
+            pass
+    
+    # ADX Analysis (Trend Strength)
+    if adx is not None:
+        try:
+            adx_val = float(adx)
+            if adx_val < 25:
+                warning_indicators.append(("ADX", f"ADX {adx_val:.0f} showed WEAK TREND - risky trade!"))
+            elif adx_val >= 25 and adx_val < 40:
+                neutral_indicators.append(("ADX", f"ADX {adx_val:.0f} showed moderate trend"))
+            else:
+                wrong_indicators.append(("ADX", f"ADX {adx_val:.0f} showed STRONG TREND but direction reversed"))
+        except:
+            pass
+    
+    # MFI Analysis
+    if mfi is not None:
+        try:
+            mfi_val = float(mfi)
+            if position_type == 'LONG':
+                if mfi_val < 20:
+                    wrong_indicators.append(("MFI", f"MFI {mfi_val:.0f} oversold but continued down"))
+                elif mfi_val > 80:
+                    warning_indicators.append(("MFI", f"MFI {mfi_val:.0f} OVERBOUGHT - warned against LONG!"))
+            else:  # SHORT
+                if mfi_val > 80:
+                    wrong_indicators.append(("MFI", f"MFI {mfi_val:.0f} overbought but continued up"))
+                elif mfi_val < 20:
+                    warning_indicators.append(("MFI", f"MFI {mfi_val:.0f} OVERSOLD - warned against SHORT!"))
+        except:
+            pass
+    
+    # Stochastic Analysis
+    if stoch is not None:
+        try:
+            stoch_val = float(stoch)
+            if position_type == 'LONG':
+                if stoch_val < 20:
+                    wrong_indicators.append(("Stochastic", f"Stoch {stoch_val:.0f} oversold but kept falling"))
+                elif stoch_val > 80:
+                    warning_indicators.append(("Stochastic", f"Stoch {stoch_val:.0f} OVERBOUGHT - warned against LONG!"))
+            else:  # SHORT
+                if stoch_val > 80:
+                    wrong_indicators.append(("Stochastic", f"Stoch {stoch_val:.0f} overbought but kept rising"))
+                elif stoch_val < 20:
+                    warning_indicators.append(("Stochastic", f"Stoch {stoch_val:.0f} OVERSOLD - warned against SHORT!"))
+        except:
+            pass
+    
+    # Display findings
+    if warning_indicators:
+        analysis.append("⚠️ WARNING SIGNS WE IGNORED (Committee Failed Here!):")
+        for name, message in warning_indicators:
+            analysis.append(f"   • {message}")
+            analysis.append(f"     → LESSON: {name} weight should be INCREASED")
+        analysis.append("")
+    
+    if wrong_indicators:
+        analysis.append("❌ INDICATORS THAT GAVE FALSE SIGNALS:")
+        for name, message in wrong_indicators:
+            analysis.append(f"   • {message}")
+            analysis.append(f"     → LESSON: {name} less reliable for this market")
+        analysis.append("")
+    
+    if not warning_indicators and not wrong_indicators:
+        analysis.append("🤷 NO CLEAR WARNING SIGNS - Unexpected market move")
+        analysis.append("   • All indicators were neutral")
+        analysis.append("   • LESSON: Don't trade without strong signals")
+        analysis.append("")
+    
+    # ROOT CAUSE DETERMINATION
+    analysis.append("📋 ROOT CAUSE:")
+    if len(warning_indicators) >= 2:
+        analysis.append(f"   🚨 IGNORED {len(warning_indicators)} CONTRA-INDICATORS")
+        analysis.append(f"   → Committee was TOO CONFIDENT ({confidence}%) despite warnings")
+        analysis.append(f"   → ACTION: Add veto rule - if 2+ indicators warn against trade, DON'T TRADE")
+        warning_names = [name for name, _ in warning_indicators]
+        analysis.append(f"   → ACTION: Increase weights for: {', '.join(warning_names)}")
+    elif len(warning_indicators) == 1:
+        name, _ = warning_indicators[0]
+        analysis.append(f"   ⚠️ IGNORED {name} WARNING")
+        analysis.append(f"   → Committee didn't weight {name} highly enough")
+        analysis.append(f"   → ACTION: Increase {name} weight significantly")
+    elif len(wrong_indicators) >= 2:
+        analysis.append(f"   ❌ MULTIPLE INDICATORS FAILED ({len(wrong_indicators)})")
+        wrong_names = [name for name, _ in wrong_indicators]
+        analysis.append(f"   → {', '.join(wrong_names)} all gave wrong signals")
+        analysis.append(f"   → ACTION: Reduce weights for these indicators")
+        analysis.append(f"   → POSSIBLE: Wrong timeframe or market conditions")
+    elif len(wrong_indicators) == 1:
+        name, _ = wrong_indicators[0]
+        analysis.append(f"   ❌ {name} GAVE FALSE SIGNAL")
+        analysis.append(f"   → ACTION: Reduce {name} weight")
+    else:
+        analysis.append(f"   🎲 UNCERTAIN - Low conviction trade")
+        analysis.append(f"   → Committee traded without strong signals")
+        analysis.append(f"   → ACTION: Increase minimum signal threshold")
+    
+    analysis.append("")
+    analysis.append("💡 ACTIONABLE LESSONS FOR COMMITTEE:")
+    
+    # Generate specific recommendations
+    if len(warning_indicators) >= 2:
+        analysis.append(f"   1. NEVER ignore {len(warning_indicators)}+ contra-indicators")
+        analysis.append(f"   2. Add warning threshold before trade execution")
+        analysis.append(f"   3. Increase weights for warning indicators")
+    elif warning_indicators:
+        name, _ = warning_indicators[0]
+        analysis.append(f"   1. Pay MORE attention to {name}")
+        analysis.append(f"   2. If {name} contradicts signal, reduce confidence by 30%")
+    
+    if len(wrong_indicators) >= 1:
+        analysis.append(f"   {len(analysis)-2}. Re-evaluate reliability of indicators that failed")
+        analysis.append(f"   {len(analysis)-1}. Consider different timeframes or market conditions")
+    
+    if confidence > 70 and (warning_indicators or len(wrong_indicators) >= 2):
+        analysis.append(f"   {len(analysis)-2}. Committee was OVERCONFIDENT at {confidence}%")
+        analysis.append(f"   {len(analysis)-1}. Add confidence penalty when signals are mixed")
+    
+    return "\n".join(analysis)
+
+
 def save_trade_result(prediction_id, entry_price, exit_price, profit_loss, 
                      profit_loss_pct, prediction_error, notes=''):
     """
@@ -476,6 +686,15 @@ def save_trade_result(prediction_id, entry_price, exit_price, profit_loss,
     # ✅ INCREMENTAL LEARNING - Evaluate this single trade with FIXED logic
     trade_won = profit_loss > 0
     evaluate_and_learn_from_trade(prediction_id, trade_won, cursor)
+    
+    # ✅ DEEP LOSS ANALYSIS - When trade loses, analyze WHY
+    if not trade_won:
+        loss_analysis = analyze_losing_trade(prediction_id, entry_price, exit_price, cursor)
+        print(f"\n{'='*70}")
+        print(f"❌ LOSING TRADE ANALYSIS - Trade #{prediction_id}")
+        print(f"{'='*70}")
+        print(loss_analysis)
+        print(f"{'='*70}\n")
     
     # ✅ PERIODIC REVALIDATION - Every 25 trades, show summary
     cursor.execute("SELECT COUNT(*) FROM trade_results")
