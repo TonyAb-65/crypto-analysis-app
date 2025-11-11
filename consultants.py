@@ -140,7 +140,16 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
                         Used to dynamically adjust OBV lookback period
     """
     # ✅ LOAD LEARNED INDICATOR WEIGHTS FROM ML
-    from database_FIXED import get_indicator_weights
+    try:
+        from database import get_indicator_weights
+    except ImportError:
+        # Fallback if function doesn't exist
+        def get_indicator_weights():
+            return {
+                'RSI': 1.0, 'MACD': 1.0, 'ADX': 1.0, 'OBV': 1.0,
+                'Stochastic': 1.0, 'MFI': 1.0, 'CCI': 1.0
+            }
+    
     indicator_weights = get_indicator_weights()
     
     # Get weights for each indicator (default 1.0 if no learning data)
