@@ -138,7 +138,9 @@ def save_prediction(asset_type, pair, timeframe, current_price, predicted_price,
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
-    timestamp = datetime.now().isoformat()
+    # Force fresh import to avoid any caching issues
+    from datetime import datetime as dt_now
+    timestamp = dt_now.now().isoformat()
     
     cursor.execute('''
         INSERT INTO predictions (
@@ -165,12 +167,18 @@ def mark_prediction_for_trading(prediction_id, actual_entry_price, entry_timesta
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
+    # Update both entry_timestamp AND main timestamp so trade appears at top when sorted
     cursor.execute('''
         UPDATE predictions 
-        SET actual_entry_price = ?, entry_timestamp = ?, status = 'will_trade',
-            position_type = ?, target_price = ?, stop_loss = ?
+        SET actual_entry_price = ?, 
+            entry_timestamp = ?, 
+            timestamp = ?,
+            status = 'will_trade',
+            position_type = ?, 
+            target_price = ?, 
+            stop_loss = ?
         WHERE id = ?
-    ''', (actual_entry_price, entry_timestamp, position_type, target_price, stop_loss, prediction_id))
+    ''', (actual_entry_price, entry_timestamp, entry_timestamp, position_type, target_price, stop_loss, prediction_id))
     
     conn.commit()
     conn.close()
@@ -459,17 +467,65 @@ def save_trade_result(prediction_id, entry_price, exit_price, profit_loss,
         UPDATE predictions SET status = 'completed' WHERE id = ?
     ''', (prediction_id,))
     
-    # ✅ INCREMENTAL LEARNING - Evaluate this single trade
-    trade_won = profit_loss > 0
-    evaluate_and_learn_from_trade(prediction_id, trade_won, cursor)
+    # ✅ ADVANCED LEARNING SYSTEM - Evaluate indicators properly
+    from indicator_learning import update_indicator_learning, generate_trade_insights, analyze_trade_indicators
     
-    # ✅ PERIODIC REVALIDATION - Every 25 trades, do full review
+    # Get prediction data for analysis
+    cursor.execute("""
+        SELECT position_type, rsi, macd, obv, mfi, adx, stochastic, cci, pair
+        FROM predictions WHERE id = ?
+    """, (prediction_id,))
+    pred_data_full = cursor.fetchone()
+    
+    if pred_data_full:
+        prediction_data = {
+            'position_type': pred_data_full[0],
+            'rsi': pred_data_full[1],
+            'macd': pred_data_full[2],
+            'obv': pred_data_full[3],
+            'mfi': pred_data_full[4],
+            'adx': pred_data_full[5],
+            'stochastic': pred_data_full[6],
+            'cci': pred_data_full[7],
+            'pair': pred_data_full[8]
+        }
+        
+        trade_result_data = {
+            'entry_price': entry_price,
+            'exit_price': exit_price,
+            'profit_loss': profit_loss,
+            'profit_loss_pct': profit_loss_pct
+        }
+        
+        # Run analysis and update learning
+        conn.commit()  # Commit current changes first
+        analysis = update_indicator_learning(trade_result_data, prediction_data)
+        
+        # Generate insights
+        insights = generate_trade_insights(analysis)
+        print(f"\n{'='*60}")
+        print(f"📊 TRADE #{prediction_id} ANALYSIS")
+        print(f"{'='*60}")
+        print(insights)
+        print(f"{'='*60}\n")
+    
+    # ✅ PERIODIC REVALIDATION - Every 25 trades, show summary
     cursor.execute("SELECT COUNT(*) FROM trade_results")
     total_trades = cursor.fetchone()[0]
     
     if total_trades % 25 == 0:  # Every 25 trades
         print(f"\n🔄 MILESTONE: {total_trades} trades completed!")
-        print(f"📊 Running full AI learning revalidation...")
+        print(f"📊 Indicator Performance Summary:")
+        cursor.execute("""
+            SELECT indicator_name, correct_count, wrong_count, accuracy_rate, weight_multiplier
+            FROM indicator_accuracy
+            WHERE correct_count + wrong_count > 0
+            ORDER BY accuracy_rate DESC
+        """)
+        for row in cursor.fetchall():
+            name, correct, wrong, acc, weight = row
+            total = correct + wrong
+            print(f"  {name}: {correct}/{total} ({acc*100:.1f}%) → Weight: {weight:.2f}x")
         
         # Revalidate all weights from scratch
         revalidate_all_indicators(cursor)
