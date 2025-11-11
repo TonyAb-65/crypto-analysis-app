@@ -139,6 +139,18 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
         timeframe_hours: Trading timeframe in hours (1 for 1H, 4 for 4H, etc.)
                         Used to dynamically adjust OBV lookback period
     """
+    # ✅ LOAD LEARNED INDICATOR WEIGHTS FROM ML
+    from database_FIXED import get_indicator_weights
+    indicator_weights = get_indicator_weights()
+    
+    # Get weights for each indicator (default 1.0 if no learning data)
+    weight_rsi = indicator_weights.get('RSI', 1.0)
+    weight_macd = indicator_weights.get('MACD', 1.0)
+    weight_adx = indicator_weights.get('ADX', 1.0)
+    weight_obv = indicator_weights.get('OBV', 1.0)
+    weight_stoch = indicator_weights.get('Stochastic', 1.0)
+    weight_mfi = indicator_weights.get('MFI', 1.0)
+    
     if df is None or len(df) < 50:
         return {
             "signal": "NO_CONFIRMATION", 
@@ -265,8 +277,9 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
                 rsi_low = min(rsi_prev_5)
                 if rsi < 40 and rsi > rsi_low + 3:
                     # RSI forming higher low (reversal pattern!)
-                    confirmation_score += 4
-                    reasoning.append(f"RSI reversal: {rsi_low:.0f}→{rsi:.0f}")
+                    rsi_score = 4 * weight_rsi  # ✅ APPLY LEARNED WEIGHT
+                    confirmation_score += rsi_score
+                    reasoning.append(f"RSI reversal: {rsi_low:.0f}→{rsi:.0f} (weight: {weight_rsi:.2f}x)")
             
             # Check #2: Volume Spike
             avg_volume = df['volume'].tail(20).mean()
@@ -281,22 +294,26 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
             # Check #3: MACD Turning Up
             macd_prev = df['macd'].iloc[-2] if len(df) > 1 else macd
             if macd > macd_prev and macd > macd_signal:
-                confirmation_score += 1
-                reasoning.append("MACD turning bullish")
+                macd_score = 1 * weight_macd  # ✅ APPLY LEARNED WEIGHT
+                confirmation_score += macd_score
+                reasoning.append(f"MACD turning bullish (weight: {weight_macd:.2f}x)")
             
             # Check #4: ADX (Trend Strength)
             if adx > 25:
-                confirmation_score += 1
-                reasoning.append(f"Strong trend ADX:{adx:.0f}")
+                adx_score = 1 * weight_adx  # ✅ APPLY LEARNED WEIGHT
+                confirmation_score += adx_score
+                reasoning.append(f"Strong trend ADX:{adx:.0f} (weight: {weight_adx:.2f}x)")
             
             # Check #5: OBV Trend Support (NEW!)
             if obv_trend == "IMPROVING":
-                confirmation_score += 2
-                reasoning.append(f"✅ OBV recovering: {obv_medium:.0f}→{obv_now:.0f} (buyers catching up)")
+                obv_score = 2 * weight_obv  # ✅ APPLY LEARNED WEIGHT
+                confirmation_score += obv_score
+                reasoning.append(f"✅ OBV recovering: {obv_medium:.0f}→{obv_now:.0f} (weight: {weight_obv:.2f}x)")
             elif obv_trend == "DETERIORATING" and obv_velocity == "FAST":
-                confirmation_score -= 2
+                obv_score = 2 * weight_obv  # ✅ APPLY LEARNED WEIGHT
+                confirmation_score -= obv_score
                 # Clarify: Getting MORE negative (worse)
-                reasoning.append(f"⚠️ OBV worsening: {obv_medium:.0f}→{obv_now:.0f} (selling accelerating)")
+                reasoning.append(f"⚠️ OBV worsening: {obv_medium:.0f}→{obv_now:.0f} (weight: {weight_obv:.2f}x)")
             elif obv_trend == "DETERIORATING":
                 # Mention but less severe if slow
                 reasoning.append(f"⚪ OBV weakening: {obv_medium:.0f}→{obv_now:.0f} (recent trend)")
@@ -334,8 +351,9 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
                 rsi_high = max(rsi_prev_5)
                 if rsi > 60 and rsi < rsi_high - 3:
                     # RSI forming lower high (reversal pattern!)
-                    confirmation_score += 4
-                    reasoning.append(f"RSI reversal: {rsi_high:.0f}→{rsi:.0f}")
+                    rsi_score = 4 * weight_rsi  # ✅ APPLY LEARNED WEIGHT
+                    confirmation_score += rsi_score
+                    reasoning.append(f"RSI reversal: {rsi_high:.0f}→{rsi:.0f} (weight: {weight_rsi:.2f}x)")
             
             # Check #2: Volume Spike
             avg_volume = df['volume'].tail(20).mean()
@@ -350,18 +368,21 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
             # Check #3: MACD Turning Down
             macd_prev = df['macd'].iloc[-2] if len(df) > 1 else macd
             if macd < macd_prev and macd < macd_signal:
-                confirmation_score += 1
-                reasoning.append("MACD turning bearish")
+                macd_score = 1 * weight_macd  # ✅ APPLY LEARNED WEIGHT
+                confirmation_score += macd_score
+                reasoning.append(f"MACD turning bearish (weight: {weight_macd:.2f}x)")
             
             # Check #4: ADX (Trend Strength)
             if adx > 25:
-                confirmation_score += 1
-                reasoning.append(f"Strong trend ADX:{adx:.0f}")
+                adx_score = 1 * weight_adx  # ✅ APPLY LEARNED WEIGHT
+                confirmation_score += adx_score
+                reasoning.append(f"Strong trend ADX:{adx:.0f} (weight: {weight_adx:.2f}x)")
             
             # Check #5: OBV Trend Support (NEW!)
             if obv_trend == "DETERIORATING":
-                confirmation_score += 2
-                reasoning.append(f"✅ OBV declining: {obv_medium:.0f}→{obv_now:.0f} (selling pressure)")
+                obv_score = 2 * weight_obv  # ✅ APPLY LEARNED WEIGHT
+                confirmation_score += obv_score
+                reasoning.append(f"✅ OBV declining: {obv_medium:.0f}→{obv_now:.0f} (weight: {weight_obv:.2f}x)")
             elif obv_trend == "IMPROVING" and obv_velocity == "FAST":
                 confirmation_score -= 2
                 # Getting LESS negative (better) - contradicts bearish
