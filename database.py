@@ -104,7 +104,7 @@ def init_database():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS indicator_accuracy (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            indicator_name TEXT NOT NULL,
+            indicator_name TEXT NOT NULL UNIQUE,
             correct_count INTEGER DEFAULT 0,
             wrong_count INTEGER DEFAULT 0,
             missed_count INTEGER DEFAULT 0,
@@ -114,15 +114,13 @@ def init_database():
         )
     ''')
     
-    cursor.execute("SELECT COUNT(*) FROM indicator_accuracy")
-    if cursor.fetchone()[0] == 0:
-        indicators = ['OBV', 'ADX', 'Stochastic', 'MFI', 'CCI', 'Hammer', 'Doji', 'Shooting_Star']
-        for ind in indicators:
-            cursor.execute('''
-                INSERT INTO indicator_accuracy 
-                (indicator_name, correct_count, wrong_count, missed_count, accuracy_rate, weight_multiplier, last_updated)
-                VALUES (?, 0, 0, 0, 0.5, 1.0, ?)
-            ''', (ind, datetime.now().isoformat()))
+    indicators = ['OBV', 'ADX', 'Stochastic', 'MFI', 'CCI', 'Hammer', 'Doji', 'Shooting_Star']
+    for ind in indicators:
+        cursor.execute('''
+            INSERT OR IGNORE INTO indicator_accuracy 
+            (indicator_name, correct_count, wrong_count, missed_count, accuracy_rate, weight_multiplier, last_updated)
+            VALUES (?, 0, 0, 0, 0.5, 1.0, ?)
+        ''', (ind, datetime.now().isoformat()))
     
     # ==================== 🆕 COMMITTEE LEARNING TABLES ====================
     
