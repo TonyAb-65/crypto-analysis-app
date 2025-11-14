@@ -6,8 +6,9 @@ from pathlib import Path
 from datetime import datetime
 import json
 
-# Database path
-DB_PATH = Path("trading_platform.db")
+# Database path - Using your existing database with 88 trades
+DB_PATH = Path.home() / "trading_ai_learning.db"  # Your old database
+# If your database has a different name, update it here
 
 def init_database():
     """Initialize database with all tables including learning system"""
