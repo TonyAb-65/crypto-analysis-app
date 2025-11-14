@@ -1,6 +1,7 @@
 """
 Main Application - Streamlit UI
 Imports functions from modularized files
+ENHANCED WITH COMMITTEE LEARNING SYSTEM (Step 4)
 """
 import streamlit as st
 import pandas as pd
@@ -34,6 +35,15 @@ from indicators import calculate_technical_indicators
 from ml_model import train_improved_model
 from consultants import run_consultant_meeting
 
+# ==================== 🆕 COMMITTEE SYSTEM INTEGRATION ====================
+try:
+    from committee_meeting import CommitteeMeeting
+    from committee_learning import CommitteeLearningSystem
+    COMMITTEE_AVAILABLE = True
+except ImportError:
+    COMMITTEE_AVAILABLE = False
+    print("⚠️ Committee system not available - using fallback consultant meeting")
+
 # Initialize database
 init_database()
 
@@ -41,8 +51,8 @@ init_database()
 
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
-st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH SURGICAL FIXES")
-st.markdown("*Crypto, Forex, Metals + AI ML Predictions + Trading Central Format + AI Learning + News Sentiment*")
+st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH LEARNING COMMITTEE")
+st.markdown("*Crypto, Forex, Metals + AI ML Predictions + 4-Consultant Committee + Automatic Learning*")
 
 if 'binance_blocked' not in st.session_state:
     st.session_state.binance_blocked = False
@@ -52,6 +62,17 @@ if st.session_state.binance_blocked:
 
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 st.markdown(f"**🕐 Last Updated:** {current_time}")
+
+# ==================== 🆕 COMMITTEE INITIALIZATION ====================
+if COMMITTEE_AVAILABLE:
+    if 'committee' not in st.session_state:
+        with st.spinner("🏛️ Initializing Committee System..."):
+            st.session_state.committee = CommitteeMeeting(enable_learning=True)
+        st.success("✅ Committee System Ready!")
+    
+    committee = st.session_state.committee
+else:
+    committee = None
 
 with st.expander("💾 Database Information", expanded=False):
     st.info(f"""
@@ -100,6 +121,24 @@ st.markdown("---")
 st.sidebar.header("⚙️ Configuration")
 
 debug_mode = st.sidebar.checkbox("🔧 Debug Mode", value=False, help="Show detailed API information")
+
+# ==================== 🆕 COMMITTEE STATUS (SIDEBAR) ====================
+if COMMITTEE_AVAILABLE and committee:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🏛️ Committee Status")
+    
+    # Show committee consultant performance
+    with st.sidebar.expander("📊 Consultant Rankings", expanded=False):
+        rankings = committee.get_consultant_rankings()
+        for rank_info in rankings:
+            streak_icon = "🔥" if rank_info['streak'] > 0 else "❄️" if rank_info['streak'] < 0 else "➖"
+            st.caption(f"#{rank_info['rank']} {rank_info['name']}: {rank_info['accuracy']:.1f}% "
+                      f"({rank_info['weight']:.2f}x) {streak_icon}")
+    
+    # Reload button
+    if st.sidebar.button("🔄 Reload Committee", help="Refresh consultant weights from database"):
+        committee.reload_consultant_performance()
+        st.sidebar.success("✅ Reloaded!")
 
 # ==================== TOP MOVERS ====================
 show_market_movers = st.sidebar.checkbox("📈 Show Top Movers", value=True,
@@ -231,6 +270,11 @@ try:
                     learned = relearn_from_past_trades()
                     st.sidebar.success(f"✅ Learned from {learned} trades!")
                     st.sidebar.info("🔄 Refresh page to see updated weights")
+                    
+                    # 🆕 Also reload committee if available
+                    if COMMITTEE_AVAILABLE and committee:
+                        committee.reload_consultant_performance()
+                        st.sidebar.success("✅ Committee updated!")
         
         with st.sidebar.expander("🔍 Full Path", expanded=False):
             st.code(str(DB_PATH))
@@ -578,24 +622,91 @@ if df is not None and len(df) > 0:
         
         st.markdown("---")
         
-        # Trading Recommendations (Consultant Meeting)
-        st.markdown("### 💰 Trading Recommendations")
-        st.markdown("*Powered by AI/ML + Trading Central Format*")
+        # ==================== 🆕 COMMITTEE MEETING (ENHANCED) ====================
+        st.markdown("### 🏛️ Committee Trading Recommendation")
+        st.markdown("*4-Consultant AI Committee with Learning System*")
         
-        meeting_result = run_consultant_meeting(symbol, asset_type, current_price, warning_details)
+        # Prepare data for committee
+        # Get indicators dict
+        indicators_dict = df.iloc[-1].to_dict() if len(df) > 0 else {}
         
-        # Display meeting result
-        st.markdown("## 🏢 CONSULTANT MEETING RESULT")
+        # Prepare news data for C2
+        committee_news_data = None
+        if fear_greed_value or news_sentiment:
+            committee_news_data = {
+                'fear_greed_index': fear_greed_value,
+                'sentiment_score': (news_sentiment / 100 - 0.5) * 2 if news_sentiment else 0,  # Convert to -1 to +1
+                'social_sentiment': 'bullish' if news_sentiment and news_sentiment > 60 else 'bearish' if news_sentiment and news_sentiment < 40 else 'neutral'
+            }
         
-        if meeting_result['position'] == 'NEUTRAL':
-            st.warning("⚪ NEUTRAL - DO NOT ENTER")
-        elif meeting_result['position'] == 'LONG':
-            st.success("🟢 LONG SIGNAL")
+        # Prepare risk metrics for C3
+        atr = df['atr'].iloc[-1] if 'atr' in df.columns else None
+        risk_metrics = None
+        if atr:
+            volatility_pct = (atr / current_price) * 100
+            risk_metrics = {
+                'volatility_pct': volatility_pct,
+                'risk_reward_ratio': 2.5  # Can be calculated dynamically
+            }
+        
+        if COMMITTEE_AVAILABLE and committee:
+            # Use new committee system
+            with st.spinner("🏛️ Committee meeting in progress..."):
+                meeting_result = committee.hold_meeting(
+                    data=df,
+                    indicators=indicators_dict,
+                    signals={},  # Can add signals here if needed
+                    news_data=committee_news_data,
+                    risk_metrics=risk_metrics,
+                    patterns=None,  # Can add patterns here
+                    symbol=symbol,
+                    current_price=current_price,
+                    market_type='crypto' if asset_type == "💰 Cryptocurrency" else 'forex' if asset_type == "💱 Forex" else 'metals'
+                )
+            
+            # Display committee result
+            if meeting_result['final_decision'] == 'HOLD':
+                st.warning(f"⚪ **COMMITTEE DECISION: HOLD**")
+                st.info("💡 Committee advises waiting for better setup")
+            elif meeting_result['final_decision'] == 'BUY':
+                st.success(f"🟢 **COMMITTEE DECISION: {meeting_result['decision_strength']} BUY**")
+                st.caption(f"Consensus: {meeting_result['consensus_percentage']}")
+            else:
+                st.error(f"🔴 **COMMITTEE DECISION: {meeting_result['decision_strength']} SELL/SHORT**")
+                st.caption(f"Consensus: {meeting_result['consensus_percentage']}")
+            
+            # Show conflicts if any
+            if meeting_result['has_conflict']:
+                st.warning("⚠️ **Consultants Disagree:**")
+                for conflict in meeting_result['conflicts']:
+                    st.caption(f"• {conflict}")
+            
+            # Show detailed committee summary in expander
+            with st.expander("📊 View Full Committee Discussion", expanded=False):
+                st.text(meeting_result['summary'])
+            
+            # Store decision_id for later
+            if 'decision_id' in meeting_result:
+                st.session_state['last_decision_id'] = meeting_result['decision_id']
+            
+            # Convert committee result to format compatible with existing code
+            meeting_result_legacy = {
+                'position': meeting_result['final_decision'] if meeting_result['final_decision'] != 'HOLD' else 'NEUTRAL',
+                'reasoning': meeting_result['summary_short'],
+                'entry': current_price,
+                'target': current_price * 1.03 if meeting_result['final_decision'] == 'BUY' else current_price * 0.97 if meeting_result['final_decision'] == 'SELL' else current_price,
+                'stop_loss': current_price * 0.99 if meeting_result['final_decision'] == 'BUY' else current_price * 1.01 if meeting_result['final_decision'] == 'SELL' else current_price
+            }
+            
         else:
-            st.error("🔴 SHORT SIGNAL")
+            # Fallback to old consultant meeting
+            st.info("ℹ️ Using legacy consultant system (Committee not available)")
+            meeting_result_legacy = run_consultant_meeting(symbol, asset_type, current_price, warning_details)
         
-        st.markdown(f"**Reasoning:** {meeting_result['reasoning']}")
+        # Use legacy variable name for rest of code
+        meeting_result = meeting_result_legacy
         
+        # Display recommendation (if not NEUTRAL)
         if meeting_result['position'] != 'NEUTRAL':
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -731,6 +842,17 @@ if df is not None and len(df) > 0:
                                             target_price=target,
                                             stop_loss=stop
                                         )
+                                        
+                                        # 🆕 Link to committee decision if available
+                                        if COMMITTEE_AVAILABLE and 'last_decision_id' in st.session_state:
+                                            try:
+                                                committee.learning_system.link_decision_to_trade(
+                                                    st.session_state['last_decision_id'],
+                                                    pred_id
+                                                )
+                                            except:
+                                                pass  # Fail silently if linking fails
+                                        
                                         st.success(f"✅ Trade marked! Entry: ${actual_entry:.2f}")
                                         st.session_state[f'marking_trade_{pred_id}'] = False
                                         time.sleep(1)
@@ -1457,6 +1579,13 @@ if df is not None and len(df) > 0:
                                                             )
                                                             
                                                             if success:
+                                                                # 🆕 TRIGGER COMMITTEE LEARNING!
+                                                                if COMMITTEE_AVAILABLE and committee:
+                                                                    try:
+                                                                        committee.learning_system.learn_from_trade(int(pred['id']))
+                                                                    except Exception as learn_error:
+                                                                        st.warning(f"⚠️ Trade closed but learning failed: {learn_error}")
+                                                                
                                                                 st.success(f"✅ Trade closed! P/L: ${pl:.2f} ({pl_pct:+.2f}%)")
                                                                 st.session_state[f'closing_{pred["id"]}'] = False
                                                                 time.sleep(1)
@@ -1764,7 +1893,7 @@ else:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center;'>
-    <p><b>🚀 AI TRADING PLATFORM - MODULAR ARCHITECTURE</b></p>
+    <p><b>🚀 AI TRADING PLATFORM - COMMITTEE LEARNING SYSTEM</b></p>
     <p><b>⚠️ Educational purposes only. Not financial advice.</b></p>
 </div>
 """, unsafe_allow_html=True)
