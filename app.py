@@ -1409,7 +1409,7 @@ if df is not None and len(df) > 0:
                     filter_status = st.selectbox(
                         "Filter by Status",
                         ["Active Trades", "All", "For Trading", "Analysis Only", "Closed"],
-                        index=0,
+                        index=1,
                         help="Active Trades = For Trading + Analysis Only (not closed)"
                     )
                 
