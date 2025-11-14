@@ -1289,7 +1289,7 @@ if df is not None and len(df) > 0:
             st.markdown("## 📊 Trade Tracking & Learning Dashboard")
             
             # Get all predictions
-            all_predictions_df = get_all_recent_predictions(limit=50)
+            all_predictions_df = get_all_recent_predictions(limit=200)
             
             if all_predictions_df is not None and len(all_predictions_df) > 0:
                 
@@ -1409,7 +1409,7 @@ if df is not None and len(df) > 0:
                     filter_status = st.selectbox(
                         "Filter by Status",
                         ["Active Trades", "All", "For Trading", "Analysis Only", "Closed"],
-                        index=1,
+                        index=0,
                         help="Active Trades = For Trading + Analysis Only (not closed)"
                     )
                 
@@ -1739,19 +1739,19 @@ if df is not None and len(df) > 0:
                     SELECT 
                         tr.id,
                         tr.trade_date,
-                        p.pair as symbol,
-                        p.position_type,
-                        p.actual_entry_price as entry_price,
+                        COALESCE(p.pair, 'N/A') as symbol,
+                        COALESCE(p.position_type, 'N/A') as position_type,
+                        tr.entry_price,
                         tr.exit_price,
                         tr.profit_loss,
                         tr.profit_loss_pct,
                         tr.notes as exit_reason,
-                        p.confidence,
-                        p.signal_strength
+                        COALESCE(p.confidence, 0) as confidence,
+                        COALESCE(p.signal_strength, 0) as signal_strength
                     FROM trade_results tr
-                    JOIN predictions p ON tr.prediction_id = p.id
+                    LEFT JOIN predictions p ON tr.prediction_id = p.id
                     ORDER BY tr.trade_date DESC
-                    LIMIT 20
+                    LIMIT 100
                 """, conn)
                 conn.close()
                 
