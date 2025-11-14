@@ -114,13 +114,37 @@ def init_database():
         )
     ''')
     
+    # Add missing columns to existing table
+    cursor.execute("PRAGMA table_info(indicator_accuracy)")
+    existing_cols = [col[1] for col in cursor.fetchall()]
+    
+    if 'missed_count' not in existing_cols:
+        cursor.execute("ALTER TABLE indicator_accuracy ADD COLUMN missed_count INTEGER DEFAULT 0")
+    if 'accuracy_rate' not in existing_cols:
+        cursor.execute("ALTER TABLE indicator_accuracy ADD COLUMN accuracy_rate REAL DEFAULT 0")
+    if 'weight_multiplier' not in existing_cols:
+        cursor.execute("ALTER TABLE indicator_accuracy ADD COLUMN weight_multiplier REAL DEFAULT 1.0")
+    if 'last_updated' not in existing_cols:
+        cursor.execute(f"ALTER TABLE indicator_accuracy ADD COLUMN last_updated TEXT DEFAULT '{datetime.now().isoformat()}'")
+    
+    # Check if indicator_accuracy needs UNIQUE constraint
+    try:
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_indicator_name ON indicator_accuracy(indicator_name)")
+    except:
+        pass
+    
+    # Initialize indicators (INSERT OR IGNORE handles duplicates)
     indicators = ['OBV', 'ADX', 'Stochastic', 'MFI', 'CCI', 'Hammer', 'Doji', 'Shooting_Star']
     for ind in indicators:
-        cursor.execute('''
-            INSERT OR IGNORE INTO indicator_accuracy 
-            (indicator_name, correct_count, wrong_count, missed_count, accuracy_rate, weight_multiplier, last_updated)
-            VALUES (?, 0, 0, 0, 0.5, 1.0, ?)
-        ''', (ind, datetime.now().isoformat()))
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO indicator_accuracy 
+                (indicator_name, correct_count, wrong_count, missed_count, accuracy_rate, weight_multiplier, last_updated)
+                VALUES (?, 0, 0, 0, 0.5, 1.0, ?)
+            ''', (ind, datetime.now().isoformat()))
+        except sqlite3.IntegrityError:
+            # Already exists, skip
+            pass
     
     # ==================== 🆕 COMMITTEE LEARNING TABLES ====================
     
