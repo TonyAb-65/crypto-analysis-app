@@ -1,7 +1,6 @@
 """
 Main Application - Streamlit UI
 Imports functions from modularized files
-ENHANCED WITH COMMITTEE LEARNING SYSTEM (Step 4)
 """
 import streamlit as st
 import pandas as pd
@@ -35,7 +34,7 @@ from indicators import calculate_technical_indicators
 from ml_model import train_improved_model
 from consultants import run_consultant_meeting
 
-# ==================== 🆕 COMMITTEE SYSTEM INTEGRATION ====================
+# ==================== COMMITTEE SYSTEM INTEGRATION ====================
 try:
     from committee_meeting import CommitteeMeeting
     from committee_learning import CommitteeLearningSystem
@@ -47,11 +46,19 @@ except ImportError:
 # Initialize database
 init_database()
 
+# ==================== COMMITTEE INITIALIZATION ====================
+if COMMITTEE_AVAILABLE:
+    if 'committee' not in st.session_state:
+        st.session_state.committee = CommitteeMeeting(enable_learning=True)
+    committee = st.session_state.committee
+else:
+    committee = None
+
 # ==================== STREAMLIT PAGE CONFIGURATION ====================
 
 st.set_page_config(page_title="AI Trading Platform", layout="wide", page_icon="🤖")
 
-st.title("🤖 AI Trading Analysis Platform - ENHANCED WITH LEARNING COMMITTEE")
+st.title("🤖 AI Trading Analysis Platform - WITH COMMITTEE LEARNING")
 st.markdown("*Crypto, Forex, Metals + AI ML Predictions + 4-Consultant Committee + Automatic Learning*")
 
 if 'binance_blocked' not in st.session_state:
@@ -62,17 +69,6 @@ if st.session_state.binance_blocked:
 
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 st.markdown(f"**🕐 Last Updated:** {current_time}")
-
-# ==================== 🆕 COMMITTEE INITIALIZATION ====================
-if COMMITTEE_AVAILABLE:
-    if 'committee' not in st.session_state:
-        with st.spinner("🏛️ Initializing Committee System..."):
-            st.session_state.committee = CommitteeMeeting(enable_learning=True)
-        st.success("✅ Committee System Ready!")
-    
-    committee = st.session_state.committee
-else:
-    committee = None
 
 with st.expander("💾 Database Information", expanded=False):
     st.info(f"""
@@ -121,24 +117,6 @@ st.markdown("---")
 st.sidebar.header("⚙️ Configuration")
 
 debug_mode = st.sidebar.checkbox("🔧 Debug Mode", value=False, help="Show detailed API information")
-
-# ==================== 🆕 COMMITTEE STATUS (SIDEBAR) ====================
-if COMMITTEE_AVAILABLE and committee:
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🏛️ Committee Status")
-    
-    # Show committee consultant performance
-    with st.sidebar.expander("📊 Consultant Rankings", expanded=False):
-        rankings = committee.get_consultant_rankings()
-        for rank_info in rankings:
-            streak_icon = "🔥" if rank_info['streak'] > 0 else "❄️" if rank_info['streak'] < 0 else "➖"
-            st.caption(f"#{rank_info['rank']} {rank_info['name']}: {rank_info['accuracy']:.1f}% "
-                      f"({rank_info['weight']:.2f}x) {streak_icon}")
-    
-    # Reload button
-    if st.sidebar.button("🔄 Reload Committee", help="Refresh consultant weights from database"):
-        committee.reload_consultant_performance()
-        st.sidebar.success("✅ Reloaded!")
 
 # ==================== TOP MOVERS ====================
 show_market_movers = st.sidebar.checkbox("📈 Show Top Movers", value=True,
@@ -271,10 +249,26 @@ try:
                     st.sidebar.success(f"✅ Learned from {learned} trades!")
                     st.sidebar.info("🔄 Refresh page to see updated weights")
                     
-                    # 🆕 Also reload committee if available
+                    # Also reload committee if available
                     if COMMITTEE_AVAILABLE and committee:
                         committee.reload_consultant_performance()
                         st.sidebar.success("✅ Committee updated!")
+        
+        # Committee Status (if available)
+        if COMMITTEE_AVAILABLE and committee:
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("### 🏛️ Committee Status")
+            
+            with st.sidebar.expander("📊 Consultant Rankings", expanded=False):
+                rankings = committee.get_consultant_rankings()
+                for rank_info in rankings:
+                    streak_icon = "🔥" if rank_info['streak'] > 0 else "❄️" if rank_info['streak'] < 0 else "➖"
+                    st.sidebar.caption(f"#{rank_info['rank']} {rank_info['name']}: {rank_info['accuracy']:.1f}% "
+                                     f"({rank_info['weight']:.2f}x) {streak_icon}")
+            
+            if st.sidebar.button("🔄 Reload Committee", help="Refresh consultant weights from database"):
+                committee.reload_consultant_performance()
+                st.sidebar.success("✅ Reloaded!")
         
         with st.sidebar.expander("🔍 Full Path", expanded=False):
             st.code(str(DB_PATH))
@@ -622,91 +616,94 @@ if df is not None and len(df) > 0:
         
         st.markdown("---")
         
-        # ==================== 🆕 COMMITTEE MEETING (ENHANCED) ====================
+        # ==================== COMMITTEE MEETING ====================
         st.markdown("### 🏛️ Committee Trading Recommendation")
         st.markdown("*4-Consultant AI Committee with Learning System*")
         
         # Prepare data for committee
-        # Get indicators dict
         indicators_dict = df.iloc[-1].to_dict() if len(df) > 0 else {}
         
-        # Prepare news data for C2
+        # Prepare news data
         committee_news_data = None
         if fear_greed_value or news_sentiment:
             committee_news_data = {
                 'fear_greed_index': fear_greed_value,
-                'sentiment_score': (news_sentiment / 100 - 0.5) * 2 if news_sentiment else 0,  # Convert to -1 to +1
+                'sentiment_score': (news_sentiment / 100 - 0.5) * 2 if news_sentiment else 0,
                 'social_sentiment': 'bullish' if news_sentiment and news_sentiment > 60 else 'bearish' if news_sentiment and news_sentiment < 40 else 'neutral'
             }
         
-        # Prepare risk metrics for C3
+        # Prepare risk metrics
         atr = df['atr'].iloc[-1] if 'atr' in df.columns else None
         risk_metrics = None
         if atr:
             volatility_pct = (atr / current_price) * 100
-            risk_metrics = {
-                'volatility_pct': volatility_pct,
-                'risk_reward_ratio': 2.5  # Can be calculated dynamically
-            }
+            risk_metrics = {'volatility_pct': volatility_pct, 'risk_reward_ratio': 2.5}
         
         if COMMITTEE_AVAILABLE and committee:
-            # Use new committee system
+            # Use committee system
             with st.spinner("🏛️ Committee meeting in progress..."):
-                meeting_result = committee.hold_meeting(
+                committee_result = committee.hold_meeting(
                     data=df,
                     indicators=indicators_dict,
-                    signals={},  # Can add signals here if needed
+                    signals={},
                     news_data=committee_news_data,
                     risk_metrics=risk_metrics,
-                    patterns=None,  # Can add patterns here
+                    patterns=None,
                     symbol=symbol,
                     current_price=current_price,
                     market_type='crypto' if asset_type == "💰 Cryptocurrency" else 'forex' if asset_type == "💱 Forex" else 'metals'
                 )
             
-            # Display committee result
-            if meeting_result['final_decision'] == 'HOLD':
+            # Display result
+            if committee_result['final_decision'] == 'HOLD':
                 st.warning(f"⚪ **COMMITTEE DECISION: HOLD**")
                 st.info("💡 Committee advises waiting for better setup")
-            elif meeting_result['final_decision'] == 'BUY':
-                st.success(f"🟢 **COMMITTEE DECISION: {meeting_result['decision_strength']} BUY**")
-                st.caption(f"Consensus: {meeting_result['consensus_percentage']}")
+            elif committee_result['final_decision'] == 'BUY':
+                st.success(f"🟢 **COMMITTEE DECISION: {committee_result['decision_strength']} BUY**")
+                st.caption(f"Consensus: {committee_result['consensus_percentage']}")
             else:
-                st.error(f"🔴 **COMMITTEE DECISION: {meeting_result['decision_strength']} SELL/SHORT**")
-                st.caption(f"Consensus: {meeting_result['consensus_percentage']}")
+                st.error(f"🔴 **COMMITTEE DECISION: {committee_result['decision_strength']} SELL/SHORT**")
+                st.caption(f"Consensus: {committee_result['consensus_percentage']}")
             
-            # Show conflicts if any
-            if meeting_result['has_conflict']:
+            # Show conflicts
+            if committee_result['has_conflict']:
                 st.warning("⚠️ **Consultants Disagree:**")
-                for conflict in meeting_result['conflicts']:
+                for conflict in committee_result['conflicts']:
                     st.caption(f"• {conflict}")
             
-            # Show detailed committee summary in expander
+            # Show full discussion
             with st.expander("📊 View Full Committee Discussion", expanded=False):
-                st.text(meeting_result['summary'])
+                st.text(committee_result['summary'])
             
-            # Store decision_id for later
-            if 'decision_id' in meeting_result:
-                st.session_state['last_decision_id'] = meeting_result['decision_id']
+            # Store decision_id
+            if 'decision_id' in committee_result:
+                st.session_state['last_decision_id'] = committee_result['decision_id']
             
-            # Convert committee result to format compatible with existing code
-            meeting_result_legacy = {
-                'position': meeting_result['final_decision'] if meeting_result['final_decision'] != 'HOLD' else 'NEUTRAL',
-                'reasoning': meeting_result['summary_short'],
+            # Convert to legacy format
+            meeting_result = {
+                'position': committee_result['final_decision'] if committee_result['final_decision'] != 'HOLD' else 'NEUTRAL',
+                'reasoning': committee_result['summary_short'],
                 'entry': current_price,
-                'target': current_price * 1.03 if meeting_result['final_decision'] == 'BUY' else current_price * 0.97 if meeting_result['final_decision'] == 'SELL' else current_price,
-                'stop_loss': current_price * 0.99 if meeting_result['final_decision'] == 'BUY' else current_price * 1.01 if meeting_result['final_decision'] == 'SELL' else current_price
+                'target': current_price * 1.03 if committee_result['final_decision'] == 'BUY' else current_price * 0.97 if committee_result['final_decision'] == 'SELL' else current_price,
+                'stop_loss': current_price * 0.99 if committee_result['final_decision'] == 'BUY' else current_price * 1.01 if committee_result['final_decision'] == 'SELL' else current_price
             }
-            
         else:
-            # Fallback to old consultant meeting
+            # Fallback to old system
             st.info("ℹ️ Using legacy consultant system (Committee not available)")
-            meeting_result_legacy = run_consultant_meeting(symbol, asset_type, current_price, warning_details)
+            meeting_result = run_consultant_meeting(symbol, asset_type, current_price, warning_details)
         
-        # Use legacy variable name for rest of code
-        meeting_result = meeting_result_legacy
+        # Display meeting result (legacy format for compatibility)
+        st.markdown("## 🏢 CONSULTANT MEETING RESULT")
         
-        # Display recommendation (if not NEUTRAL)
+        if meeting_result['position'] == 'NEUTRAL':
+            st.warning("⚪ NEUTRAL - DO NOT ENTER")
+        elif meeting_result['position'] == 'LONG':
+            st.success("🟢 LONG SIGNAL")
+        else:
+            st.error("🔴 SHORT SIGNAL")
+        
+        st.markdown(f"**Reasoning:** {meeting_result['reasoning']}")
+        
         if meeting_result['position'] != 'NEUTRAL':
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -843,7 +840,7 @@ if df is not None and len(df) > 0:
                                             stop_loss=stop
                                         )
                                         
-                                        # 🆕 Link to committee decision if available
+                                        # Link to committee decision if available
                                         if COMMITTEE_AVAILABLE and 'last_decision_id' in st.session_state:
                                             try:
                                                 committee.learning_system.link_decision_to_trade(
@@ -1289,7 +1286,7 @@ if df is not None and len(df) > 0:
             st.markdown("## 📊 Trade Tracking & Learning Dashboard")
             
             # Get all predictions
-            all_predictions_df = get_all_recent_predictions(limit=200)
+            all_predictions_df = get_all_recent_predictions(limit=50)
             
             if all_predictions_df is not None and len(all_predictions_df) > 0:
                 
@@ -1579,7 +1576,7 @@ if df is not None and len(df) > 0:
                                                             )
                                                             
                                                             if success:
-                                                                # 🆕 TRIGGER COMMITTEE LEARNING!
+                                                                # Trigger committee learning
                                                                 if COMMITTEE_AVAILABLE and committee:
                                                                     try:
                                                                         committee.learning_system.learn_from_trade(int(pred['id']))
@@ -1606,285 +1603,286 @@ if df is not None and len(df) > 0:
                     st.info("No predictions match the selected filters")
             else:
                 st.info("📝 No predictions yet. Save a prediction to start tracking!")
-    
-    # ==================== CLOSED TRADES HISTORY ====================
-    # This section ALWAYS shows if there are closed trades, independent of show_learning_dashboard
-    st.markdown("---")
-    col_title, col_edit_btn = st.columns([3, 1])
-    with col_title:
-        st.markdown("### 💰 Closed Trades History")
-    with col_edit_btn:
-        if st.button("✏️ Edit Trade", key="edit_trade_btn"):
-            st.session_state['show_edit_form'] = not st.session_state.get('show_edit_form', False)
-    
-    # Edit Trade Form
-    if st.session_state.get('show_edit_form', False):
-        with st.form("edit_trade_form"):
-                st.markdown("#### 🔍 Search & Delete Trade")
+            
+            # ==================== CLOSED TRADES HISTORY ====================
+            col_title, col_edit_btn = st.columns([3, 1])
+            with col_title:
+                st.markdown("### 💰 Closed Trades History")
+            with col_edit_btn:
+                if st.button("✏️ Edit Trade", key="edit_trade_btn"):
+                    st.session_state['show_edit_form'] = not st.session_state.get('show_edit_form', False)
+            
+            # Edit Trade Form
+            if st.session_state.get('show_edit_form', False):
+                with st.form("edit_trade_form"):
+                    st.markdown("#### 🔍 Search & Delete Trade")
+                    
+                    trade_id_input = st.number_input(
+                        "Trade ID to Delete",
+                        min_value=1,
+                        value=59,
+                        step=1,
+                        help="Enter the ID of the trade you want to delete"
+                    )
+                    
+                    col_search, col_cancel = st.columns(2)
+                    
+                    with col_search:
+                        search_clicked = st.form_submit_button("🔍 Search & Preview", use_container_width=True)
+                    
+                    with col_cancel:
+                        cancel_clicked = st.form_submit_button("❌ Cancel", use_container_width=True)
+                    
+                    if cancel_clicked:
+                        st.session_state['show_edit_form'] = False
+                        st.rerun()
+                    
+                    if search_clicked:
+                        try:
+                            conn_search = sqlite3.connect(str(DB_PATH))
+                            cursor_search = conn_search.cursor()
+                            
+                            # Get trade details
+                            cursor_search.execute("""
+                                SELECT 
+                                    tr.id,
+                                    tr.trade_date,
+                                    p.pair,
+                                    p.position_type,
+                                    tr.entry_price,
+                                    tr.exit_price,
+                                    tr.profit_loss,
+                                    tr.profit_loss_pct,
+                                    tr.notes
+                                FROM trade_results tr
+                                LEFT JOIN predictions p ON tr.prediction_id = p.id
+                                WHERE tr.id = ?
+                            """, (trade_id_input,))
+                            
+                            trade = cursor_search.fetchone()
+                            conn_search.close()
+                            
+                            if trade:
+                                st.success("✅ Trade Found!")
+                                
+                                # Display trade details
+                                st.markdown("**Trade Details:**")
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.info(f"**ID:** {trade[0]}")
+                                    st.info(f"**Symbol:** {trade[2] or 'N/A'}")
+                                    st.info(f"**Position:** {trade[3] or 'N/A'}")
+                                with col2:
+                                    st.info(f"**Entry:** ${trade[4]:.2f}")
+                                    st.info(f"**Exit:** ${trade[5]:.2f}")
+                                with col3:
+                                    pl_color = "🟢" if trade[6] > 0 else "🔴"
+                                    st.info(f"**P/L:** {pl_color} ${trade[6]:.2f}")
+                                    st.info(f"**P/L %:** {trade[7]:.2f}%")
+                                
+                                st.warning(f"**Exit Reason:** {trade[8]}")
+                                
+                                # Store trade ID for deletion
+                                st.session_state['trade_to_delete'] = trade_id_input
+                                
+                            else:
+                                st.error(f"❌ Trade ID {trade_id_input} not found!")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Error: {str(e)}")
                 
-                trade_id_input = st.number_input(
-                    "Trade ID to Delete",
-                    min_value=1,
-                    value=59,
-                    step=1,
-                    help="Enter the ID of the trade you want to delete"
-                )
+                # Delete button (outside form, only shows if trade found)
+                if st.session_state.get('trade_to_delete'):
+                    if st.button("🗑️ DELETE THIS TRADE", type="primary", use_container_width=True):
+                        try:
+                            trade_id_to_delete = st.session_state['trade_to_delete']
+                            
+                            conn_del = sqlite3.connect(str(DB_PATH))
+                            cursor_del = conn_del.cursor()
+                            
+                            # Get P/L before deletion
+                            cursor_del.execute("SELECT SUM(profit_loss) FROM trade_results")
+                            total_before = cursor_del.fetchone()[0]
+                            
+                            # Delete the trade
+                            cursor_del.execute("DELETE FROM trade_results WHERE id = ?", (trade_id_to_delete,))
+                            conn_del.commit()
+                            
+                            # Get P/L after deletion
+                            cursor_del.execute("SELECT SUM(profit_loss) FROM trade_results")
+                            total_after = cursor_del.fetchone()[0]
+                            
+                            conn_del.close()
+                            
+                            # Clear session state
+                            st.session_state['trade_to_delete'] = None
+                            st.session_state['show_edit_form'] = False
+                            
+                            st.success(f"✅ Trade {trade_id_to_delete} deleted successfully!")
+                            st.info(f"📊 Total P/L updated: ${total_before:.2f} → ${total_after:.2f}")
+                            
+                            time.sleep(2)
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"❌ Error deleting trade: {str(e)}")
                 
-                col_search, col_cancel = st.columns(2)
+                st.markdown("---")
+
+            
+            try:
+                conn = sqlite3.connect(str(DB_PATH))
+                trades_df = pd.read_sql_query("""
+                    SELECT 
+                        tr.id,
+                        tr.trade_date,
+                        p.pair as symbol,
+                        p.position_type,
+                        p.actual_entry_price as entry_price,
+                        tr.exit_price,
+                        tr.profit_loss,
+                        tr.profit_loss_pct,
+                        tr.notes as exit_reason,
+                        p.confidence,
+                        p.signal_strength
+                    FROM trade_results tr
+                    JOIN predictions p ON tr.prediction_id = p.id
+                    ORDER BY tr.trade_date DESC
+                    LIMIT 20
+                """, conn)
+                conn.close()
                 
-                with col_search:
-                    search_clicked = st.form_submit_button("🔍 Search & Preview", use_container_width=True)
+                if len(trades_df) > 0:
+                    # Add color coding
+                    def color_pl(val):
+                        if val > 0:
+                            return 'background-color: #d4edda'
+                        elif val < 0:
+                            return 'background-color: #f8d7da'
+                        return ''
+                    
+                    styled_df = trades_df.style.applymap(color_pl, subset=['profit_loss', 'profit_loss_pct'])
+                    st.dataframe(styled_df, use_container_width=True)
+                    
+                    # Summary stats - Calculate from ALL trades, not just displayed 20
+                    # Get complete stats from database
+                    conn_stats = sqlite3.connect(str(DB_PATH))
+                    cursor_stats = conn_stats.cursor()
+                    
+                    cursor_stats.execute("""
+                        SELECT 
+                            COUNT(*) as total_trades,
+                            COUNT(CASE WHEN profit_loss > 0 THEN 1 END) as wins,
+                            AVG(CASE WHEN profit_loss > 0 THEN profit_loss END) as avg_win,
+                            AVG(CASE WHEN profit_loss < 0 THEN profit_loss END) as avg_loss,
+                            SUM(profit_loss) as total_pl
+                        FROM trade_results
+                    """)
+                    
+                    stats = cursor_stats.fetchone()
+                    conn_stats.close()
+                    
+                    total_all = stats[0] if stats[0] else 0
+                    wins_all = stats[1] if stats[1] else 0
+                    avg_win_all = stats[2] if stats[2] else 0
+                    avg_loss_all = stats[3] if stats[3] else 0
+                    total_pl_all = stats[4] if stats[4] else 0
+                    
+                    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                    
+                    with col_stat1:
+                        win_rate = (wins_all / total_all * 100) if total_all > 0 else 0
+                        st.metric("Win Rate", f"{win_rate:.1f}%", f"{wins_all}/{total_all}")
+                    
+                    with col_stat2:
+                        st.metric("Avg Win", f"${avg_win_all:.2f}")
+                    
+                    with col_stat3:
+                        st.metric("Avg Loss", f"${avg_loss_all:.2f}")
+                    
+                    with col_stat4:
+                        st.metric("Total P/L", f"${total_pl_all:.2f}", 
+                                 "🟢" if total_pl_all > 0 else "🔴" if total_pl_all < 0 else "⚪")
+                else:
+                    st.info("No closed trades yet")
+            
+            except Exception as e:
+                st.error(f"Error loading trade history: {str(e)}")
+            
+            # ==================== INDICATOR PERFORMANCE ====================
+            st.markdown("### 🎯 Indicator Performance Analysis")
+            
+            try:
+                conn = sqlite3.connect(str(DB_PATH))
                 
-                with col_cancel:
-                    cancel_clicked = st.form_submit_button("❌ Cancel", use_container_width=True)
+                # Check if we have any closed trades
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM trade_results")
+                trade_count = cursor.fetchone()[0]
                 
-                if cancel_clicked:
-                    st.session_state['show_edit_form'] = False
-                    st.rerun()
+                # DEBUG: Show raw data
+                with st.expander("🔍 Debug: Raw Indicator Data"):
+                    debug_df = pd.read_sql_query("""
+                        SELECT * FROM indicator_accuracy
+                    """, conn)
+                    st.dataframe(debug_df, use_container_width=True)
                 
-                if search_clicked:
-                    try:
-                        conn_search = sqlite3.connect(str(DB_PATH))
-                        cursor_search = conn_search.cursor()
+                # Get indicator data
+                indicator_df = pd.read_sql_query("""
+                    SELECT 
+                        indicator_name,
+                        correct_count,
+                        wrong_count,
+                        accuracy_rate,
+                        weight_multiplier,
+                        last_updated
+                    FROM indicator_accuracy
+                    ORDER BY accuracy_rate DESC
+                """, conn)
+                conn.close()
+                
+                if len(indicator_df) > 0:
+                    # Show indicators that have been evaluated
+                    st.dataframe(indicator_df, use_container_width=True)
+                    
+                    # Visual chart (only for indicators with data)
+                    chart_df = indicator_df[indicator_df['correct_count'] + indicator_df['wrong_count'] > 0].copy()
+                    
+                    if len(chart_df) > 0:
+                        fig_ind = go.Figure()
                         
-                        # Get trade details
-                        cursor_search.execute("""
-                            SELECT 
-                                tr.id,
-                                tr.trade_date,
-                                p.pair,
-                                p.position_type,
-                                tr.entry_price,
-                                tr.exit_price,
-                                tr.profit_loss,
-                                tr.profit_loss_pct,
-                                tr.notes
-                            FROM trade_results tr
-                            LEFT JOIN predictions p ON tr.prediction_id = p.id
-                            WHERE tr.id = ?
-                        """, (trade_id_input,))
+                        fig_ind.add_trace(go.Bar(
+                            x=chart_df['indicator_name'],
+                            y=chart_df['accuracy_rate'] * 100,
+                            name='Accuracy %',
+                            marker_color=['green' if x > 0.6 else 'orange' if x > 0.5 else 'red' 
+                                         for x in chart_df['accuracy_rate']]
+                        ))
                         
-                        trade = cursor_search.fetchone()
-                        conn_search.close()
+                        fig_ind.update_layout(
+                            title="Indicator Accuracy Rates",
+                            xaxis_title="Indicator",
+                            yaxis_title="Accuracy %",
+                            height=400
+                        )
                         
-                        if trade:
-                            st.success("✅ Trade Found!")
-                            
-                            # Display trade details
-                            st.markdown("**Trade Details:**")
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.info(f"**ID:** {trade[0]}")
-                                st.info(f"**Symbol:** {trade[2] or 'N/A'}")
-                                st.info(f"**Position:** {trade[3] or 'N/A'}")
-                            with col2:
-                                st.info(f"**Entry:** ${trade[4]:.2f}")
-                                st.info(f"**Exit:** ${trade[5]:.2f}")
-                            with col3:
-                                pl_color = "🟢" if trade[6] > 0 else "🔴"
-                                st.info(f"**P/L:** {pl_color} ${trade[6]:.2f}")
-                                st.info(f"**P/L %:** {trade[7]:.2f}%")
-                            
-                            st.warning(f"**Exit Reason:** {trade[8]}")
-                            
-                            # Store trade ID for deletion
-                            st.session_state['trade_to_delete'] = trade_id_input
-                            
-                        else:
-                            st.error(f"❌ Trade ID {trade_id_input} not found!")
-                            
-                    except Exception as e:
-                        st.error(f"❌ Error: {str(e)}")
-        
-        # Delete button (outside form, only shows if trade found)
-        if st.session_state.get('trade_to_delete'):
-            if st.button("🗑️ DELETE THIS TRADE", type="primary", use_container_width=True):
-                try:
-                    trade_id_to_delete = st.session_state['trade_to_delete']
-                    
-                    conn_del = sqlite3.connect(str(DB_PATH))
-                    cursor_del = conn_del.cursor()
-                    
-                    # Get P/L before deletion
-                    cursor_del.execute("SELECT SUM(profit_loss) FROM trade_results")
-                    total_before = cursor_del.fetchone()[0]
-                    
-                    # Delete the trade
-                    cursor_del.execute("DELETE FROM trade_results WHERE id = ?", (trade_id_to_delete,))
-                    conn_del.commit()
-                    
-                    # Get P/L after deletion
-                    cursor_del.execute("SELECT SUM(profit_loss) FROM trade_results")
-                    total_after = cursor_del.fetchone()[0]
-                    
-                    conn_del.close()
-                    
-                    # Clear session state
-                    st.session_state['trade_to_delete'] = None
-                    st.session_state['show_edit_form'] = False
-                    
-                    st.success(f"✅ Trade {trade_id_to_delete} deleted successfully!")
-                    st.info(f"📊 Total P/L updated: ${total_before:.2f} → ${total_after:.2f}")
-                    
-                    time.sleep(2)
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"❌ Error deleting trade: {str(e)}")
-        
-        st.markdown("---")
+                        st.plotly_chart(fig_ind, use_container_width=True)
+                    else:
+                        st.info("📊 Indicator data initialized. Close trades or click 'Relearn from Past Trades' to see performance!")
+                else:
+                    # Show message - no indicators in table at all
+                    if trade_count > 0:
+                        st.warning(f"📊 You have {trade_count} closed trades!")
+                        st.info("👆 Click the '🔄 Relearn from Past Trades' button in the sidebar to analyze them and populate indicator performance!")
+                    else:
+                        st.info("💡 No closed trades yet. Close some trades to see AI learning in action!")
+                        st.caption("The system will automatically track which indicators are accurate as you trade.")
+            
+            except Exception as e:
+                st.error(f"Error loading indicator performance: {str(e)}")
     
-    # Display closed trades table
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        trades_df = pd.read_sql_query("""
-                SELECT 
-                    tr.id,
-                    tr.trade_date,
-                    COALESCE(p.pair, 'N/A') as symbol,
-                    COALESCE(p.position_type, 'N/A') as position_type,
-                    tr.entry_price,
-                    tr.exit_price,
-                    tr.profit_loss,
-                    tr.profit_loss_pct,
-                    tr.notes as exit_reason,
-                    COALESCE(p.confidence, 0) as confidence,
-                    COALESCE(p.signal_strength, 0) as signal_strength
-                FROM trade_results tr
-                LEFT JOIN predictions p ON tr.prediction_id = p.id
-                ORDER BY tr.trade_date DESC
-                LIMIT 100
-        """, conn)
-        conn.close()
-        
-        if len(trades_df) > 0:
-            # Add color coding
-            def color_pl(val):
-                if val > 0:
-                    return 'background-color: #d4edda'
-                elif val < 0:
-                    return 'background-color: #f8d7da'
-                return ''
-            
-            styled_df = trades_df.style.applymap(color_pl, subset=['profit_loss', 'profit_loss_pct'])
-            st.dataframe(styled_df, use_container_width=True)
-            
-            # Summary stats - Calculate from ALL trades, not just displayed 20
-            # Get complete stats from database
-            conn_stats = sqlite3.connect(str(DB_PATH))
-            cursor_stats = conn_stats.cursor()
-            
-            cursor_stats.execute("""
-                SELECT 
-                    COUNT(*) as total_trades,
-                    COUNT(CASE WHEN profit_loss > 0 THEN 1 END) as wins,
-                    AVG(CASE WHEN profit_loss > 0 THEN profit_loss END) as avg_win,
-                    AVG(CASE WHEN profit_loss < 0 THEN profit_loss END) as avg_loss,
-                    SUM(profit_loss) as total_pl
-                FROM trade_results
-            """)
-            
-            stats = cursor_stats.fetchone()
-            conn_stats.close()
-            
-            total_all = stats[0] if stats[0] else 0
-            wins_all = stats[1] if stats[1] else 0
-            avg_win_all = stats[2] if stats[2] else 0
-            avg_loss_all = stats[3] if stats[3] else 0
-            total_pl_all = stats[4] if stats[4] else 0
-            
-            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-            
-            with col_stat1:
-                win_rate = (wins_all / total_all * 100) if total_all > 0 else 0
-                st.metric("Win Rate", f"{win_rate:.1f}%", f"{wins_all}/{total_all}")
-            
-            with col_stat2:
-                st.metric("Avg Win", f"${avg_win_all:.2f}")
-            
-            with col_stat3:
-                st.metric("Avg Loss", f"${avg_loss_all:.2f}")
-            
-            with col_stat4:
-                st.metric("Total P/L", f"${total_pl_all:.2f}", 
-                         "🟢" if total_pl_all > 0 else "🔴" if total_pl_all < 0 else "⚪")
-        else:
-            st.info("No closed trades yet")
-    
-    except Exception as e:
-        st.error(f"Error loading trade history: {str(e)}")
-    
-    # ==================== INDICATOR PERFORMANCE ====================
-    st.markdown("### 🎯 Indicator Performance Analysis")
-    
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        
-        # Check if we have any closed trades
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM trade_results")
-        trade_count = cursor.fetchone()[0]
-        
-        # DEBUG: Show raw data
-        with st.expander("🔍 Debug: Raw Indicator Data"):
-            debug_df = pd.read_sql_query("""
-                SELECT * FROM indicator_accuracy
-            """, conn)
-            st.dataframe(debug_df, use_container_width=True)
-        
-        # Get indicator data
-        indicator_df = pd.read_sql_query("""
-            SELECT 
-                indicator_name,
-                correct_count,
-                wrong_count,
-                accuracy_rate,
-                weight_multiplier,
-                last_updated
-            FROM indicator_accuracy
-            ORDER BY accuracy_rate DESC
-        """, conn)
-        conn.close()
-        
-        if len(indicator_df) > 0:
-            # Show indicators that have been evaluated
-            st.dataframe(indicator_df, use_container_width=True)
-            
-            # Visual chart (only for indicators with data)
-            chart_df = indicator_df[indicator_df['correct_count'] + indicator_df['wrong_count'] > 0].copy()
-            
-            if len(chart_df) > 0:
-                fig_ind = go.Figure()
-                
-                fig_ind.add_trace(go.Bar(
-                    x=chart_df['indicator_name'],
-                    y=chart_df['accuracy_rate'] * 100,
-                    name='Accuracy %',
-                    marker_color=['green' if x > 0.6 else 'orange' if x > 0.5 else 'red' 
-                                 for x in chart_df['accuracy_rate']]
-                ))
-                
-                fig_ind.update_layout(
-                    title="Indicator Accuracy Rates",
-                    xaxis_title="Indicator",
-                    yaxis_title="Accuracy %",
-                    height=400
-                )
-                
-                st.plotly_chart(fig_ind, use_container_width=True)
-            else:
-                st.info("📊 Indicator data initialized. Close trades or click 'Relearn from Past Trades' to see performance!")
-        else:
-            # Show message - no indicators in table at all
-            if trade_count > 0:
-                st.warning(f"📊 You have {trade_count} closed trades!")
-                st.info("👆 Click the '🔄 Relearn from Past Trades' button in the sidebar to analyze them and populate indicator performance!")
-            else:
-                st.info("💡 No closed trades yet. Close some trades to see AI learning in action!")
-                st.caption("The system will automatically track which indicators are accurate as you trade.")
-    
-    except Exception as e:
-        st.error(f"Error loading indicator performance: {str(e)}")
+    else:
+        st.error("❌ Could not generate predictions")
 
 else:
     st.error("❌ Unable to fetch data. Please check symbol and try again.")
@@ -1892,7 +1890,7 @@ else:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center;'>
-    <p><b>🚀 AI TRADING PLATFORM - COMMITTEE LEARNING SYSTEM</b></p>
+    <p><b>🚀 AI TRADING PLATFORM - MODULAR ARCHITECTURE</b></p>
     <p><b>⚠️ Educational purposes only. Not financial advice.</b></p>
 </div>
 """, unsafe_allow_html=True)
