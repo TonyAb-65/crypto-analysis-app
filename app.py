@@ -1813,81 +1813,78 @@ if df is not None and len(df) > 0:
     
     except Exception as e:
         st.error(f"Error loading trade history: {str(e)}")
-        
-        # ==================== INDICATOR PERFORMANCE ====================
-        st.markdown("### 🎯 Indicator Performance Analysis")
-        
-        try:
-            conn = sqlite3.connect(str(DB_PATH))
-            
-            # Check if we have any closed trades
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM trade_results")
-            trade_count = cursor.fetchone()[0]
-            
-            # DEBUG: Show raw data
-            with st.expander("🔍 Debug: Raw Indicator Data"):
-                debug_df = pd.read_sql_query("""
-                    SELECT * FROM indicator_accuracy
-                """, conn)
-                st.dataframe(debug_df, use_container_width=True)
-            
-            # Get indicator data
-            indicator_df = pd.read_sql_query("""
-                SELECT 
-                    indicator_name,
-                    correct_count,
-                    wrong_count,
-                    accuracy_rate,
-                    weight_multiplier,
-                    last_updated
-                FROM indicator_accuracy
-                ORDER BY accuracy_rate DESC
-            """, conn)
-            conn.close()
-            
-            if len(indicator_df) > 0:
-                # Show indicators that have been evaluated
-                st.dataframe(indicator_df, use_container_width=True)
-                
-                # Visual chart (only for indicators with data)
-                chart_df = indicator_df[indicator_df['correct_count'] + indicator_df['wrong_count'] > 0].copy()
-                
-                if len(chart_df) > 0:
-                    fig_ind = go.Figure()
-                    
-                    fig_ind.add_trace(go.Bar(
-                        x=chart_df['indicator_name'],
-                        y=chart_df['accuracy_rate'] * 100,
-                        name='Accuracy %',
-                        marker_color=['green' if x > 0.6 else 'orange' if x > 0.5 else 'red' 
-                                     for x in chart_df['accuracy_rate']]
-                    ))
-                    
-                    fig_ind.update_layout(
-                        title="Indicator Accuracy Rates",
-                        xaxis_title="Indicator",
-                        yaxis_title="Accuracy %",
-                        height=400
-                    )
-                    
-                    st.plotly_chart(fig_ind, use_container_width=True)
-                else:
-                    st.info("📊 Indicator data initialized. Close trades or click 'Relearn from Past Trades' to see performance!")
-            else:
-                # Show message - no indicators in table at all
-                if trade_count > 0:
-                    st.warning(f"📊 You have {trade_count} closed trades!")
-                    st.info("👆 Click the '🔄 Relearn from Past Trades' button in the sidebar to analyze them and populate indicator performance!")
-                else:
-                    st.info("💡 No closed trades yet. Close some trades to see AI learning in action!")
-                    st.caption("The system will automatically track which indicators are accurate as you trade.")
-        
-        except Exception as e:
-            st.error(f"Error loading indicator performance: {str(e)}")
     
-    else:
-        st.error("❌ Could not generate predictions")
+    # ==================== INDICATOR PERFORMANCE ====================
+    st.markdown("### 🎯 Indicator Performance Analysis")
+    
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        
+        # Check if we have any closed trades
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM trade_results")
+        trade_count = cursor.fetchone()[0]
+        
+        # DEBUG: Show raw data
+        with st.expander("🔍 Debug: Raw Indicator Data"):
+            debug_df = pd.read_sql_query("""
+                SELECT * FROM indicator_accuracy
+            """, conn)
+            st.dataframe(debug_df, use_container_width=True)
+        
+        # Get indicator data
+        indicator_df = pd.read_sql_query("""
+            SELECT 
+                indicator_name,
+                correct_count,
+                wrong_count,
+                accuracy_rate,
+                weight_multiplier,
+                last_updated
+            FROM indicator_accuracy
+            ORDER BY accuracy_rate DESC
+        """, conn)
+        conn.close()
+        
+        if len(indicator_df) > 0:
+            # Show indicators that have been evaluated
+            st.dataframe(indicator_df, use_container_width=True)
+            
+            # Visual chart (only for indicators with data)
+            chart_df = indicator_df[indicator_df['correct_count'] + indicator_df['wrong_count'] > 0].copy()
+            
+            if len(chart_df) > 0:
+                fig_ind = go.Figure()
+                
+                fig_ind.add_trace(go.Bar(
+                    x=chart_df['indicator_name'],
+                    y=chart_df['accuracy_rate'] * 100,
+                    name='Accuracy %',
+                    marker_color=['green' if x > 0.6 else 'orange' if x > 0.5 else 'red' 
+                                 for x in chart_df['accuracy_rate']]
+                ))
+                
+                fig_ind.update_layout(
+                    title="Indicator Accuracy Rates",
+                    xaxis_title="Indicator",
+                    yaxis_title="Accuracy %",
+                    height=400
+                )
+                
+                st.plotly_chart(fig_ind, use_container_width=True)
+            else:
+                st.info("📊 Indicator data initialized. Close trades or click 'Relearn from Past Trades' to see performance!")
+        else:
+            # Show message - no indicators in table at all
+            if trade_count > 0:
+                st.warning(f"📊 You have {trade_count} closed trades!")
+                st.info("👆 Click the '🔄 Relearn from Past Trades' button in the sidebar to analyze them and populate indicator performance!")
+            else:
+                st.info("💡 No closed trades yet. Close some trades to see AI learning in action!")
+                st.caption("The system will automatically track which indicators are accurate as you trade.")
+    
+    except Exception as e:
+        st.error(f"Error loading indicator performance: {str(e)}")
 
 else:
     st.error("❌ Unable to fetch data. Please check symbol and try again.")
