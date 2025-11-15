@@ -1737,6 +1737,18 @@ if df is not None and len(df) > 0:
             
             try:
                 conn = sqlite3.connect(str(DB_PATH))
+                
+                # DEBUG: Check if trade_results has data
+                cursor_debug = conn.cursor()
+                cursor_debug.execute("SELECT COUNT(*) FROM trade_results")
+                total_trades_in_db = cursor_debug.fetchone()[0]
+                st.info(f"🔍 DEBUG: Found {total_trades_in_db} trades in trade_results table")
+                
+                # DEBUG: Check predictions table
+                cursor_debug.execute("SELECT COUNT(*) FROM predictions")
+                total_predictions = cursor_debug.fetchone()[0]
+                st.info(f"🔍 DEBUG: Found {total_predictions} predictions in predictions table")
+                
                 trades_df = pd.read_sql_query("""
                     SELECT 
                         tr.id,
@@ -1755,6 +1767,9 @@ if df is not None and len(df) > 0:
                     ORDER BY tr.trade_date DESC
                     LIMIT 20
                 """, conn)
+                
+                st.info(f"🔍 DEBUG: Query returned {len(trades_df)} rows")
+                
                 conn.close()
                 
                 if len(trades_df) > 0:
@@ -1812,7 +1827,11 @@ if df is not None and len(df) > 0:
                     st.info("No closed trades yet")
             
             except Exception as e:
-                st.error(f"Error loading trade history: {str(e)}")
+                st.error(f"❌ Error loading trade history: {str(e)}")
+                st.error(f"🔍 DEBUG: Exception type: {type(e).__name__}")
+                st.error(f"🔍 DEBUG: Full error: {repr(e)}")
+                import traceback
+                st.code(traceback.format_exc())
             
             # ==================== INDICATOR PERFORMANCE ====================
             st.markdown("### 🎯 Indicator Performance Analysis")
