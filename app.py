@@ -218,54 +218,6 @@ if show_market_movers:
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💾 Database Status")
-
-# Enhanced diagnostics
-import os
-st.sidebar.info(f"📍 Path: `{DB_PATH}`")
-st.sidebar.success(f"✅ File exists: {os.path.exists(DB_PATH)}")
-
-if os.path.exists(DB_PATH):
-    file_size = os.path.getsize(DB_PATH)
-    st.sidebar.info(f"📦 Size: {file_size:,} bytes ({file_size/1024:.2f} KB)")
-    
-    # Get file creation/modification time
-    import time
-    modified_time = os.path.getmtime(DB_PATH)
-    modified_date = datetime.fromtimestamp(modified_time)
-    st.sidebar.info(f"🕐 Last modified: {modified_date.strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Check database contents
-    st.sidebar.markdown("**📊 Table Row Counts:**")
-    conn_check = sqlite3.connect(str(DB_PATH))
-    cursor_check = conn_check.cursor()
-    
-    # Get all tables
-    cursor_check.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = cursor_check.fetchall()
-    
-    for table in tables:
-        table_name = table[0]
-        try:
-            cursor_check.execute(f"SELECT COUNT(*) FROM {table_name}")
-            count = cursor_check.fetchone()[0]
-            
-            if table_name == 'trade_results':
-                if count > 0:
-                    st.sidebar.success(f"💰 {table_name}: **{count} rows**")
-                else:
-                    st.sidebar.error(f"💰 {table_name}: **{count} rows** ❌")
-            elif table_name == 'predictions':
-                if count > 0:
-                    st.sidebar.success(f"🎯 {table_name}: {count} rows")
-                else:
-                    st.sidebar.warning(f"🎯 {table_name}: {count} rows")
-            else:
-                st.sidebar.caption(f"• {table_name}: {count} rows")
-        except Exception as e:
-            st.sidebar.caption(f"• {table_name}: Error")
-    
-    conn_check.close()
-
 try:
     db_exists = DB_PATH.exists()
     if db_exists:
@@ -1786,17 +1738,6 @@ if df is not None and len(df) > 0:
             try:
                 conn = sqlite3.connect(str(DB_PATH))
                 
-                # DEBUG: Check if trade_results has data
-                cursor_debug = conn.cursor()
-                cursor_debug.execute("SELECT COUNT(*) FROM trade_results")
-                total_trades_in_db = cursor_debug.fetchone()[0]
-                st.info(f"🔍 DEBUG: Found {total_trades_in_db} trades in trade_results table")
-                
-                # DEBUG: Check predictions table
-                cursor_debug.execute("SELECT COUNT(*) FROM predictions")
-                total_predictions = cursor_debug.fetchone()[0]
-                st.info(f"🔍 DEBUG: Found {total_predictions} predictions in predictions table")
-                
                 trades_df = pd.read_sql_query("""
                     SELECT 
                         tr.id,
@@ -1815,8 +1756,6 @@ if df is not None and len(df) > 0:
                     ORDER BY tr.trade_date DESC
                     LIMIT 20
                 """, conn)
-                
-                st.info(f"🔍 DEBUG: Query returned {len(trades_df)} rows")
                 
                 conn.close()
                 
@@ -1875,11 +1814,7 @@ if df is not None and len(df) > 0:
                     st.info("No closed trades yet")
             
             except Exception as e:
-                st.error(f"❌ Error loading trade history: {str(e)}")
-                st.error(f"🔍 DEBUG: Exception type: {type(e).__name__}")
-                st.error(f"🔍 DEBUG: Full error: {repr(e)}")
-                import traceback
-                st.code(traceback.format_exc())
+                st.error(f"Error loading trade history: {str(e)}")
             
             # ==================== INDICATOR PERFORMANCE ====================
             st.markdown("### 🎯 Indicator Performance Analysis")
