@@ -147,10 +147,10 @@ def backup_database():
             backup_dir.mkdir(exist_ok=True)
             backup_path = backup_dir / f'trading_db_backup_{datetime.now():%Y%m%d_%H%M%S}.db'
             shutil.copy(DB_PATH, backup_path)
-            return backup_path
+            return True, str(backup_path)
         except Exception as e:
-            return None
-    return None
+            return False, str(e)
+    return False, "Database not found"
 
 
 def export_trades_to_csv():
