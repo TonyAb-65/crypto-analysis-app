@@ -181,9 +181,8 @@ class Trade(Base):
     entry_slippage = Column(Float)
     exit_slippage = Column(Float)
     
-    # Add outcome field if it doesn't exist in database
-    # (SQLAlchemy will ignore this if column doesn't exist)
-    outcome = Column(String)
+    # NOTE: Don't add columns that don't exist in actual database!
+    # outcome column removed - it doesn't exist in your trade_results table
     
     def __repr__(self):
         return f"<Trade {self.id}: ${self.profit_loss:.2f} ({self.profit_loss_pct:.2f}%)>"
@@ -342,12 +341,18 @@ def get_decision_by_trade(trade_id):
 # INITIALIZATION
 # ============================================================================
 
-# Initialize models when module is imported
-try:
-    init_models()
-    print("✅ database_module.py loaded - SQLAlchemy models ready")
-except Exception as e:
-    print(f"⚠️ database_module.py: Could not initialize models - {e}")
+# DON'T auto-initialize on import - causes conflicts with existing database
+# Models will be created when explicitly needed
+# 
+# To manually initialize: call init_models() after importing
+#
+# try:
+#     init_models()
+#     print("✅ database_module.py loaded - SQLAlchemy models ready")
+# except Exception as e:
+#     print(f"⚠️ database_module.py: Could not initialize models - {e}")
+
+print("✅ database_module.py loaded - use init_models() to create tables if needed")
 
 
 # ============================================================================
