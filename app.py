@@ -218,6 +218,54 @@ if show_market_movers:
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💾 Database Status")
+
+# Enhanced diagnostics
+import os
+st.sidebar.info(f"📍 Path: `{DB_PATH}`")
+st.sidebar.success(f"✅ File exists: {os.path.exists(DB_PATH)}")
+
+if os.path.exists(DB_PATH):
+    file_size = os.path.getsize(DB_PATH)
+    st.sidebar.info(f"📦 Size: {file_size:,} bytes ({file_size/1024:.2f} KB)")
+    
+    # Get file creation/modification time
+    import time
+    modified_time = os.path.getmtime(DB_PATH)
+    modified_date = datetime.fromtimestamp(modified_time)
+    st.sidebar.info(f"🕐 Last modified: {modified_date.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Check database contents
+    st.sidebar.markdown("**📊 Table Row Counts:**")
+    conn_check = sqlite3.connect(str(DB_PATH))
+    cursor_check = conn_check.cursor()
+    
+    # Get all tables
+    cursor_check.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = cursor_check.fetchall()
+    
+    for table in tables:
+        table_name = table[0]
+        try:
+            cursor_check.execute(f"SELECT COUNT(*) FROM {table_name}")
+            count = cursor_check.fetchone()[0]
+            
+            if table_name == 'trade_results':
+                if count > 0:
+                    st.sidebar.success(f"💰 {table_name}: **{count} rows**")
+                else:
+                    st.sidebar.error(f"💰 {table_name}: **{count} rows** ❌")
+            elif table_name == 'predictions':
+                if count > 0:
+                    st.sidebar.success(f"🎯 {table_name}: {count} rows")
+                else:
+                    st.sidebar.warning(f"🎯 {table_name}: {count} rows")
+            else:
+                st.sidebar.caption(f"• {table_name}: {count} rows")
+        except Exception as e:
+            st.sidebar.caption(f"• {table_name}: Error")
+    
+    conn_check.close()
+
 try:
     db_exists = DB_PATH.exists()
     if db_exists:
