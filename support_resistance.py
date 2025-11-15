@@ -307,16 +307,23 @@ def analyze_timeframe_volatility(df, predicted_change_pct, timeframe_hours):
 
 
 def adjust_confidence_for_barriers(base_confidence, barriers, volatility_context):
-    """Adjust confidence based on barriers"""
+    """
+    Adjust confidence based on barriers and volatility
+    
+    FIXED: Reduced penalties to allow higher confidence scores
+    """
     adjusted_confidence = base_confidence
     
+    # Apply gentler penalties for barriers
     for barrier_type, price_level, distance in barriers:
         if 'strong' in barrier_type:
-            adjusted_confidence *= 0.7
+            adjusted_confidence *= 0.90  # 10% penalty (was 0.7 = 30% penalty)
         else:
-            adjusted_confidence *= 0.85
+            adjusted_confidence *= 0.95  # 5% penalty (was 0.85 = 15% penalty)
     
+    # Gentler penalty for unrealistic volatility
     if not volatility_context['is_realistic']:
-        adjusted_confidence *= 0.6
+        adjusted_confidence *= 0.85  # 15% penalty (was 0.6 = 40% penalty)
     
+    # Keep same min/max bounds
     return max(30.0, min(95.0, adjusted_confidence))
