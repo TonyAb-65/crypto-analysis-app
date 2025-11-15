@@ -117,9 +117,7 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
             
             cv_scores.append(cv_mape)
         
-        avg_cv_score = np.mean(cv_scores)
-        st.info(f"📊 Cross-validation MAPE: {avg_cv_score:.2%}")
-        
+        # Train final model on all training data
         gb_model.fit(X_train, y_train)
         
         # Create predictions
@@ -156,27 +154,9 @@ def train_improved_model(df, lookback=6, prediction_periods=5):
             pred_price = 0.4 * rf_pred + 0.6 * gb_pred
             predictions.append(float(pred_price))
         
-        if len(X_test) > 0:
-            rf_test_pred = rf_model.predict(X_test)
-            gb_test_pred = gb_model.predict(X_test)
-            ensemble_pred = 0.4 * rf_test_pred + 0.6 * gb_test_pred
-            
-            actual_returns = np.diff(y_test) / y_test[:-1]
-            predicted_returns = np.diff(ensemble_pred) / ensemble_pred[:-1]
-            
-            mask = np.isfinite(actual_returns) & np.isfinite(predicted_returns) & (np.abs(actual_returns) > 1e-6)
-            actual_returns_clean = actual_returns[mask]
-            predicted_returns_clean = predicted_returns[mask]
-            
-            if len(actual_returns_clean) > 0:
-                mape = np.mean(np.abs((actual_returns_clean - predicted_returns_clean) / (actual_returns_clean + 1e-8))) * 100
-                mape = min(mape, 100)
-            else:
-                mape = 50.0
-            
-            base_confidence = max(0, min(100, 100 - mape))
-        else:
-            base_confidence = 65
+        # Use fixed base confidence (MAPE removed for simplicity)
+        # Confidence is adjusted later based on barriers and volatility
+        base_confidence = 65
         
         # Apply surgical fixes
         current_price_model = df_clean['close'].iloc[-1]
