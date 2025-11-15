@@ -1,6 +1,5 @@
 """
 Database Module - SQLite operations for trade tracking and AI learning
-ENHANCED WITH COMMITTEE LEARNING SYSTEM
 """
 import sqlite3
 from pathlib import Path
@@ -14,11 +13,9 @@ print(f"💾 Database location: {DB_PATH}")
 
 
 def init_database():
-    """Initialize SQLite database for trade tracking with AI learning + Committee System"""
+    """Initialize SQLite database for trade tracking with AI learning"""
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
-    
-    # ==================== YOUR EXISTING TABLES ====================
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS predictions (
@@ -104,7 +101,7 @@ def init_database():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS indicator_accuracy (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            indicator_name TEXT NOT NULL UNIQUE,
+            indicator_name TEXT NOT NULL,
             correct_count INTEGER DEFAULT 0,
             wrong_count INTEGER DEFAULT 0,
             missed_count INTEGER DEFAULT 0,
@@ -114,39 +111,17 @@ def init_database():
         )
     ''')
     
-    # Add missing columns to existing table
-    cursor.execute("PRAGMA table_info(indicator_accuracy)")
-    existing_cols = [col[1] for col in cursor.fetchall()]
-    
-    if 'missed_count' not in existing_cols:
-        cursor.execute("ALTER TABLE indicator_accuracy ADD COLUMN missed_count INTEGER DEFAULT 0")
-    if 'accuracy_rate' not in existing_cols:
-        cursor.execute("ALTER TABLE indicator_accuracy ADD COLUMN accuracy_rate REAL DEFAULT 0")
-    if 'weight_multiplier' not in existing_cols:
-        cursor.execute("ALTER TABLE indicator_accuracy ADD COLUMN weight_multiplier REAL DEFAULT 1.0")
-    if 'last_updated' not in existing_cols:
-        cursor.execute(f"ALTER TABLE indicator_accuracy ADD COLUMN last_updated TEXT DEFAULT '{datetime.now().isoformat()}'")
-    
-    # Check if indicator_accuracy needs UNIQUE constraint
-    try:
-        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_indicator_name ON indicator_accuracy(indicator_name)")
-    except:
-        pass
-    
-    # Initialize indicators (INSERT OR IGNORE handles duplicates)
-    indicators = ['OBV', 'ADX', 'Stochastic', 'MFI', 'CCI', 'Hammer', 'Doji', 'Shooting_Star']
-    for ind in indicators:
-        try:
+    cursor.execute("SELECT COUNT(*) FROM indicator_accuracy")
+    if cursor.fetchone()[0] == 0:
+        indicators = ['OBV', 'ADX', 'Stochastic', 'MFI', 'CCI', 'Hammer', 'Doji', 'Shooting_Star']
+        for ind in indicators:
             cursor.execute('''
-                INSERT OR IGNORE INTO indicator_accuracy 
+                INSERT INTO indicator_accuracy 
                 (indicator_name, correct_count, wrong_count, missed_count, accuracy_rate, weight_multiplier, last_updated)
                 VALUES (?, 0, 0, 0, 0.5, 1.0, ?)
             ''', (ind, datetime.now().isoformat()))
-        except sqlite3.IntegrityError:
-            # Already exists, skip
-            pass
     
-    # ==================== 🆕 COMMITTEE LEARNING TABLES ====================
+    # ==================== COMMITTEE LEARNING TABLES ====================
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS consultant_performance (
@@ -180,17 +155,12 @@ def init_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             consultant_name TEXT NOT NULL,
             signal_name TEXT NOT NULL,
-            signal_description TEXT,
             total_occurrences INTEGER DEFAULT 0,
             correct_predictions INTEGER DEFAULT 0,
             wrong_predictions INTEGER DEFAULT 0,
             accuracy_rate REAL DEFAULT 50.0,
             signal_weight REAL DEFAULT 1.0,
-            base_score REAL DEFAULT 1.0,
-            first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
-            last_seen TEXT DEFAULT CURRENT_TIMESTAMP,
             last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
-            market_conditions TEXT,
             UNIQUE(consultant_name, signal_name)
         )
     ''')
@@ -198,67 +168,56 @@ def init_database():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS committee_decisions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_id INTEGER,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
             symbol TEXT NOT NULL,
             market_type TEXT,
             price_at_decision REAL NOT NULL,
-            indicators_snapshot TEXT,
-            
+            timestamp TEXT NOT NULL,
             c1_vote TEXT,
             c1_confidence TEXT,
             c1_score REAL,
             c1_weight REAL,
             c1_reasoning TEXT,
-            
             c2_vote TEXT,
             c2_confidence TEXT,
             c2_score REAL,
             c2_weight REAL,
             c2_reasoning TEXT,
-            
             c3_vote TEXT,
             c3_confidence TEXT,
             c3_score REAL,
             c3_weight REAL,
             c3_reasoning TEXT,
-            
             c4_vote TEXT,
             c4_confidence TEXT,
             c4_score REAL,
             c4_weight REAL,
             c4_reasoning TEXT,
-            
-            final_decision TEXT,
+            final_decision TEXT NOT NULL,
             consensus_level REAL,
             total_weighted_votes TEXT,
             recommended_entry REAL,
             recommended_stop_loss REAL,
             recommended_take_profit REAL,
-            
+            indicators_snapshot TEXT,
+            trade_id INTEGER,
             actual_outcome TEXT,
             outcome_determined_at TEXT,
             price_at_outcome REAL,
             profit_loss_pct REAL,
-            was_correct INTEGER,
             hours_to_outcome REAL,
-            
-            FOREIGN KEY (trade_id) REFERENCES predictions(id)
+            was_correct INTEGER,
+            FOREIGN KEY (trade_id) REFERENCES trade_results(id)
         )
     ''')
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS committee_meeting_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            decision_id INTEGER,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            decision_id INTEGER NOT NULL,
+            timestamp TEXT NOT NULL,
             meeting_summary TEXT,
-            had_conflict INTEGER DEFAULT 0,
-            conflict_description TEXT,
-            agreement_matrix TEXT,
-            volatility REAL,
-            trend_strength REAL,
-            volume_level TEXT,
+            conflicts_detected TEXT,
+            consensus_reached INTEGER,
             FOREIGN KEY (decision_id) REFERENCES committee_decisions(id)
         )
     ''')
@@ -266,44 +225,39 @@ def init_database():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS signal_correlations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            signal_1_consultant TEXT,
-            signal_1_name TEXT,
-            signal_2_consultant TEXT,
-            signal_2_name TEXT,
-            both_present_count INTEGER DEFAULT 0,
-            both_present_wins INTEGER DEFAULT 0,
-            both_present_accuracy REAL DEFAULT 50.0,
-            synergy_score REAL DEFAULT 0.0,
-            last_updated TEXT DEFAULT CURRENT_TIMESTAMP
+            signal_1 TEXT NOT NULL,
+            signal_2 TEXT NOT NULL,
+            times_both_correct INTEGER DEFAULT 0,
+            times_both_wrong INTEGER DEFAULT 0,
+            times_conflicted INTEGER DEFAULT 0,
+            correlation_strength REAL DEFAULT 0,
+            last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(signal_1, signal_2)
         )
     ''')
     
-    # Initialize consultants
-    consultants = [
-        ('C1', 'Technical Analysis'),
-        ('C2', 'Market Sentiment'),
-        ('C3', 'Risk Management'),
-        ('C4', 'Trend Analysis')
-    ]
+    # Initialize consultants if not exists
+    cursor.execute("SELECT COUNT(*) FROM consultant_performance")
+    if cursor.fetchone()[0] == 0:
+        consultants = [
+            ('C1', 'Pattern & Structure Analysis'),
+            ('C2', 'Market Sentiment & News'),
+            ('C3', 'Risk Management'),
+            ('C4', 'Trend Analysis')
+        ]
+        for name, specialty in consultants:
+            cursor.execute('''
+                INSERT INTO consultant_performance 
+                (consultant_name, specialty, accuracy_rate, current_weight)
+                VALUES (?, ?, 50.0, 1.0)
+            ''', (name, specialty))
     
-    for name, specialty in consultants:
-        cursor.execute("""
-            INSERT OR IGNORE INTO consultant_performance 
-            (consultant_name, specialty, current_weight, accuracy_rate, performance_history)
-            VALUES (?, ?, 1.0, 50.0, '[]')
-        """, (name, specialty))
-    
-    # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_timestamp ON predictions(timestamp DESC)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_pair ON predictions(pair, timestamp DESC)")
     
     conn.commit()
     conn.close()
-    
-    print("✅ Database initialized with all tables including learning system!")
 
-
-# ==================== YOUR EXISTING FUNCTIONS (UNCHANGED) ====================
 
 def save_prediction(asset_type, pair, timeframe, current_price, predicted_price, 
                    prediction_horizon, confidence, signal_strength, features, 
@@ -353,7 +307,7 @@ def mark_prediction_for_trading(prediction_id, actual_entry_price, entry_timesta
     conn.close()
 
 
-def get_all_recent_predictions(limit=200):
+def get_all_recent_predictions(limit=50):
     """Get recent predictions for dashboard"""
     conn = sqlite3.connect(str(DB_PATH))
     
@@ -370,69 +324,95 @@ def get_all_recent_predictions(limit=200):
 
 
 def evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won):
-    """Evaluate if an indicator correctly predicted the trade outcome"""
-    if indicator_value is None or pd.isna(indicator_value):
-        return None
+    """
+    Evaluate if an indicator correctly predicted the trade outcome
     
+    NEW LOGIC: Indicators learn from COMMITTEE recommendations!
+    - If committee recommended LONG and won → all indicators correct
+    - If committee recommended SHORT and won → all indicators correct
+    - If committee recommended LONG and lost → all indicators wrong
+    - If committee recommended SHORT and lost → all indicators wrong
+    
+    Individual indicator signals don't matter - we evaluate based on 
+    whether they contributed to a winning or losing committee decision.
+    
+    Returns True if correct, False if wrong, None if neutral/skip
+    """
+    if indicator_value is None or pd.isna(indicator_value):
+        return None  # Skip if no data
+    
+    # Handle nested dict format - extract signal to check if neutral
     if isinstance(indicator_value, dict):
         signal = indicator_value.get('signal', 'neutral')
+        
+        # Skip neutral signals - they didn't contribute to decision
         if signal == 'neutral':
             return None
+        
+        # For non-neutral signals, evaluate based on committee outcome
+        # If committee won, indicator was correct (contributed to good decision)
+        # If committee lost, indicator was wrong (contributed to bad decision)
         return trade_won
     
+    # Handle flat value format (for non-signal based indicators)
     try:
         indicator_value = float(indicator_value)
     except:
         return None
     
+    # For value-based indicators, use the original logic
+    # (These are not part of committee, evaluated independently)
+    
     if indicator_name == 'OBV':
         if indicator_value == 0:
-            return None
+            return None  # Neutral
         predicted_bullish = indicator_value > 0
         actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
         return predicted_bullish == actual_bullish
     
     elif indicator_name == 'MFI':
         if 20 <= indicator_value <= 80:
-            return None
+            return None  # Neutral zone
         if indicator_value > 80:
             predicted_bearish = True
             actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
             return predicted_bearish == actual_bearish
-        else:
+        else:  # < 20
             predicted_bullish = True
             actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
             return predicted_bullish == actual_bullish
     
     elif indicator_name == 'ADX':
         if indicator_value <= 25:
-            return None
+            return None  # Weak trend, skip
+        # Strong trend - if trade won, ADX was correct about trend strength
         return trade_won
     
     elif indicator_name == 'Stochastic':
         if 20 <= indicator_value <= 80:
-            return None
+            return None  # Neutral zone
         if indicator_value > 80:
             predicted_bearish = True
             actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
             return predicted_bearish == actual_bearish
-        else:
+        else:  # < 20
             predicted_bullish = True
             actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
             return predicted_bullish == actual_bullish
     
     elif indicator_name == 'CCI':
         if -100 <= indicator_value <= 100:
-            return None
+            return None  # Neutral zone
         if indicator_value > 100:
             predicted_bearish = True
             actual_bearish = (position_type == 'SHORT' and trade_won) or (position_type == 'LONG' and not trade_won)
             return predicted_bearish == actual_bearish
-        else:
+        else:  # < -100
             predicted_bullish = True
             actual_bullish = (position_type == 'LONG' and trade_won) or (position_type == 'SHORT' and not trade_won)
             return predicted_bullish == actual_bullish
     
+    # Unknown indicator
     return None
 
 
@@ -442,18 +422,22 @@ def parse_indicator_snapshot(snapshot_str):
         import json
         import ast
         
+        # Try JSON first
         try:
             return json.loads(snapshot_str)
         except:
             pass
         
+        # Try ast.literal_eval
         try:
             return ast.literal_eval(snapshot_str)
         except:
             pass
         
+        # Try simple parsing
         indicators = {}
         if isinstance(snapshot_str, str):
+            # Remove brackets and split
             clean_str = snapshot_str.strip('{}[]')
             pairs = clean_str.split(',')
             for pair in pairs:
@@ -472,7 +456,11 @@ def parse_indicator_snapshot(snapshot_str):
 
 
 def evaluate_and_learn_from_trade(prediction_id, trade_won, cursor):
-    """Evaluate which indicators were correct and update learning"""
+    """
+    Evaluate which indicators were correct and update learning
+    This is the CORE AI learning function!
+    """
+    # Get prediction data
     cursor.execute("""
         SELECT indicator_snapshot, position_type, committee_reasoning
         FROM predictions WHERE id = ?
@@ -484,21 +472,27 @@ def evaluate_and_learn_from_trade(prediction_id, trade_won, cursor):
     
     indicator_snapshot, position_type, committee_reasoning = row
     
+    # Parse indicators
     indicators = parse_indicator_snapshot(indicator_snapshot)
     
     if not indicators:
         return
     
+    # Evaluate each tracked indicator
     tracked_indicators = ['OBV', 'MFI', 'ADX', 'Stochastic', 'CCI']
     
     for indicator_name in tracked_indicators:
+        # Get indicator value from snapshot
         indicator_value = indicators.get(indicator_name.lower(), indicators.get(indicator_name))
         
+        # Evaluate if indicator was correct
         was_correct = evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won)
         
         if was_correct is None:
+            # Skip neutral/unclear cases
             continue
         
+        # Update indicator accuracy
         if was_correct:
             cursor.execute("""
                 UPDATE indicator_accuracy 
@@ -514,6 +508,7 @@ def evaluate_and_learn_from_trade(prediction_id, trade_won, cursor):
                 WHERE indicator_name = ?
             """, (datetime.now().isoformat(), indicator_name))
     
+    # Recalculate accuracy rates and weights for all indicators
     cursor.execute("""
         UPDATE indicator_accuracy
         SET accuracy_rate = CAST(correct_count AS REAL) / NULLIF(correct_count + wrong_count, 0),
@@ -529,12 +524,18 @@ def evaluate_and_learn_from_trade(prediction_id, trade_won, cursor):
 
 def save_trade_result(prediction_id, entry_price, exit_price, profit_loss, 
                      profit_loss_pct, prediction_error, notes=''):
-    """Save trade result AND update AI learning"""
+    """
+    Save trade result AND update AI learning
+    This function now includes automatic learning from trade outcomes!
+    Also triggers periodic revalidation every 25 trades.
+    NOW TRACKS: Predicted vs Actual Entry/Exit for slippage analysis!
+    """
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
     trade_date = datetime.now().isoformat()
     
+    # Get predicted entry and exit from original prediction
     cursor.execute("""
         SELECT current_price, target_price, stop_loss, position_type
         FROM predictions WHERE id = ?
@@ -547,25 +548,32 @@ def save_trade_result(prediction_id, entry_price, exit_price, profit_loss,
     exit_slippage = None
     
     if pred_data:
-        predicted_entry = pred_data[0]
+        predicted_entry = pred_data[0]  # current_price at time of prediction
         target = pred_data[1]
         stop = pred_data[2]
         position_type = pred_data[3]
         
+        # Determine predicted exit (target or stop, depending on trade outcome)
         if profit_loss > 0:
+            # Win: predicted exit was target
             predicted_exit = target
         else:
+            # Loss: predicted exit was stop
             predicted_exit = stop
         
+        # Calculate slippages
         if predicted_entry:
-            entry_slippage = entry_price - predicted_entry
+            entry_slippage = entry_price - predicted_entry  # Positive = worse fill
         
         if predicted_exit:
             if position_type == 'LONG':
+                # For LONG: positive slippage = worse exit (got less)
                 exit_slippage = predicted_exit - exit_price
-            else:
+            else:  # SHORT
+                # For SHORT: positive slippage = worse exit (paid more)
                 exit_slippage = exit_price - predicted_exit
     
+    # Save trade result with predicted vs actual tracking
     cursor.execute('''
         INSERT INTO trade_results (
             prediction_id, entry_price, exit_price, trade_date, 
@@ -577,32 +585,49 @@ def save_trade_result(prediction_id, entry_price, exit_price, profit_loss,
           profit_loss, profit_loss_pct, prediction_error, notes,
           predicted_entry, predicted_exit, entry_slippage, exit_slippage))
     
+    # Update prediction status
     cursor.execute('''
         UPDATE predictions SET status = 'completed' WHERE id = ?
     ''', (prediction_id,))
     
+    # ✅ INCREMENTAL LEARNING - Evaluate this single trade
     trade_won = profit_loss > 0
     evaluate_and_learn_from_trade(prediction_id, trade_won, cursor)
     
+    # ✅ PERIODIC REVALIDATION - Every 25 trades, do full review
     cursor.execute("SELECT COUNT(*) FROM trade_results")
     total_trades = cursor.fetchone()[0]
     
-    if total_trades % 25 == 0:
+    if total_trades % 25 == 0:  # Every 25 trades
         print(f"\n🔄 MILESTONE: {total_trades} trades completed!")
         print(f"📊 Running full AI learning revalidation...")
+        
+        # Revalidate all weights from scratch
         revalidate_all_indicators(cursor)
-        print(f"✅ Revalidation complete!")
+        
+        print(f"✅ Revalidation complete! Weights updated based on {total_trades} trades.")
     
     conn.commit()
     conn.close()
     
+    # Print summary with predicted vs actual
     print(f"✅ Trade saved and AI learning updated for prediction #{prediction_id}")
+    if predicted_entry and entry_slippage is not None:
+        print(f"   Entry: Predicted ${predicted_entry:.2f} → Actual ${entry_price:.2f} (Slippage: ${entry_slippage:+.2f})")
+    if predicted_exit and exit_slippage is not None:
+        print(f"   Exit: Predicted ${predicted_exit:.2f} → Actual ${exit_price:.2f} (Slippage: ${exit_slippage:+.2f})")
+    if total_trades % 25 == 0:
+        print(f"🎯 Milestone reached: {total_trades} trades! Full revalidation completed.")
     
     return True
 
 
 def revalidate_all_indicators(cursor):
-    """Comprehensive revalidation of all indicators"""
+    """
+    Comprehensive revalidation of all indicators
+    Called every 25 trades for stable, accurate weights
+    """
+    # Get all completed trades with their indicators
     cursor.execute("""
         SELECT 
             tr.prediction_id,
@@ -617,6 +642,7 @@ def revalidate_all_indicators(cursor):
     
     all_trades = cursor.fetchall()
     
+    # Reset all counts
     indicator_stats = {
         'OBV': {'correct': 0, 'wrong': 0, 'total': 0},
         'MFI': {'correct': 0, 'wrong': 0, 'total': 0},
@@ -625,32 +651,95 @@ def revalidate_all_indicators(cursor):
         'CCI': {'correct': 0, 'wrong': 0, 'total': 0}
     }
     
+    # Analyze each trade
+    trades_processed = 0
+    indicators_found = 0
+    signals_evaluated = 0
+    
     for trade in all_trades:
         prediction_id, profit_loss, indicator_snapshot, position_type = trade
         trade_won = profit_loss > 0
+        trades_processed += 1
         
         try:
             indicators = parse_indicator_snapshot(indicator_snapshot)
-        except:
+        except Exception as e:
+            print(f"  ⚠️ Error parsing snapshot for trade {prediction_id}: {e}")
             indicators = {}
         
+        # DEBUG: Print first trade's indicators
+        try:
+            if trade == all_trades[0]:
+                print(f"\n  📊 DETAILED DEBUG - First Trade:")
+                print(f"     Prediction ID: {prediction_id}")
+                print(f"     Position: {position_type}")
+                print(f"     Won: {trade_won}")
+                print(f"     P/L: ${profit_loss:.2f}")
+                print(f"     Raw snapshot type: {type(indicator_snapshot)}")
+                print(f"     Raw snapshot: {str(indicator_snapshot)[:200]}...")
+                print(f"     Parsed indicators count: {len(indicators)}")
+                print(f"     Parsed indicators: {indicators}")
+        except Exception as e:
+            print(f"  ⚠️ Debug print error: {e}")
+        
+        if indicators:
+            indicators_found += 1
+        
         for indicator_name in indicator_stats.keys():
-            indicator_value = indicators.get(indicator_name.lower(), indicators.get(indicator_name))
+            # Try multiple possible keys (case-insensitive, with/without spaces/underscores)
+            indicator_value = None
+            possible_keys = [
+                indicator_name,  # Exact: 'OBV'
+                indicator_name.lower(),  # Lower: 'obv'
+                indicator_name.upper(),  # Upper: 'OBV'
+                indicator_name.replace(' ', '_'),  # With underscore
+                indicator_name.replace('_', ' '),  # With space
+                indicator_name.replace('_', ''),  # No separator
+            ]
+            
+            for key in possible_keys:
+                if key in indicators:
+                    indicator_value = indicators[key]
+                    break
+            
+            # If still not found, try case-insensitive search
+            if indicator_value is None:
+                try:
+                    for key in indicators.keys():
+                        if key.lower().replace('_', '').replace(' ', '') == indicator_name.lower().replace('_', '').replace(' ', ''):
+                            indicator_value = indicators[key]
+                            break
+                except:
+                    pass
+            
+            # DEBUG: Print what we found for first trade
+            if trade == all_trades[0] and indicator_value is not None:
+                print(f"     {indicator_name}: {indicator_value} (type: {type(indicator_value)})")
             
             was_correct = evaluate_indicator_prediction(indicator_name, indicator_value, position_type, trade_won)
             
             if was_correct is not None:
+                signals_evaluated += 1
                 indicator_stats[indicator_name]['total'] += 1
                 if was_correct:
                     indicator_stats[indicator_name]['correct'] += 1
                 else:
                     indicator_stats[indicator_name]['wrong'] += 1
     
+    # Print summary
+    print(f"\n  📈 RELEARN SUMMARY:")
+    print(f"     Total trades processed: {trades_processed}")
+    print(f"     Trades with indicators: {indicators_found}")
+    print(f"     Total signals evaluated: {signals_evaluated}")
+    print(f"     Signals per trade avg: {signals_evaluated/trades_processed if trades_processed > 0 else 0:.1f}")
+    
+    # Update database with comprehensive statistics
     for indicator_name, stats in indicator_stats.items():
         if stats['total'] > 0:
             accuracy = stats['correct'] / stats['total']
             
-            if stats['total'] >= 50:
+            # Calculate weight based on statistical significance
+            if stats['total'] >= 50:  # High confidence (50+ samples)
                 if accuracy >= 0.65:
                     weight = 1.0
                 elif accuracy >= 0.60:
@@ -663,7 +752,7 @@ def revalidate_all_indicators(cursor):
                     weight = 0.7
                 else:
                     weight = 0.5
-            elif stats['total'] >= 25:
+            elif stats['total'] >= 25:  # Medium confidence (25-49 samples)
                 if accuracy >= 0.60:
                     weight = 1.0
                 elif accuracy >= 0.55:
@@ -674,7 +763,7 @@ def revalidate_all_indicators(cursor):
                     weight = 0.7
                 else:
                     weight = 0.6
-            else:
+            else:  # Low confidence (<25 samples)
                 if accuracy >= 0.60:
                     weight = 0.95
                 elif accuracy >= 0.50:
@@ -692,6 +781,8 @@ def revalidate_all_indicators(cursor):
                 WHERE indicator_name = ?
             """, (stats['correct'], stats['wrong'], accuracy, weight, 
                   datetime.now().isoformat(), indicator_name))
+            
+            print(f"  {indicator_name}: {stats['correct']}/{stats['total']} ({accuracy*100:.1f}%) → Weight: {weight}")
 
 
 def get_indicator_weights():
@@ -713,10 +804,14 @@ def get_indicator_weights():
 
 
 def relearn_from_past_trades():
-    """Retroactively learn from all completed trades"""
+    """
+    Retroactively learn from all completed trades
+    Use this to teach the AI from your existing trades!
+    """
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
+    # Get trade count for return value
     cursor.execute("""
         SELECT COUNT(*) 
         FROM trade_results tr
@@ -727,6 +822,7 @@ def relearn_from_past_trades():
     
     print(f"\n🔄 Relearning from {learned_count} past trades...")
     
+    # Use the revalidate function which properly resets and recalculates everything
     revalidate_all_indicators(cursor)
     
     conn.commit()
