@@ -35,24 +35,29 @@ from ml_model import train_improved_model
 from consultants import run_consultant_meeting
 
 # ==================== COMMITTEE SYSTEM INTEGRATION ====================
-try:
-    from committee_meeting import CommitteeMeeting
-    from committee_learning import CommitteeLearningSystem
-    COMMITTEE_AVAILABLE = True
-except ImportError:
-    COMMITTEE_AVAILABLE = False
-    print("⚠️ Committee system not available - using fallback consultant meeting")
+# Temporarily disabled to fix sidebar rendering
+COMMITTEE_AVAILABLE = False
+committee = None
+print("⚠️ Committee system disabled - using fallback consultant meeting")
+
+# try:
+#     from committee_meeting import CommitteeMeeting
+#     from committee_learning import CommitteeLearningSystem
+#     COMMITTEE_AVAILABLE = True
+# except ImportError:
+#     COMMITTEE_AVAILABLE = False
+#     print("⚠️ Committee system not available - using fallback consultant meeting")
 
 # Initialize database
 init_database()
 
 # ==================== COMMITTEE INITIALIZATION ====================
-if COMMITTEE_AVAILABLE:
-    if 'committee' not in st.session_state:
-        st.session_state.committee = CommitteeMeeting(enable_learning=True)
-    committee = st.session_state.committee
-else:
-    committee = None
+# if COMMITTEE_AVAILABLE:
+#     if 'committee' not in st.session_state:
+#         st.session_state.committee = CommitteeMeeting(enable_learning=True)
+#     committee = st.session_state.committee
+# else:
+#     committee = None
 
 # ==================== STREAMLIT PAGE CONFIGURATION ====================
 
@@ -1736,17 +1741,17 @@ if df is not None and len(df) > 0:
                     SELECT 
                         tr.id,
                         tr.trade_date,
-                        p.pair as symbol,
-                        p.position_type,
-                        p.actual_entry_price as entry_price,
+                        COALESCE(p.pair, 'N/A') as symbol,
+                        COALESCE(p.position_type, 'N/A') as position_type,
+                        COALESCE(p.actual_entry_price, tr.entry_price) as entry_price,
                         tr.exit_price,
                         tr.profit_loss,
                         tr.profit_loss_pct,
-                        tr.notes as exit_reason,
-                        p.confidence,
-                        p.signal_strength
+                        COALESCE(tr.notes, 'N/A') as exit_reason,
+                        COALESCE(p.confidence, 0) as confidence,
+                        COALESCE(p.signal_strength, 0) as signal_strength
                     FROM trade_results tr
-                    JOIN predictions p ON tr.prediction_id = p.id
+                    LEFT JOIN predictions p ON tr.prediction_id = p.id
                     ORDER BY tr.trade_date DESC
                     LIMIT 20
                 """, conn)
