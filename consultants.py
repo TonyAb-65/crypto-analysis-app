@@ -1,464 +1,876 @@
-# consultants.py - UPDATED TO WORK WITH YOUR DATABASE.PY
-# Learning-enabled consultants + your existing run_consultant_meeting function
-
-from database import DB_PATH
-import sqlite3
+"""
+Consultants Module - Advanced Committee-Based Trading Decisions
+Implements full brainstorming session logic with C1/C2 collaboration
+"""
+import pandas as pd
+import numpy as np
 from datetime import datetime
-import json
 
-# ============================================================================
-# BASE CLASS: LEARNING CONSULTANT
-# ============================================================================
+# Import from other modules
+from data_api import fetch_data
+from indicators import calculate_technical_indicators
 
-class LearningConsultant:
+# Import S/R functions from support_resistance module (uses Twelve Data API)
+from support_resistance import (
+    find_support_resistance_zones,
+    get_price_targets_based_on_sr,
+    check_at_key_level
+)
+
+
+# ==================== CONSULTANT C1: PATTERN & STRUCTURE ====================
+
+def consultant_c1_pattern_structure(df, symbol, interval='1h'):
     """
-    Base class for all learning-enabled consultants.
+    C1: Pattern & Structure Analysis
+    Focus: Identifies LOCATION (Support/Resistance/Mid-range)
+    DOES NOT predict direction - only identifies WHERE price is
     
-    Each consultant:
-    - Loads their historical performance from database
-    - Loads signal weights learned from past trades
-    - Applies weighted scoring to their signals
-    - Tracks which signals work best
+    Args:
+        df: Price dataframe
+        symbol: Trading symbol (e.g., 'BTC/USD', 'EUR/USD')
+        interval: Timeframe (e.g., '1h', '4h', '1d') for Twelve Data API
     """
-    
-    def __init__(self, name, specialty):
-        """
-        Initialize learning consultant
-        
-        Args:
-            name: Consultant identifier ('C1', 'C2', 'C3', 'C4')
-            specialty: Area of expertise (e.g., 'Technical Analysis')
-        """
-        self.name = name
-        self.specialty = specialty
-        self.performance = self._load_performance()
-        self.signal_weights = self._load_signal_weights()
-    
-    def _load_performance(self):
-        """Load consultant's historical performance from database"""
-        try:
-            conn = sqlite3.connect(str(DB_PATH))
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT current_weight, accuracy_rate, total_votes, correct_votes, current_streak
-                FROM consultant_performance
-                WHERE consultant_name = ?
-            """, (self.name,))
-            
-            row = cursor.fetchone()
-            
-            if not row:
-                # Initialize new consultant
-                cursor.execute("""
-                    INSERT INTO consultant_performance 
-                    (consultant_name, specialty, current_weight, accuracy_rate, performance_history)
-                    VALUES (?, ?, 1.0, 50.0, '[]')
-                """, (self.name, self.specialty))
-                conn.commit()
-                conn.close()
-                
-                return {
-                    'weight': 1.0,
-                    'accuracy': 50.0,
-                    'total_votes': 0,
-                    'correct_votes': 0,
-                    'current_streak': 0
-                }
-            
-            conn.close()
-            
-            return {
-                'weight': row[0],
-                'accuracy': row[1],
-                'total_votes': row[2],
-                'correct_votes': row[3],
-                'current_streak': row[4]
-            }
-        
-        except Exception as e:
-            print(f"⚠️ Error loading performance for {self.name}: {e}")
-            return {
-                'weight': 1.0,
-                'accuracy': 50.0,
-                'total_votes': 0,
-                'correct_votes': 0,
-                'current_streak': 0
-            }
-    
-    def _load_signal_weights(self):
-        """Load learned weights for each signal this consultant uses"""
-        try:
-            conn = sqlite3.connect(str(DB_PATH))
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT signal_name, signal_weight
-                FROM signal_performance
-                WHERE consultant_name = ?
-            """, (self.name,))
-            
-            weights = {}
-            for row in cursor.fetchall():
-                weights[row[0]] = row[1]
-            
-            conn.close()
-            
-            return weights
-        
-        except Exception as e:
-            print(f"⚠️ Error loading signal weights for {self.name}: {e}")
-            return {}
-    
-    def _get_signal_weight(self, signal_name):
-        """Get current learned weight for a signal"""
-        return self.signal_weights.get(signal_name, 1.0)
-    
-    def _apply_signal(self, signal_name, base_score, description=None):
-        """Apply a signal with its learned weight"""
-        weight = self._get_signal_weight(signal_name)
-        weighted_score = base_score * weight
-        
+    if df is None or len(df) < 50:
         return {
-            'signal': signal_name,
-            'description': description or signal_name,
-            'base_score': base_score,
-            'weight': weight,
-            'final_score': weighted_score,
-            'consultant': self.name
+            "signal": "MID_RANGE", 
+            "strength": 5, 
+            "reasoning": "Insufficient data", 
+            "targets": None,
+            "at_key_level": False,
+            "level_type": None
         }
     
-    def reload_performance(self):
-        """Reload performance metrics from database"""
-        self.performance = self._load_performance()
-        self.signal_weights = self._load_signal_weights()
+    latest = df.iloc[-1]
+    close = latest.get('close', 0)
     
-    def analyze(self, data, indicators, signals, **kwargs):
-        """Must be implemented by child classes"""
-        raise NotImplementedError("Child class must implement analyze() method")
-
-
-# ============================================================================
-# C1: TECHNICAL ANALYST (Learning-Enabled)
-# ============================================================================
-
-class C1_TechnicalAnalyst(LearningConsultant):
-    """Technical Indicator Specialist with Learning"""
+    signal = "MID_RANGE"
+    strength = 5
+    reasoning = []
+    at_key_level = False
+    level_type = None
     
-    def __init__(self):
-        super().__init__(name='C1', specialty='Technical Analysis')
+    # Professional S/R Analysis from Twelve Data API
+    sr_zones = find_support_resistance_zones(df, symbol=symbol, interval=interval)
+    targets = get_price_targets_based_on_sr(close, sr_zones)
+    at_level, detected_level_type, level_info = check_at_key_level(close, sr_zones)
     
-    def analyze(self, data, indicators, signals, **kwargs):
-        """Analyze technical indicators with learned weights"""
-        score = 0
-        reasoning = []
-        signals_used = []
+    # Check if AT a key level
+    if at_level:
+        at_key_level = True
+        level_type = detected_level_type
         
-        # RSI ANALYSIS
-        if indicators.get('rsi') is not None:
-            rsi = indicators['rsi']
-            
-            if rsi < 30:
-                signal_result = self._apply_signal('rsi_oversold', 2.0, f"RSI oversold ({rsi:.1f})")
-                score += signal_result['final_score']
-                reasoning.append(f"🟢 RSI oversold ({rsi:.1f}) - Weight: {signal_result['weight']:.2f}x")
-                signals_used.append(signal_result)
-            elif rsi > 70:
-                signal_result = self._apply_signal('rsi_overbought', -2.0, f"RSI overbought ({rsi:.1f})")
-                score += signal_result['final_score']
-                reasoning.append(f"🔴 RSI overbought ({rsi:.1f}) - Weight: {signal_result['weight']:.2f}x")
-                signals_used.append(signal_result)
-        
-        # MACD ANALYSIS
-        if indicators.get('macd') is not None and indicators.get('macd_signal') is not None:
-            macd = indicators['macd']
-            macd_signal = indicators['macd_signal']
-            
-            if macd > macd_signal:
-                signal_result = self._apply_signal('macd_bullish', 2.0, "MACD bullish")
-                score += signal_result['final_score']
-                reasoning.append(f"🟢 MACD bullish - Weight: {signal_result['weight']:.2f}x")
-                signals_used.append(signal_result)
-            elif macd < macd_signal:
-                signal_result = self._apply_signal('macd_bearish', -2.0, "MACD bearish")
-                score += signal_result['final_score']
-                reasoning.append(f"🔴 MACD bearish - Weight: {signal_result['weight']:.2f}x")
-                signals_used.append(signal_result)
-        
-        # Determine vote
-        if score >= 3:
-            vote, confidence = 'BUY', 'HIGH'
-        elif score >= 1:
-            vote, confidence = 'BUY', 'MEDIUM'
-        elif score > 0:
-            vote, confidence = 'BUY', 'LOW'
-        elif score <= -3:
-            vote, confidence = 'SELL', 'HIGH'
-        elif score <= -1:
-            vote, confidence = 'SELL', 'MEDIUM'
-        elif score < 0:
-            vote, confidence = 'SELL', 'LOW'
-        else:
-            vote, confidence = 'HOLD', 'LOW'
-        
-        return {
-            'consultant': self.name,
-            'specialty': self.specialty,
-            'vote': vote,
-            'confidence': confidence,
-            'score': score,
-            'consultant_weight': self.performance['weight'],
-            'weighted_vote_power': score * self.performance['weight'],
-            'reasoning': reasoning,
-            'signals_used': signals_used,
-            'accuracy_history': f"{self.performance['accuracy']:.1f}% over {self.performance['total_votes']} votes",
-            'current_streak': self.performance['current_streak']
-        }
-
-
-# ============================================================================
-# C2: SENTIMENT ANALYST (Learning-Enabled)
-# ============================================================================
-
-class C2_SentimentAnalyst(LearningConsultant):
-    """News & Market Sentiment Specialist with Learning"""
-    
-    def __init__(self):
-        super().__init__(name='C2', specialty='Market Sentiment')
-    
-    def analyze(self, data, indicators, signals, news_data=None, **kwargs):
-        """Analyze news and sentiment with learned weights"""
-        score = 0
-        reasoning = []
-        signals_used = []
-        
-        if not news_data:
-            return {
-                'consultant': self.name,
-                'specialty': self.specialty,
-                'vote': 'HOLD',
-                'confidence': 'LOW',
-                'score': 0,
-                'consultant_weight': self.performance['weight'],
-                'weighted_vote_power': 0,
-                'reasoning': ['No news data available'],
-                'signals_used': [],
-                'accuracy_history': f"{self.performance['accuracy']:.1f}% over {self.performance['total_votes']} votes",
-                'current_streak': self.performance['current_streak']
-            }
-        
-        # Analyze sentiment
-        sentiment = news_data.get('sentiment_score', 0)
-        
-        if sentiment > 0.5:
-            signal_result = self._apply_signal('news_very_positive', 3.0, "Very positive news")
-            score += signal_result['final_score']
-            reasoning.append(f"🟢 Very positive news - Weight: {signal_result['weight']:.2f}x")
-            signals_used.append(signal_result)
-        elif sentiment < -0.5:
-            signal_result = self._apply_signal('news_very_negative', -3.0, "Very negative news")
-            score += signal_result['final_score']
-            reasoning.append(f"🔴 Very negative news - Weight: {signal_result['weight']:.2f}x")
-            signals_used.append(signal_result)
-        
-        # Determine vote
-        if score >= 2:
-            vote, confidence = 'BUY', 'HIGH'
-        elif score >= 1:
-            vote, confidence = 'BUY', 'MEDIUM'
-        elif score > 0:
-            vote, confidence = 'BUY', 'LOW'
-        elif score <= -2:
-            vote, confidence = 'SELL', 'HIGH'
-        elif score <= -1:
-            vote, confidence = 'SELL', 'MEDIUM'
-        elif score < 0:
-            vote, confidence = 'SELL', 'LOW'
-        else:
-            vote, confidence = 'HOLD', 'LOW'
-        
-        return {
-            'consultant': self.name,
-            'specialty': self.specialty,
-            'vote': vote,
-            'confidence': confidence,
-            'score': score,
-            'consultant_weight': self.performance['weight'],
-            'weighted_vote_power': score * self.performance['weight'],
-            'reasoning': reasoning,
-            'signals_used': signals_used,
-            'accuracy_history': f"{self.performance['accuracy']:.1f}% over {self.performance['total_votes']} votes",
-            'current_streak': self.performance['current_streak']
-        }
-
-
-# ============================================================================
-# C3: RISK MANAGER (Learning-Enabled)
-# ============================================================================
-
-class C3_RiskManager(LearningConsultant):
-    """Risk Assessment Specialist with Learning"""
-    
-    def __init__(self):
-        super().__init__(name='C3', specialty='Risk Management')
-    
-    def analyze(self, data, indicators, signals, risk_metrics=None, **kwargs):
-        """Analyze risk factors with learned weights"""
-        score = 0
-        reasoning = []
-        signals_used = []
-        
-        # Volatility analysis
-        if indicators.get('atr') and indicators.get('close'):
-            atr = indicators['atr']
-            price = indicators['close']
-            volatility_pct = (atr / price) * 100
-            
-            if volatility_pct > 5:
-                signal_result = self._apply_signal('volatility_very_high', -2.0, f"Very high volatility ({volatility_pct:.1f}%)")
-                score += signal_result['final_score']
-                reasoning.append(f"🔴 Very high volatility - Weight: {signal_result['weight']:.2f}x")
-                signals_used.append(signal_result)
-            elif volatility_pct < 1:
-                signal_result = self._apply_signal('volatility_low', 1.0, f"Low volatility ({volatility_pct:.1f}%)")
-                score += signal_result['final_score']
-                reasoning.append(f"🟢 Low volatility - Weight: {signal_result['weight']:.2f}x")
-                signals_used.append(signal_result)
-        
-        # Determine vote
-        if score >= 2:
-            vote, confidence = 'BUY', 'HIGH'
-        elif score >= 1:
-            vote, confidence = 'BUY', 'MEDIUM'
-        elif score > 0:
-            vote, confidence = 'BUY', 'LOW'
-        elif score <= -2:
-            vote, confidence = 'SELL', 'HIGH'
-        elif score <= -1:
-            vote, confidence = 'SELL', 'MEDIUM'
-        elif score < 0:
-            vote, confidence = 'SELL', 'LOW'
-        else:
-            vote, confidence = 'HOLD', 'LOW'
-        
-        return {
-            'consultant': self.name,
-            'specialty': self.specialty,
-            'vote': vote,
-            'confidence': confidence,
-            'score': score,
-            'consultant_weight': self.performance['weight'],
-            'weighted_vote_power': score * self.performance['weight'],
-            'reasoning': reasoning,
-            'signals_used': signals_used,
-            'accuracy_history': f"{self.performance['accuracy']:.1f}% over {self.performance['total_votes']} votes",
-            'current_streak': self.performance['current_streak']
-        }
-
-
-# ============================================================================
-# C4: TREND ANALYST (Learning-Enabled)
-# ============================================================================
-
-class C4_TrendAnalyst(LearningConsultant):
-    """Trend & Pattern Recognition Specialist with Learning"""
-    
-    def __init__(self):
-        super().__init__(name='C4', specialty='Trend Analysis')
-    
-    def analyze(self, data, indicators, signals, patterns=None, **kwargs):
-        """Analyze trends and patterns with learned weights"""
-        score = 0
-        reasoning = []
-        signals_used = []
-        
-        # Moving average alignment
-        if indicators.get('sma_20') and indicators.get('sma_50'):
-            sma20 = indicators['sma_20']
-            sma50 = indicators['sma_50']
-            
-            if sma20 > sma50:
-                signal_result = self._apply_signal('bullish_ma', 2.0, "Bullish MA alignment")
-                score += signal_result['final_score']
-                reasoning.append(f"🟢 Bullish MAs - Weight: {signal_result['weight']:.2f}x")
-                signals_used.append(signal_result)
+        if detected_level_type == 'RESISTANCE':
+            signal = "AT_RESISTANCE"
+            if level_info['strength'] == 'STRONG':
+                strength = 9
+                reasoning.append(f"At STRONG resistance ${level_info['price']:,.2f} ({level_info['touches']} rejections)")
             else:
-                signal_result = self._apply_signal('bearish_ma', -2.0, "Bearish MA alignment")
-                score += signal_result['final_score']
-                reasoning.append(f"🔴 Bearish MAs - Weight: {signal_result['weight']:.2f}x")
-                signals_used.append(signal_result)
+                strength = 7
+                reasoning.append(f"At resistance ${level_info['price']:,.2f} ({level_info['touches']} tests)")
         
-        # Determine vote
-        if score >= 3:
-            vote, confidence = 'BUY', 'HIGH'
-        elif score >= 1:
-            vote, confidence = 'BUY', 'MEDIUM'
-        elif score > 0:
-            vote, confidence = 'BUY', 'LOW'
-        elif score <= -3:
-            vote, confidence = 'SELL', 'HIGH'
-        elif score <= -1:
-            vote, confidence = 'SELL', 'MEDIUM'
-        elif score < 0:
-            vote, confidence = 'SELL', 'LOW'
-        else:
-            vote, confidence = 'HOLD', 'LOW'
+        elif detected_level_type == 'SUPPORT':
+            signal = "AT_SUPPORT"
+            if level_info['strength'] == 'STRONG':
+                strength = 9
+                reasoning.append(f"At STRONG support ${level_info['price']:,.2f} ({level_info['touches']} bounces)")
+            else:
+                strength = 7
+                reasoning.append(f"At support ${level_info['price']:,.2f} ({level_info['touches']} tests)")
+    
+    # If not at key level, check proximity
+    else:
+        if targets['next_resistance']:
+            next_r = targets['next_resistance']
+            distance_pct = ((next_r['price'] - close) / close) * 100
+            
+            if distance_pct < 2:  # Very close to resistance
+                signal = "NEAR_RESISTANCE"
+                strength = 6
+                reasoning.append(f"Near resistance ${next_r['price']:,.2f}")
         
-        return {
-            'consultant': self.name,
-            'specialty': self.specialty,
-            'vote': vote,
-            'confidence': confidence,
-            'score': score,
-            'consultant_weight': self.performance['weight'],
-            'weighted_vote_power': score * self.performance['weight'],
-            'reasoning': reasoning,
-            'signals_used': signals_used,
-            'accuracy_history': f"{self.performance['accuracy']:.1f}% over {self.performance['total_votes']} votes",
-            'current_streak': self.performance['current_streak']
-        }
-
-
-# ============================================================================
-# YOUR EXISTING FUNCTION (FALLBACK)
-# ============================================================================
-
-def run_consultant_meeting(symbol, asset_type, current_price, warning_details):
-    """
-    YOUR ORIGINAL CONSULTANT MEETING FUNCTION
-    Used as fallback when committee system not available
-    """
-    # Simple trading logic based on warnings
-    if warning_details and isinstance(warning_details, dict):
-        warning_count = sum(1 for w in warning_details.values() if isinstance(w, dict) and w.get('active'))
-    else:
-        warning_count = 0
+        if targets['next_support']:
+            next_s = targets['next_support']
+            distance_pct = ((close - next_s['price']) / close) * 100
+            
+            if distance_pct < 2:  # Very close to support
+                signal = "NEAR_SUPPORT"
+                strength = 6
+                reasoning.append(f"Near support ${next_s['price']:,.2f}")
     
-    # Determine position based on warnings
-    if warning_count >= 3:
-        position = 'NEUTRAL'
-        reasoning = f"Too many warnings ({warning_count}) - stay out"
-    elif warning_count >= 1:
-        position = 'LONG'  # or SHORT based on signals
-        reasoning = f"Some warnings ({warning_count}) detected - cautious entry"
-    else:
-        position = 'LONG'
-        reasoning = "Clear signals - standard entry"
+    # Build detailed reasoning with targets
+    reasoning_text = " ".join(reasoning) if reasoning else "Mid-range"
     
-    # Calculate entry/target/stop
-    entry = current_price
+    # DEBUG: Show detected resistance levels for troubleshooting
+    if sr_zones.get('resistance'):
+        top_resistance = sr_zones['resistance'][0] if len(sr_zones['resistance']) > 0 else None
+        if top_resistance:
+            reasoning_text += f" (Resistance detected: ${top_resistance['price']:,.2f} - {top_resistance['touches']} tests)"
     
-    if asset_type == "💰 Cryptocurrency":
-        target = entry * 1.03  # 3% target for crypto
-        stop_loss = entry * 0.99  # 1% stop
-    else:
-        target = entry * 1.01  # 1% target for forex/metals
-        stop_loss = entry * 0.995  # 0.5% stop
+    # Add current price for verification
+    reasoning_text = f"(Current: ${close:,.2f}) " + reasoning_text
+    
+    # Add price targets to reasoning
+    if targets['next_resistance']:
+        reasoning_text += f" | Next R: ${targets['next_resistance']['price']:,.2f}"
+    if targets['next_support']:
+        reasoning_text += f" | Next S: ${targets['next_support']['price']:,.2f}"
     
     return {
-        'position': position,
-        'reasoning': reasoning,
-        'entry': entry,
-        'target': target,
-        'stop_loss': stop_loss
+        "signal": signal,  # AT_SUPPORT, AT_RESISTANCE, NEAR_SUPPORT, NEAR_RESISTANCE, or MID_RANGE
+        "strength": strength,
+        "reasoning": reasoning_text,
+        "targets": targets,
+        "sr_zones": sr_zones,
+        "at_key_level": at_key_level,
+        "level_type": level_type
     }
+
+
+# ==================== CONSULTANT C2: MOMENTUM CONFIRMATION ====================
+
+def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
+    """
+    C2: Momentum Confirmation Analyst
+    Focus: Confirms if momentum is ACTUALLY reversing at support/resistance
+    Uses: RSI reversal patterns, Volume spikes, Historical success rate
+    
+    Args:
+        timeframe_hours: Trading timeframe in hours (1 for 1H, 4 for 4H, etc.)
+                        Used to dynamically adjust OBV lookback period
+    """
+    if df is None or len(df) < 50:
+        return {
+            "signal": "NO_CONFIRMATION", 
+            "strength": 0, 
+            "reasoning": "Insufficient data",
+            "reversal_confirmed": False
+        }
+    
+    latest = df.iloc[-1]
+    close = latest.get('close', 0)
+    rsi = latest.get('rsi', 50)
+    volume = latest.get('volume', 0)
+    adx = latest.get('adx', 20)
+    plus_di = latest.get('plus_di', 0)
+    minus_di = latest.get('minus_di', 0)
+    macd = latest.get('macd', 0)
+    macd_signal = latest.get('macd_signal', 0)
+    
+    # === NEW: DYNAMIC OBV HISTORY TRACKING BASED ON TIMEFRAME ===
+    # Match OBV lookback to trading timeframe for relevance
+    
+    # Calculate candle lookbacks based on timeframe
+    # For recent trend: Look back 1-2 candles
+    # For medium trend: Look back 4-5 candles  
+    # For overall trend: Look back 20-25 candles
+    
+    recent_candles = 2  # Always 1-2 candles for recent
+    medium_candles = min(5, len(df) - 1)  # 4-5 candles for medium
+    overall_candles = min(25, len(df) - 1)  # 20-25 candles for overall
+    
+    obv_now = df['obv'].iloc[-1] if 'obv' in df.columns else 0
+    obv_recent = df['obv'].iloc[-recent_candles] if len(df) > recent_candles and 'obv' in df.columns else obv_now
+    obv_medium = df['obv'].iloc[-medium_candles] if len(df) > medium_candles and 'obv' in df.columns else obv_now
+    obv_overall = df['obv'].iloc[-overall_candles] if len(df) > overall_candles and 'obv' in df.columns else obv_now
+    
+    # Calculate OBV changes
+    obv_change_recent = obv_now - obv_recent  # Last 1-2 candles
+    obv_change_medium = obv_now - obv_medium  # Last 4-5 candles
+    obv_change_overall = obv_now - obv_overall  # Last 20-25 candles
+    
+    # Determine OBV trend (using RECENT for timing decisions!)
+    if obv_change_recent > 0 and obv_change_medium > 0:
+        obv_trend = "IMPROVING"
+        obv_trend_score = +2
+    elif obv_change_recent < 0 and obv_change_medium < 0:
+        obv_trend = "DETERIORATING"
+        obv_trend_score = -2
+    else:
+        obv_trend = "STABLE"
+        obv_trend_score = 0
+    
+    # Measure OBV velocity (rate of change per candle)
+    obv_velocity_per_candle = abs(obv_change_medium) / medium_candles if medium_candles > 0 else 0
+    
+    # Velocity thresholds scale with timeframe
+    # Smaller timeframes = smaller absolute changes per candle
+    velocity_threshold_fast = 2000 / max(timeframe_hours, 0.25)  # Scale down for smaller timeframes
+    velocity_threshold_medium = 800 / max(timeframe_hours, 0.25)
+    
+    if obv_velocity_per_candle > velocity_threshold_fast:
+        obv_velocity = "FAST"
+    elif obv_velocity_per_candle > velocity_threshold_medium:
+        obv_velocity = "MEDIUM"
+    else:
+        obv_velocity = "SLOW"
+    
+    # === NEW: WHALE/SMART MONEY DETECTION ===
+    # Professional whale detection based on volume spikes and OBV divergence
+    
+    avg_volume_20 = df['volume'].tail(20).mean() if len(df) >= 20 else volume
+    volume_ratio = volume / avg_volume_20 if avg_volume_20 > 0 else 1.0
+    
+    whale_detected = False
+    whale_type = None
+    whale_strength = 0
+    
+    # Whale thresholds (senior analyst recommended)
+    if volume_ratio >= 5.0:
+        whale_detected = True
+        whale_type = "MEGA_WHALE"
+        whale_strength = 3  # Strong signal
+    elif volume_ratio >= 3.0:
+        whale_detected = True
+        whale_type = "WHALE"
+        whale_strength = 2  # Medium signal
+    
+    # Determine whale direction (accumulation vs distribution)
+    whale_signal = None
+    if whale_detected:
+        price_change = (close - df['close'].iloc[-2]) / df['close'].iloc[-2] if len(df) > 1 else 0
+        
+        if obv_change_recent > 0:
+            # Whale buying
+            if price_change < 0.005:  # Price flat or slightly down
+                whale_signal = "ACCUMULATION"  # Smart money accumulating quietly
+            else:
+                whale_signal = "BUYING"  # Whale buying aggressively
+        elif obv_change_recent < 0:
+            # Whale selling
+            if price_change > -0.005:  # Price holding despite selling
+                whale_signal = "DISTRIBUTION"  # Smart money distributing quietly
+            else:
+                whale_signal = "SELLING"  # Whale dumping
+        else:
+            whale_signal = "NEUTRAL"  # Large volume but unclear direction
+
+    
+    signal = "NO_CONFIRMATION"
+    strength = 0
+    reasoning = []
+    reversal_confirmed = False
+    confirmation_score = 0
+    
+    # === IF C1 IS AT SUPPORT OR RESISTANCE, CHECK FOR REVERSAL ===
+    if c1_result and c1_result.get('at_key_level'):
+        level_type = c1_result.get('level_type')
+        
+        if level_type == 'SUPPORT':
+            # === CHECK FOR BULLISH REVERSAL AT SUPPORT ===
+            
+            # Check #1: RSI Reversal Pattern (Most Important)
+            rsi_prev_5 = [df['rsi'].iloc[i] for i in range(-6, -1) if i >= -len(df)]
+            if len(rsi_prev_5) >= 4:
+                rsi_low = min(rsi_prev_5)
+                if rsi < 40 and rsi > rsi_low + 3:
+                    # RSI forming higher low (reversal pattern!)
+                    confirmation_score += 4
+                    reasoning.append(f"RSI reversal: {rsi_low:.0f}→{rsi:.0f}")
+            
+            # Check #2: Volume Spike
+            avg_volume = df['volume'].tail(20).mean()
+            volume_ratio = volume / avg_volume if avg_volume > 0 else 1.0
+            if volume_ratio > 1.5:
+                confirmation_score += 3
+                reasoning.append(f"Volume spike: {volume_ratio:.1f}x")
+            elif volume_ratio > 1.2:
+                confirmation_score += 1
+                reasoning.append(f"Volume elevated: {volume_ratio:.1f}x")
+            
+            # Check #3: MACD Turning Up
+            macd_prev = df['macd'].iloc[-2] if len(df) > 1 else macd
+            if macd > macd_prev and macd > macd_signal:
+                confirmation_score += 1
+                reasoning.append("MACD turning bullish")
+            
+            # Check #4: ADX (Trend Strength)
+            if adx > 25:
+                confirmation_score += 1
+                reasoning.append(f"Strong trend ADX:{adx:.0f}")
+            
+            # Check #5: OBV Trend Support (NEW!)
+            if obv_trend == "IMPROVING":
+                confirmation_score += 2
+                reasoning.append(f"✅ OBV recovering: {obv_medium:.0f}→{obv_now:.0f} (buyers catching up)")
+            elif obv_trend == "DETERIORATING" and obv_velocity == "FAST":
+                confirmation_score -= 2
+                # Clarify: Getting MORE negative (worse)
+                reasoning.append(f"⚠️ OBV worsening: {obv_medium:.0f}→{obv_now:.0f} (selling accelerating)")
+            elif obv_trend == "DETERIORATING":
+                # Mention but less severe if slow
+                reasoning.append(f"⚪ OBV weakening: {obv_medium:.0f}→{obv_now:.0f} (recent trend)")
+            
+            # Check #6: Whale/Smart Money Detection
+            if whale_detected and whale_signal in ["ACCUMULATION", "BUYING"]:
+                confirmation_score += whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"{whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
+            elif whale_detected and whale_signal in ["DISTRIBUTION", "SELLING"]:
+                confirmation_score -= whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"⚠️ {whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
+            
+            # Decision for Support
+            if confirmation_score >= 6:
+                signal = "BULLISH_REVERSAL_CONFIRMED"
+                strength = min(confirmation_score, 10)
+                reversal_confirmed = True
+            elif confirmation_score >= 3:
+                signal = "POSSIBLE_BULLISH_REVERSAL"
+                strength = confirmation_score
+                reversal_confirmed = False
+            else:
+                signal = "NO_BULLISH_CONFIRMATION"
+                strength = confirmation_score
+                reversal_confirmed = False
+        
+        elif level_type == 'RESISTANCE':
+            # === CHECK FOR BEARISH REVERSAL AT RESISTANCE ===
+            
+            # Check #1: RSI Reversal Pattern
+            rsi_prev_5 = [df['rsi'].iloc[i] for i in range(-6, -1) if i >= -len(df)]
+            if len(rsi_prev_5) >= 4:
+                rsi_high = max(rsi_prev_5)
+                if rsi > 60 and rsi < rsi_high - 3:
+                    # RSI forming lower high (reversal pattern!)
+                    confirmation_score += 4
+                    reasoning.append(f"RSI reversal: {rsi_high:.0f}→{rsi:.0f}")
+            
+            # Check #2: Volume Spike
+            avg_volume = df['volume'].tail(20).mean()
+            volume_ratio = volume / avg_volume if avg_volume > 0 else 1.0
+            if volume_ratio > 1.5:
+                confirmation_score += 3
+                reasoning.append(f"Volume spike: {volume_ratio:.1f}x")
+            elif volume_ratio > 1.2:
+                confirmation_score += 1
+                reasoning.append(f"Volume elevated: {volume_ratio:.1f}x")
+            
+            # Check #3: MACD Turning Down
+            macd_prev = df['macd'].iloc[-2] if len(df) > 1 else macd
+            if macd < macd_prev and macd < macd_signal:
+                confirmation_score += 1
+                reasoning.append("MACD turning bearish")
+            
+            # Check #4: ADX (Trend Strength)
+            if adx > 25:
+                confirmation_score += 1
+                reasoning.append(f"Strong trend ADX:{adx:.0f}")
+            
+            # Check #5: OBV Trend Support (NEW!)
+            if obv_trend == "DETERIORATING":
+                confirmation_score += 2
+                reasoning.append(f"✅ OBV declining: {obv_medium:.0f}→{obv_now:.0f} (selling pressure)")
+            elif obv_trend == "IMPROVING" and obv_velocity == "FAST":
+                confirmation_score -= 2
+                # Getting LESS negative (better) - contradicts bearish
+                reasoning.append(f"⚠️ OBV recovering: {obv_medium:.0f}→{obv_now:.0f} (buyers entering)")
+            
+            # Check #6: Whale/Smart Money Detection
+            if whale_detected and whale_signal in ["DISTRIBUTION", "SELLING"]:
+                confirmation_score += whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"{whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
+            elif whale_detected and whale_signal in ["ACCUMULATION", "BUYING"]:
+                confirmation_score -= whale_strength
+                whale_emoji = "🐋🐋" if whale_type == "MEGA_WHALE" else "🐋"
+                reasoning.append(f"⚠️ {whale_emoji} Whale {whale_signal.lower()}: {volume_ratio:.1f}x volume")
+            
+            # Decision for Resistance
+            if confirmation_score >= 6:
+                signal = "BEARISH_REVERSAL_CONFIRMED"
+                strength = min(confirmation_score, 10)
+                reversal_confirmed = True
+            elif confirmation_score >= 3:
+                signal = "POSSIBLE_BEARISH_REVERSAL"
+                strength = confirmation_score
+                reversal_confirmed = False
+            else:
+                signal = "NO_BEARISH_CONFIRMATION"
+                strength = confirmation_score
+                reversal_confirmed = False
+    
+    # === IF C1 IS MID-RANGE, CHECK MOMENTUM DIRECTION ===
+    else:
+        # Standard momentum analysis (when not at S/R)
+        # ENHANCED: Apply ADX+OBV mix (user's discovery!)
+        
+        # Calculate directional strength
+        di_ratio = plus_di / minus_di if minus_di > 0.1 else 999
+        strong_directional = (di_ratio > 4.0 or di_ratio < 0.25)  # 4:1 ratio or better
+        
+        if adx > 60 or (adx > 25 and strong_directional):
+            # Strong ADX OR strong directional movement - check OBV for quality
+            if plus_di > minus_di:  # Bullish direction
+                if obv_trend == "IMPROVING":
+                    signal = "BULLISH"
+                    strength = 9
+                    reasoning.append(f"ADX {adx:.1f} +DI:{plus_di:.1f}>{minus_di:.1f} + OBV improving")
+                elif obv_trend == "STABLE" or (obv_trend == "DETERIORATING" and obv_velocity == "SLOW"):
+                    signal = "BULLISH"
+                    strength = 7
+                    reasoning.append(f"ADX {adx:.1f} +DI:{plus_di:.1f}>{minus_di:.1f}, OBV {obv_trend.lower()}")
+                    reasoning.append(f"⚠️ Short-term momentum - OBV: {obv_medium:.0f}→{obv_now:.0f}")
+                elif obv_trend == "DETERIORATING" and obv_velocity in ["MEDIUM", "FAST"]:
+                    signal = "CAUTION_BULLISH"
+                    strength = 5
+                    reasoning.append(f"⚠️ +DI:{plus_di:.1f}>{minus_di:.1f} but OBV declining {obv_velocity.lower()}")
+                    reasoning.append(f"High risk - OBV: {obv_overall:.0f}→{obv_now:.0f}")
+            else:
+                # Bearish direction (-DI > +DI)
+                if obv_trend == "DETERIORATING":
+                    signal = "BEARISH"
+                    strength = 9
+                    reasoning.append(f"ADX {adx:.1f} -DI:{minus_di:.1f}>{plus_di:.1f} + OBV declining")
+                elif obv_trend == "STABLE" or (obv_trend == "IMPROVING" and obv_velocity == "SLOW"):
+                    signal = "BEARISH"
+                    strength = 7
+                    reasoning.append(f"ADX {adx:.1f} -DI:{minus_di:.1f}>{plus_di:.1f}, OBV {obv_trend.lower()}")
+                    reasoning.append(f"⚠️ Short-term momentum - OBV: {obv_medium:.0f}→{obv_now:.0f}")
+                elif obv_trend == "IMPROVING" and obv_velocity in ["MEDIUM", "FAST"]:
+                    signal = "CAUTION_BEARISH"
+                    strength = 5
+                    reasoning.append(f"⚠️ -DI:{minus_di:.1f}>{plus_di:.1f} but OBV rising {obv_velocity.lower()}")
+                    reasoning.append(f"High risk - OBV: {obv_overall:.0f}→{obv_now:.0f}")
+        
+        elif adx > 40:
+            # Moderate ADX - standard logic but note OBV
+            if close > df['sma_20'].iloc[-1]:
+                signal = "BULLISH"
+                strength = 6
+                reasoning.append(f"ADX {adx:.1f} uptrend")
+                if obv_trend == "DETERIORATING":
+                    reasoning.append(f"⚠️ OBV negative ({obv_trend.lower()})")
+            else:
+                signal = "BEARISH"
+                strength = 6
+                reasoning.append(f"ADX {adx:.1f} downtrend")
+                if obv_trend == "IMPROVING":
+                    reasoning.append(f"⚠️ OBV positive ({obv_trend.lower()})")
+        
+        elif macd > macd_signal and macd > 0:
+            signal = "BULLISH"
+            strength = 5
+            reasoning.append("MACD bullish")
+        
+        elif macd < macd_signal and macd < 0:
+            signal = "BEARISH"
+            strength = 5
+            reasoning.append("MACD bearish")
+        
+        else:
+            signal = "NEUTRAL"
+            strength = 5
+            reasoning.append("No clear momentum")
+    
+    return {
+        "signal": signal,
+        "strength": strength,
+        "reasoning": " | ".join(reasoning) if reasoning else "neutral",
+        "reversal_confirmed": reversal_confirmed,
+        "confirmation_score": confirmation_score,
+        "obv_analysis": {
+            "current": float(obv_now),
+            "recent": float(obv_recent),
+            "medium": float(obv_medium),
+            "overall": float(obv_overall),
+            "change_recent": float(obv_change_recent),
+            "change_medium": float(obv_change_medium),
+            "change_overall": float(obv_change_overall),
+            "trend": obv_trend,
+            "velocity": obv_velocity,
+            "timeframe_hours": timeframe_hours
+        },
+        "whale_analysis": {
+            "detected": whale_detected,
+            "type": whale_type,
+            "signal": whale_signal,
+            "strength": whale_strength,
+            "volume_ratio": float(volume_ratio)
+        }
+    }
+
+
+# ==================== CONSULTANT C3: RISK & WARNINGS ====================
+
+def consultant_c3_risk_warnings(df, symbol, warnings):
+    """
+    C3: Risk & Warning Analysis
+    Focus: Counts warnings and assesses risk level
+    """
+    if df is None or len(df) < 50:
+        return {"signal": "ACCEPTABLE", "strength": 5, "reasoning": "Insufficient data"}
+    
+    # Count active warnings
+    warning_count = 0
+    warning_types = []
+    
+    if warnings:
+        if warnings.get('news_warning'):
+            warning_count += 1
+            warning_types.append("news")
+        if warnings.get('price_warning'):
+            warning_count += 1
+            warning_types.append("price")
+        if warnings.get('volume_warning'):
+            warning_count += 1
+            warning_types.append("volume")
+        if warnings.get('momentum_warning'):
+            warning_count += 1
+            warning_types.append("momentum")
+    
+    # Risk assessment
+    if warning_count == 0:
+        signal = "ACCEPTABLE"
+        strength = 8
+        reasoning = "0 warnings"
+    elif warning_count == 1:
+        signal = "CAUTION"
+        strength = 6
+        reasoning = f"1 warning ({warning_types[0]})"
+    elif warning_count == 2:
+        signal = "HIGH_RISK"
+        strength = 5
+        reasoning = f"2 warnings ({','.join(warning_types)})"
+    else:
+        signal = "EXTREME_RISK"
+        strength = 1
+        reasoning = f"{warning_count} warnings - DO_NOT_TRADE"
+    
+    return {
+        "signal": signal,
+        "strength": strength,
+        "reasoning": reasoning
+    }
+
+
+# ==================== CONSULTANT C4: NEWS & SENTIMENT ====================
+
+def consultant_c4_news_sentiment(symbol, news_data=None):
+    """
+    C4: News & Sentiment Analysis
+    Focus: Critical and Major news only
+    """
+    if not news_data:
+        return {
+            "signal": "NO_NEWS",
+            "strength": 5,
+            "weight": 5,  # Low weight when no news
+            "reasoning": "No significant news"
+        }
+    
+    # Classify news importance
+    critical_keywords = ['sec lawsuit', 'government ban', 'exchange hack', 'bankruptcy', 'fraud', 'investigation']
+    major_keywords = ['partnership', 'listing', 'institutional', 'adoption', 'regulation approved']
+    
+    has_critical = any(keyword in str(news_data).lower() for keyword in critical_keywords)
+    has_major = any(keyword in str(news_data).lower() for keyword in major_keywords)
+    
+    if has_critical:
+        # Critical news - very high weight
+        sentiment = news_data.get('sentiment', 'neutral')
+        return {
+            "signal": "BULLISH" if sentiment == 'positive' else "BEARISH",
+            "strength": 9,
+            "weight": 70,  # Critical news gets 70% weight
+            "reasoning": "CRITICAL_NEWS_OVERRIDE"
+        }
+    elif has_major:
+        # Major news - moderate weight
+        sentiment = news_data.get('sentiment', 'neutral')
+        return {
+            "signal": "BULLISH" if sentiment == 'positive' else "BEARISH",
+            "strength": 7,
+            "weight": 40,  # Major news gets 40% weight
+            "reasoning": "MAJOR_NEWS_IMPACT"
+        }
+    else:
+        # Regular news - ignored
+        return {
+            "signal": "NO_NEWS",
+            "strength": 5,
+            "weight": 5,  # Regular news basically ignored
+            "reasoning": "Regular news (ignored)"
+        }
+
+
+# ==================== MEETING RESOLUTION ====================
+
+def consultant_meeting_resolution(c1, c2, c3, c4, current_price, asset_type=None, timeframe_hours=4):
+    """
+    NEW LOGIC: C1 identifies location, C2 confirms reversal
+    Only trades when BOTH agree on confirmed reversals
+    """
+    
+    # If C3 shows extreme risk (3+ warnings), DO NOT TRADE
+    if c3['strength'] <= 2:
+        return {
+            "position": "NEUTRAL",
+            "entry": current_price,
+            "target": current_price,
+            "stop_loss": current_price,
+            "hold_hours": 0,
+            "confidence": 0,
+            "reasoning": f"DO NOT TRADE - {c3['reasoning']}",
+            "risk_reward": 0
+        }
+    
+    # ==================== NEW DECISION LOGIC ====================
+    # C1 identifies WHERE (support/resistance/mid-range)
+    # C2 confirms IF momentum is reversing
+    
+    c1_signal = c1['signal']
+    c1_strength = c1['strength']
+    c2_confirmed = c2.get('reversal_confirmed', False)
+    c2_signal = c2['signal']
+    c2_strength = c2['strength']
+    
+    position = "NEUTRAL"
+    confidence = 0
+    reasoning_parts = []
+    
+    # === CASE 1: AT SUPPORT ===
+    if c1_signal in ['AT_SUPPORT', 'NEAR_SUPPORT']:
+        if c2_confirmed and 'BULLISH' in c2_signal:
+            # CONFIRMED BULLISH REVERSAL
+            position = "LONG"
+            confidence = min((c1_strength + c2_strength) / 20 * 100, 90)
+            reasoning_parts.append(f"✅ Confirmed bullish reversal at support")
+        elif c2_signal == 'BEARISH' and c2_strength >= 8:  # Higher threshold (was 7)
+            # VERY STRONG BEARISH = POTENTIAL BREAKDOWN
+            # Additional safety checks:
+            obv_analysis = c2.get('obv_analysis', {})
+            obv_trend = obv_analysis.get('trend', 'STABLE')
+            
+            # Require OBV confirmation for breakdowns
+            if obv_trend == "DETERIORATING":
+                position = "SHORT"
+                confidence = c2_strength * 10 * 0.7  # 30% penalty (was 20%)
+                reasoning_parts.append(f"📉 Strong breakdown attempt (OBV confirms)")
+            else:
+                # OBV not supporting - TOO RISKY
+                position = "NEUTRAL"
+                confidence = 0
+                reasoning_parts.append(f"⚠️ At support, momentum weak but OBV not confirming - WAIT")
+        else:
+            # NO CONFIRMATION - WAIT
+            position = "NEUTRAL"
+            confidence = 0
+            reasoning_parts.append(f"⏸️ At support but no clear signal - WAIT")
+    
+    # === CASE 2: AT RESISTANCE ===
+    elif c1_signal in ['AT_RESISTANCE', 'NEAR_RESISTANCE']:
+        if c2_confirmed and 'BEARISH' in c2_signal:
+            # CONFIRMED BEARISH REVERSAL
+            position = "SHORT"
+            confidence = min((c1_strength + c2_strength) / 20 * 100, 90)
+            reasoning_parts.append(f"✅ Confirmed bearish reversal at resistance")
+        elif c2_signal == 'BULLISH' and c2_strength >= 8:  # Higher threshold (was 7)
+            # VERY STRONG BULLISH = POTENTIAL BREAKOUT
+            # Additional safety checks:
+            obv_analysis = c2.get('obv_analysis', {})
+            obv_trend = obv_analysis.get('trend', 'STABLE')
+            
+            # Require OBV confirmation for breakouts
+            if obv_trend == "IMPROVING":
+                position = "LONG"
+                confidence = c2_strength * 10 * 0.7  # 30% penalty (was 20%)
+                reasoning_parts.append(f"🚀 Strong breakout attempt (OBV confirms)")
+            else:
+                # OBV not supporting - TOO RISKY
+                position = "NEUTRAL"
+                confidence = 0
+                reasoning_parts.append(f"⚠️ At resistance, momentum strong but OBV weak - WAIT")
+        else:
+            # NO CONFIRMATION - WAIT
+            position = "NEUTRAL"
+            confidence = 0
+            reasoning_parts.append(f"⏸️ At resistance but no clear signal - WAIT")
+    
+    # === CASE 3: MID-RANGE ===
+    else:
+        # Follow C2 momentum when not at S/R
+        if c2_signal == 'BULLISH' and c2_strength >= 6:
+            position = "LONG"
+            confidence = c2_strength * 10
+            reasoning_parts.append(f"📈 Mid-range bullish momentum")
+        elif c2_signal == 'BEARISH' and c2_strength >= 6:
+            position = "SHORT"
+            confidence = c2_strength * 10
+            reasoning_parts.append(f"📉 Mid-range bearish momentum")
+        else:
+            position = "NEUTRAL"
+            confidence = 0
+            reasoning_parts.append(f"⚪ Mid-range, no clear momentum")
+    
+    # === APPLY RISK PENALTY (C3) ===
+    risk_multiplier = c3['strength'] / 10.0
+    if c3['signal'] == 'HIGH_RISK':
+        confidence *= max(risk_multiplier, 0.7)  # Max 30% reduction
+    else:
+        confidence *= risk_multiplier
+    
+    # === APPLY NEWS WEIGHT (C4) ===
+    if c4['weight'] >= 70:  # Critical news
+        if c4['signal'] == 'BULLISH' and position == 'SHORT':
+            confidence *= 0.5  # Cut in half if against critical news
+        elif c4['signal'] == 'BEARISH' and position == 'LONG':
+            confidence *= 0.5
+    
+    # === MINIMUM CONFIDENCE CHECK ===
+    if confidence < 20:
+        position = "NEUTRAL"
+        confidence = 0
+        reasoning_parts.append(f"⚠️ Confidence too low")
+    
+    # ==================== CALCULATE TARGETS ====================
+    # Hold duration - 1 candle prediction
+    if c4['weight'] >= 70:
+        hold_hours = timeframe_hours * 2  # Critical news: 2 candles
+    else:
+        hold_hours = timeframe_hours  # Normal: 1 candle
+    
+    entry = current_price
+    
+    # Asset-aware max move
+    if asset_type and ("Forex" in asset_type or "Precious Metals" in asset_type):
+        if hold_hours <= 12:
+            max_move_pct = 0.01  # 1% for forex
+        else:
+            max_move_pct = 0.015  # 1.5% for forex daily
+    else:
+        if hold_hours <= 8:
+            max_move_pct = 0.03  # 3% for crypto
+        else:
+            max_move_pct = 0.05  # 5% for crypto daily
+    
+    if position == "LONG":
+        # Get S/R target
+        targets_sr = c1.get('targets', {})
+        next_resistance = targets_sr.get('next_resistance')
+        
+        if next_resistance and next_resistance['price'] > entry * 1.01:
+            target = min(next_resistance['price'] * 0.98, entry * (1 + max_move_pct))
+        else:
+            target = entry * (1 + max_move_pct)
+        
+        if target <= entry:
+            target = entry * (1 + max_move_pct)
+        
+        # Stop loss with minimum distance
+        min_stop_pct = 0.015 if "Forex" not in str(asset_type) else 0.008
+        stop_loss = entry * (1 - max(0.02, min_stop_pct))
+    
+    elif position == "SHORT":
+        # Get S/R target
+        targets_sr = c1.get('targets', {})
+        next_support = targets_sr.get('next_support')
+        
+        if next_support and next_support['price'] < entry * 0.99:
+            target = max(next_support['price'] * 1.02, entry * (1 - max_move_pct))
+        else:
+            target = entry * (1 - max_move_pct)
+        
+        if target >= entry:
+            target = entry * (1 - max_move_pct)
+        
+        # Stop loss with minimum distance
+        min_stop_pct = 0.015 if "Forex" not in str(asset_type) else 0.008
+        stop_loss = entry * (1 + max(0.02, min_stop_pct))
+    
+    else:
+        target = current_price
+        stop_loss = current_price
+    
+    # Calculate risk/reward
+    if position != "NEUTRAL":
+        risk = abs(entry - stop_loss)
+        reward = abs(target - entry)
+        risk_reward = reward / risk if risk > 0 else 0
+    else:
+        risk_reward = 0
+    
+    # Build full reasoning
+    full_reasoning = [
+        f"C1: {c1['signal']} {c1['strength']}/10 ({c1['reasoning']})",
+        f"C2: {c2['signal']} {c2['strength']}/10 ({c2['reasoning']})",
+        f"C3: {c3['signal']} ({c3['reasoning']})",
+        f"C4: {c4['signal']} (weight: {c4['weight']}%)"
+    ]
+    
+    full_reasoning.extend(reasoning_parts)
+    
+    return {
+        "position": position,
+        "entry": entry,
+        "target": target,
+        "stop_loss": stop_loss,
+        "hold_hours": hold_hours,
+        "confidence": int(confidence),
+        "reasoning": " | ".join(full_reasoning),
+        "risk_reward": round(risk_reward, 2)
+    }
+
+
+# ==================== MAIN ENTRY POINT ====================
+
+def run_consultant_meeting(symbol, asset_type, current_price, warning_details, timeframe_hours=1):
+    """
+    Main function called by app.py
+    Runs the full consultant meeting process
+    
+    Args:
+        timeframe_hours: Trading timeframe in hours (default 1 for 1H)
+    """
+    
+    # Map timeframe hours to API format
+    timeframe_map = {
+        0.0833: {'binance': '5m', 'okx': '5m', 'limit': 100},  # 5 minutes
+        0.25: {'binance': '15m', 'okx': '15m', 'limit': 100},  # 15 minutes
+        0.5: {'binance': '30m', 'okx': '30m', 'limit': 100},   # 30 minutes
+        1: {'binance': '1h', 'okx': '1H', 'limit': 100},       # 1 hour
+        4: {'binance': '4h', 'okx': '4H', 'limit': 100},       # 4 hours
+        24: {'binance': '1d', 'okx': '1D', 'limit': 100}       # 1 day
+    }
+    
+    timeframe_config = timeframe_map.get(timeframe_hours, {'binance': '1h', 'okx': '1H', 'limit': 100})
+    df, source = fetch_data(symbol, asset_type, timeframe_config)
+    
+    if df is None or len(df) < 50:
+        return {
+            'position': 'NEUTRAL',
+            'entry': current_price,
+            'target': current_price,
+            'stop_loss': current_price,
+            'reasoning': 'Insufficient data for analysis',
+            'confidence': 0
+        }
+    
+    # Calculate indicators
+    df = calculate_technical_indicators(df)
+    
+    # Convert timeframe to Twelve Data format for S/R API
+    twelvedata_interval_map = {
+        0.0833: '5min',
+        0.25: '15min',
+        0.5: '30min',
+        1: '1h',
+        4: '4h',
+        24: '1day'
+    }
+    twelvedata_interval = twelvedata_interval_map.get(timeframe_hours, '1h')
+    
+    # Run all 4 consultants
+    c1_result = consultant_c1_pattern_structure(df, symbol, interval=twelvedata_interval)
+    c2_result = consultant_c2_trend_momentum(df, symbol, c1_result, timeframe_hours)  # Pass C1 result and timeframe!
+    c3_result = consultant_c3_risk_warnings(df, symbol, warning_details)
+    c4_result = consultant_c4_news_sentiment(symbol, news_data=None)
+    
+    # Resolve their votes
+    meeting_result = consultant_meeting_resolution(
+        c1_result, c2_result, c3_result, c4_result,
+        current_price, asset_type, timeframe_hours=timeframe_hours  # Use actual parameter!
+    )
+    
+    return meeting_result
