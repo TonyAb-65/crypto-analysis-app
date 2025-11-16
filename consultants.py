@@ -449,20 +449,105 @@ def consultant_c2_trend_momentum(df, symbol, c1_result=None, timeframe_hours=1):
                 if obv_trend == "IMPROVING":
                     reasoning.append(f"⚠️ OBV positive ({obv_trend.lower()})")
         
-        elif macd > macd_signal and macd > 0:
-            signal = "BULLISH"
-            strength = 5
-            reasoning.append("MACD bullish")
-        
-        elif macd < macd_signal and macd < 0:
-            signal = "BEARISH"
-            strength = 5
-            reasoning.append("MACD bearish")
-        
         else:
-            signal = "NEUTRAL"
-            strength = 5
-            reasoning.append("No clear momentum")
+            # === COMPREHENSIVE INDICATOR ANALYSIS (Mid-range without strong ADX) ===
+            # C2 acts like C1 but on indicators, not candles
+            # Tracks indicator trends and weights them properly
+            
+            bullish_score = 0
+            bearish_score = 0
+            indicator_details = []
+            
+            # 1. OBV Analysis (HIGHEST WEIGHT - Volume is truth)
+            if obv_trend == "IMPROVING":
+                bullish_score += 2
+                indicator_details.append(f"OBV↑ ({obv_medium:.0f}→{obv_now:.0f})")
+            elif obv_trend == "DETERIORATING":
+                bearish_score += 2
+                indicator_details.append(f"OBV↓ ({obv_medium:.0f}→{obv_now:.0f})")
+            else:
+                indicator_details.append(f"OBV→ (stable)")
+            
+            # 2. RSI Trend Analysis (Check last 3 candles for trend)
+            rsi_history = [df['rsi'].iloc[i] for i in range(-4, 0) if i >= -len(df)]
+            if len(rsi_history) >= 3:
+                rsi_trend_up = sum(1 for i in range(1, len(rsi_history)) if rsi_history[i] > rsi_history[i-1])
+                rsi_trend_down = sum(1 for i in range(1, len(rsi_history)) if rsi_history[i] < rsi_history[i-1])
+                
+                if rsi > 50 and rsi_trend_up >= 2:
+                    bullish_score += 1
+                    indicator_details.append(f"RSI↑ ({rsi:.0f}, rising)")
+                elif rsi < 50 and rsi_trend_down >= 2:
+                    bearish_score += 1
+                    indicator_details.append(f"RSI↓ ({rsi:.0f}, falling)")
+                elif rsi > 50:
+                    indicator_details.append(f"RSI {rsi:.0f} (>50 but flat)")
+                else:
+                    indicator_details.append(f"RSI {rsi:.0f} (<50 but flat)")
+            
+            # 3. MACD Analysis (Medium weight - lagging indicator)
+            if macd > macd_signal and macd > 0:
+                bullish_score += 1
+                indicator_details.append("MACD bullish")
+            elif macd < macd_signal and macd < 0:
+                bearish_score += 1
+                indicator_details.append("MACD bearish")
+            else:
+                indicator_details.append("MACD neutral")
+            
+            # 4. Price Action vs Moving Averages
+            sma_20 = df['sma_20'].iloc[-1] if 'sma_20' in df.columns else close
+            sma_50 = df['sma_50'].iloc[-1] if 'sma_50' in df.columns else close
+            
+            if close > sma_20 and close > sma_50:
+                bullish_score += 1
+                indicator_details.append(f"Price > SMAs")
+            elif close < sma_20 and close < sma_50:
+                bearish_score += 1
+                indicator_details.append(f"Price < SMAs")
+            
+            # 5. Volume Trend (separate from OBV)
+            avg_volume = df['volume'].tail(5).mean()
+            if volume > avg_volume * 1.2:
+                # High volume - check if buying or selling
+                if obv_change_recent > 0:
+                    bullish_score += 1
+                    indicator_details.append(f"Vol↑ (buying)")
+                else:
+                    bearish_score += 1
+                    indicator_details.append(f"Vol↑ (selling)")
+            
+            # === DECISION LOGIC ===
+            # Total possible: Bullish ~6 points, Bearish ~6 points
+            
+            if bullish_score >= bearish_score + 2:
+                # Clear bullish advantage
+                signal = "BULLISH"
+                strength = min(4 + bullish_score, 10)
+                reasoning.append(f"Bullish indicators: {bullish_score} vs {bearish_score}")
+            elif bearish_score >= bullish_score + 2:
+                # Clear bearish advantage
+                signal = "BEARISH"
+                strength = min(4 + bearish_score, 10)
+                reasoning.append(f"Bearish indicators: {bearish_score} vs {bullish_score}")
+            elif bullish_score > bearish_score:
+                # Slight bullish edge
+                signal = "BULLISH"
+                strength = 5
+                reasoning.append(f"Weak bullish: {bullish_score} vs {bearish_score}")
+            elif bearish_score > bullish_score:
+                # Slight bearish edge
+                signal = "BEARISH"
+                strength = 5
+                reasoning.append(f"Weak bearish: {bearish_score} vs {bullish_score}")
+            else:
+                # Tied
+                signal = "NEUTRAL"
+                strength = 5
+                reasoning.append(f"Mixed signals: {bullish_score} vs {bearish_score}")
+            
+            # Add indicator details to reasoning
+            reasoning.extend(indicator_details)
     
     return {
         "signal": signal,
